@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@12.10.1",
   "scripts": {
-    "check": "biome check . && knip && pnpm typecheck && pnpm test && pnpm test:cron",
+    "check": "biome check . && knip && pnpm typecheck && pnpm test",
     "typecheck": "tsc -p apps/api",
     "test": "vitest run",
     "dev:api": "pnpm --filter @agent-casino/api dev",

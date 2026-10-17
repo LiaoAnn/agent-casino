@@ -30,7 +30,7 @@ The api Worker is available at `http://localhost:8787`.
 | `pnpm format` | Apply formatting and lint fixes |
 | `pnpm dev:api` | Start the api Worker locally |
 | `pnpm dev:cron` | Run the local cron scheduler in the foreground (Linux) |
-| `pnpm test:cron` | Test cron scheduling and Worker discovery |
+| `pnpm test:cron` | Test cron scheduling and Worker discovery (Dev Container only, not in `pnpm check`) |
 | `pnpm --filter @agent-casino/api cf-typegen` | Regenerate Worker types after changing bindings |
 
 Tests must not use `.skip` or `.only`: Biome rejects both, and Vitest also
