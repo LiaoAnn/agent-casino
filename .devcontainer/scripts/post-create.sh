@@ -11,8 +11,9 @@ sudo chown -R node:node /home/node/.pnpm-store
 pnpm config set store-dir /home/node/.pnpm-store
 
 # Playwright + headless Chromium for driving the app in a browser during
-# verification. A dev-environment tool, not a repo dependency: never add it to
-# package.json. Pinned and installed globally. Browsers go to
+# verification. Pinned and installed globally. apps/web also depends on
+# @playwright/test for `pnpm test:web`, pinned to the same version: bump both
+# together, since only this version's browser is installed. Browsers go to
 # PLAYWRIGHT_BROWSERS_PATH, the shared playwright_browsers volume, so re-creating
 # the container skips the download; only the system libraries are reinstalled.
 PLAYWRIGHT_VERSION=1.63.0

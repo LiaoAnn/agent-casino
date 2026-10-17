@@ -7,7 +7,9 @@ for the rules of this repo and `docs/tickets.md` for the plan.
 
 - `apps/api`: the Cloudflare Worker (API, Durable Objects `Room` and
   `Matchmaker`, D1 database `DB`). `GET /health` answers `{"ok":true}`.
-- `apps/web`: the read-only website (TanStack Start, not built yet).
+- `apps/web`: the read-only website (TanStack Start on Workers, Tailwind,
+  shadcn/ui). It shows fake data from the contract until the real API is wired
+  in.
 
 ## Development
 
@@ -26,9 +28,11 @@ The api Worker is available at `http://localhost:8787`.
 | --- | --- |
 | `pnpm check` | Biome, knip, type check and all unit tests (what CI runs) |
 | `pnpm test` | Unit tests (Vitest); `pnpm test <filter>` runs matching files |
-| `pnpm typecheck` | TypeScript, strict |
+| `pnpm typecheck` / `pnpm typecheck:web` | TypeScript, strict, for api / web |
 | `pnpm format` | Apply formatting and lint fixes |
 | `pnpm dev:api` | Start the api Worker locally |
+| `pnpm dev:web` | Start the website locally (Vite) |
+| `pnpm test:web` | Playwright tests for the website (not in `pnpm check` or CI yet) |
 | `pnpm --filter @agent-casino/api cf-typegen` | Regenerate Worker types after changing bindings |
 
 Tests must not use `.skip` or `.only`: Biome rejects both, and Vitest also
