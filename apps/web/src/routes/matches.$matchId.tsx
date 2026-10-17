@@ -3,7 +3,6 @@ import type {
   MatchHand,
 } from '@agent-casino/api/src/contract/schemas';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
-import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { getMatch } from '@/data';
 import {
@@ -27,14 +26,14 @@ export const Route = createFileRoute('/matches/$matchId')({
 // `alice 41 · Bob 39`
 const bySeat = (
   players: MatchDetail['players'],
-  values: readonly [ReactNode, ReactNode],
+  values: readonly [string | number, string | number],
 ) => `${players[0]} ${values[0]} · ${players[1]} ${values[1]}`;
 
 function Pairs({
   items,
   label,
 }: {
-  items: [string, ReactNode][];
+  items: [string, string][];
   label?: string;
 }) {
   return (
@@ -54,7 +53,7 @@ function Pairs({
 function MatchPage() {
   const match = Route.useLoaderData();
   const { players, settings } = match;
-  const info: [string, ReactNode][] = [
+  const info: [string, string][] = [
     ['結果', resultLabel(match)],
     ['結束時間', formatTime(match.ended_at)],
     ['計分', match.rated ? '計分' : '不計分'],
@@ -103,10 +102,10 @@ function Hand({
   players: MatchDetail['players'];
 }) {
   const title = `第 ${hand.hand_number} 手`;
-  const items: [string, ReactNode][] = [['莊家', players[hand.button_seat]]];
+  const items: [string, string][] = [['莊家', players[hand.button_seat]]];
   if (hand.board.length > 0) items.push(['公共牌', formatCards(hand.board)]);
-  // Hole cards only exist for showdowns; a folded hand never shows them.
-  if (hand.hole_cards !== null) {
+  // A folded hand never shows hole cards, whatever the data says.
+  if (hand.ended_by === 'showdown' && hand.hole_cards !== null) {
     items.push([
       '底牌',
       bySeat(players, [
