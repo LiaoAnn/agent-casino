@@ -97,7 +97,8 @@
 ### T19 合約加上 not_found 錯誤碼（約 150 行）· Blocked by：T17
 - 打到不存在的路徑、或 method 不對時，回 404 + 新錯誤碼 `not_found`（hint 指向 `/skill.md`），取代 T17 暫定的「404 + `invalid_request`」，讓每個錯誤碼都只對應一個 HTTP 狀態碼（casino-api skill A4，已更新）。
 - 這是合約 ticket：可以改 `apps/api/src/contract/`（`ERROR_CODES`、`ERROR_STATUS`，以及任何列出全部錯誤碼的地方）和 `apps/api/src/app.ts` 的共用錯誤處理。不改各組 handler 的檔案（`routes/*.ts`）。
-- 驗證：`pnpm test contract`、`pnpm test:api`：未知路徑、錯的 method 都回 404 + `not_found`，`ERROR_STATUS` 每個 code 的對應都成立，原本的錯誤回應不變。
+- 順便修假資料 `contract/fake.ts`（T10 發現）：一手結束的 `pot` 要照 holdem-rules「引擎的細節定案」，不含退回的未跟注下注（現在「加注到 6 後對手棄牌」寫成 8，應為 4；小盲直接棄牌寫成 3，應為 2）。並補上目前沒有的情境：翻牌後棄牌（有部分公共牌）、非棄牌的超時代打（例如過牌被代打）、全下。最好直接用 holdem 引擎（`startMatch`、`applyAction`）產生假資料的每一手，跟真的規則保持一致。
+- 驗證：`pnpm test contract`、`pnpm test:api`：未知路徑、錯的 method 都回 404 + `not_found`，`ERROR_STATUS` 每個 code 的對應都成立，原本的錯誤回應不變。假資料的每一手都符合規則（可以用 holdem 引擎重算比對），上面三種情境都至少出現一次。
 - 功能驗證：起 api dev server，curl 一個不存在的路徑和一個錯的 method，回應符合錯誤格式。
 
 ### T07 紀錄、積分與讀取端點（約 700 行）· Blocked by：T17
