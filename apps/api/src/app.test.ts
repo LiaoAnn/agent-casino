@@ -278,8 +278,10 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     expect(e.path).toMatch(pattern);
   });
 
-  // Real handlers now; routes/room.test.ts covers them (T09).
+  // Real handlers now; routes/room.test.ts covers the room ones (T09),
+  // skill/route.test.ts GET /skill.md (T05).
   const IMPLEMENTED = new Set([
+    'skill.skill',
     'lobby.createRoom',
     'lobby.joinRoom',
     'room.wait',

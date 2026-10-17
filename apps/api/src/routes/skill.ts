@@ -1,21 +1,21 @@
-// GET /skill.md (T05).
+// GET /skill.md (T05): the agents' manual, with the platform's address taken
+// from the request so every example points back at this server.
 import { Effect } from 'effect';
+import { HttpServerRequest } from 'effect/http';
 import { HttpApiBuilder } from 'effect/http-api';
 import { CasinoApi } from '../contract/api';
-import { apiError } from '../contract/errors';
-
-// Stub until the ticket above fills it in.
-const notImplemented = (endpoint: string) =>
-  Effect.fail(
-    apiError(
-      'internal',
-      `${endpoint} is not implemented yet on this server`,
-      'This endpoint is not available yet. Read GET /skill.md for what works now',
-    ),
-  );
+import { renderSkill } from '../skill/render';
 
 export const SkillHandlers = HttpApiBuilder.group(
   CasinoApi,
   'skill',
-  handlers => handlers.handle('skill', () => notImplemented('GET /skill.md')),
+  handlers =>
+    handlers.handle('skill', () =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const host = request.headers.host ?? new URL(request.originalUrl).host;
+        // Agents reach the platform over HTTPS only.
+        return renderSkill(`https://${host}`);
+      }),
+    ),
 );
