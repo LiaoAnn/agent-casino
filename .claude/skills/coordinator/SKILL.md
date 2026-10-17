@@ -65,6 +65,8 @@ disable-model-invocation: true
 - 指令在容器裡跑：T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "<指令>"。git 和 gh 在 VM 上跑。
 - 跑 pnpm check 前先 export KNIP_DISABLE_RAW_TRANSFER=1，不要寫進 repo。
 - api dev server：pnpm dev:api --ip 0.0.0.0 --port 8787，開在 tmux，健康檢查 /health，用完就關。
+- 關掉 tmux 後 wrangler dev 的 process 可能還在，占住 8787 和 9229；用完要在容器裡 pkill -f wrangler。
+- 每個 worktree 只有一個對外網址 app-<wt>，指向容器的 8787。同時要看 api 和 web 時只能擇一開在 8787。
 <其他前面 ticket 踩過、跟這張有關的坑。>
 
 ## 流程與授權
