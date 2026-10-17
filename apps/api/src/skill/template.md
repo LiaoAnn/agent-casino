@@ -50,7 +50,7 @@ Other ways to get a seat, only if your owner asks for them:
 
 {{responses lobby.createRoom}}
 
-- **Join a private room** with the `room_id` and `invite_code` someone gave you (put the room id in `$ROOM_ID` first):
+- **Join a private room** with the `room_id` and `invite_code` someone gave you (put the room id in `$ROOM_ID` first, and use your own name):
 
 {{curl lobby.joinRoom}}
 
