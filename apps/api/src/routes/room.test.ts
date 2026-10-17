@@ -2120,3 +2120,263 @@ describe('Durable Object storage stays under the per-value limit', () => {
     );
   }, 60_000);
 });
+
+describe('the seed stays secret during the match', () => {
+  // A distinctive seed: no room_id, token, turn_id, deadline or chip count
+  // legitimately contains these ten digits. The check is on the behaviour
+  // (no `seed` key, no seed text), not on the seed's format.
+  const SECRET_SEED = 3_141_592_653;
+  const SEED_TEXT = String(SECRET_SEED);
+
+  // Every object key anywhere in a JSON value.
+  const allKeys = (value: unknown): string[] =>
+    Array.isArray(value)
+      ? value.flatMap(allKeys)
+      : value !== null && typeof value === 'object'
+        ? Object.entries(value).flatMap(([key, inner]) => [
+            key,
+            ...allKeys(inner),
+          ])
+        : [];
+
+  it('no room response ever contains the seed', async () => {
+    const t = makeEnv({ allowTestRooms: true, waitMs: 20 });
+    const seen: Array<{ label: string; status: number; raw: string }> = [];
+    const record = async (label: string, response: Response) => {
+      const raw = await response.text();
+      seen.push({ label, status: response.status, raw });
+      return { status: response.status, body: JSON.parse(raw) as unknown };
+    };
+    const statusOf = async (label: string, response: Response) => {
+      const { status, body } = await record(label, response);
+      expect(status, label).toBe(200);
+      return decodeStatus(body);
+    };
+    const errorOf = async (
+      label: string,
+      response: Response,
+      code: ErrorCode,
+    ) => {
+      const { status, body } = await record(label, response);
+      expect({ label, status, code: (body as ErrorBody).code }).toEqual({
+        label,
+        status: ERROR_STATUS[code],
+        code,
+      });
+      expect((body as ErrorBody).state, label).toBeDefined();
+      return body as ErrorBody;
+    };
+    const both = async (
+      when: string,
+      roomId: string,
+      tokens: readonly string[],
+    ) => {
+      const out: Status[] = [];
+      for (const [seat, token] of tokens.entries()) {
+        out.push(
+          await statusOf(
+            `${when}: state seat ${seat}`,
+            await get(t.env, `/v1/rooms/${roomId}/state`, token),
+          ),
+        );
+        await statusOf(
+          `${when}: wait seat ${seat}`,
+          await get(t.env, `/v1/rooms/${roomId}/wait`, token),
+        );
+      }
+      return out;
+    };
+
+    // --- Room A: a 2-hand match played to the end. ---------------------------
+    const createdA = await record(
+      'create',
+      await post(t.env, '/v1/rooms', {
+        game: 'holdem',
+        name: 'alice',
+        settings: { hands: 2 },
+        test: { seed: SECRET_SEED },
+      }),
+    );
+    expect(createdA.status).toBe(200);
+    const roomA = decodeCreate(createdA.body);
+    const idA = roomA.room_id;
+
+    const [beforeJoin] = await both('before the join', idA, [roomA.token]);
+    expect(beforeJoin?.status).toBe('waiting');
+    await errorOf(
+      'actions before the join (not_your_turn)',
+      await actPost(t.env, idA, roomA.token, { turn_id: 't_1', type: 'check' }),
+      'not_your_turn',
+    );
+
+    const joinedA = await record(
+      'join',
+      await post(t.env, `/v1/rooms/${idA}/join`, {
+        name: 'bob',
+        invite_code: roomA.invite_code,
+      }),
+    );
+    expect(joinedA.status).toBe(200);
+    const tokensA = [roomA.token, decodeJoin(joinedA.body).token] as const;
+
+    const [first, other] = await both('hand 1', idA, tokensA);
+    expect([first?.status, other?.status]).toEqual(['your_turn', 'waiting']);
+    if (first?.status !== 'your_turn') throw new Error('expected your_turn');
+
+    await errorOf(
+      'invalid_action',
+      await actPost(t.env, idA, tokensA[0], {
+        turn_id: first.turn_id,
+        type: 'raise',
+        amount: 3,
+      }),
+      'invalid_action',
+    );
+    await errorOf(
+      'not_your_turn',
+      await actPost(t.env, idA, tokensA[1], {
+        turn_id: first.turn_id,
+        type: 'call',
+      }),
+      'not_your_turn',
+    );
+    await errorOf(
+      'stale_turn',
+      await actPost(t.env, idA, tokensA[0], {
+        turn_id: first.turn_id === 't_999' ? 't_998' : 't_999',
+        type: 'call',
+      }),
+      'stale_turn',
+    );
+    const folded = await record(
+      'accepted (fold hand 1)',
+      await actPost(t.env, idA, tokensA[0], {
+        turn_id: first.turn_id,
+        type: 'fold',
+      }),
+    );
+    expect(folded.status).toBe(200);
+    const duplicate = await record(
+      'duplicate',
+      await actPost(t.env, idA, tokensA[0], {
+        turn_id: first.turn_id,
+        type: 'fold',
+      }),
+    );
+    expect(duplicate.status).toBe(200);
+    expect(decodeAccepted(duplicate.body).duplicate).toBe(true);
+
+    // Hand 2 (with last_hand), check or call to showdown.
+    let lastTurn = first.turn_id;
+    let lastToken = tokensA[0];
+    let sawLastHand = false;
+    for (let step = 0; ; step++) {
+      expect(step).toBeLessThan(20);
+      const statuses = await both(`hand 2 step ${step}`, idA, tokensA);
+      if (statuses.every(s => s.status === 'match_over')) break;
+      if (statuses.some(s => 'last_hand' in s && s.last_hand !== null))
+        sawLastHand = true;
+      const seat = statuses.findIndex(s => s.status === 'your_turn');
+      const turn = statuses[seat];
+      if (turn?.status !== 'your_turn') throw new Error('nobody to act');
+      const canCheck = turn.legal_actions.some(a => a.type === 'check');
+      const accepted = await record(
+        `accepted (hand 2 step ${step})`,
+        await actPost(t.env, idA, tokensA[seat] ?? '', {
+          turn_id: turn.turn_id,
+          type: canCheck ? 'check' : 'call',
+        }),
+      );
+      expect(accepted.status).toBe(200);
+      lastTurn = turn.turn_id;
+      lastToken = tokensA[seat] ?? lastToken;
+    }
+    expect(sawLastHand).toBe(true);
+
+    const finals = await both('after the end', idA, tokensA);
+    for (const final of finals) {
+      expect(asMatchOver(final).last_hand).not.toBeNull();
+    }
+    for (const [seat, token] of tokensA.entries()) {
+      await errorOf(
+        `actions after the end seat ${seat} (match_over)`,
+        await actPost(t.env, idA, token, { turn_id: 't_999', type: 'check' }),
+        'match_over',
+      );
+      await errorOf(
+        `leave after the end seat ${seat} (match_over)`,
+        await leavePost(t.env, idA, token),
+        'match_over',
+      );
+    }
+    const lateDuplicate = await record(
+      'duplicate after the end',
+      await actPost(t.env, idA, lastToken, {
+        turn_id: lastTurn,
+        type: 'fold',
+      }),
+    );
+    expect(lateDuplicate.status).toBe(200);
+
+    // --- Room B: leave while playing. ------------------------------------------
+    const roomB = await record(
+      'create B',
+      await post(t.env, '/v1/rooms', {
+        game: 'holdem',
+        name: 'alice',
+        test: { seed: SECRET_SEED },
+      }),
+    );
+    const createdB = decodeCreate(roomB.body);
+    const joinedB = decodeJoin(
+      (
+        await record(
+          'join B',
+          await post(t.env, `/v1/rooms/${createdB.room_id}/join`, {
+            name: 'bob',
+            invite_code: createdB.invite_code,
+          }),
+        )
+      ).body,
+    );
+    const tokensB = [createdB.token, joinedB.token] as const;
+    const left = await statusOf(
+      'leave while playing',
+      await leavePost(t.env, createdB.room_id, tokensB[0]),
+    );
+    expect(asMatchOver(left).result).toBe('loss');
+    await both('after leave B', createdB.room_id, tokensB);
+
+    // --- Room C: leave a waiting room. -----------------------------------------
+    const roomC = decodeCreate(
+      (
+        await record(
+          'create C',
+          await post(t.env, '/v1/rooms', {
+            game: 'holdem',
+            name: 'alice',
+            test: { seed: SECRET_SEED },
+          }),
+        )
+      ).body,
+    );
+    const cancelled = await statusOf(
+      'leave while waiting',
+      await leavePost(t.env, roomC.room_id, roomC.token),
+    );
+    expect(asMatchOver(cancelled).result).toBe('cancelled');
+    await both('after leave C', roomC.room_id, [roomC.token]);
+    await errorOf(
+      'leave again C (match_over)',
+      await leavePost(t.env, roomC.room_id, roomC.token),
+      'match_over',
+    );
+
+    // --- Every response. -------------------------------------------------------
+    expect(seen.length).toBeGreaterThan(40);
+    for (const { label, raw } of seen) {
+      expect(allKeys(JSON.parse(raw)), label).not.toContain('seed');
+      expect(raw.includes(SEED_TEXT), `${label}: ${raw}`).toBe(false);
+    }
+  });
+});

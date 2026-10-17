@@ -14,6 +14,7 @@ import {
 import type { Bindings } from '../routes/env';
 import { signRoomToken } from '../token/token';
 import type { RoomApi } from './referee';
+import { newSeed } from './seed';
 
 const isRoomId = Schema.is(RoomId);
 const ROOM_ID_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -34,8 +35,6 @@ function randomString(alphabet: string, length: number): string {
   }
   return out;
 }
-
-const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
 
 // `test` settings only count where ALLOW_TEST_ROOMS=true (casino-api 測試房).
 const allowTestRooms = (env: Bindings) =>
@@ -145,7 +144,7 @@ export const openRoom = (
         invite_code,
         name: input.name,
         settings: { ...SETTINGS_DEFAULTS, ...input.settings },
-        seed: test?.seed ?? randomSeed(),
+        seed: newSeed(test),
         test,
       }),
     );
