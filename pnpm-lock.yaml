@@ -172,12 +172,6 @@ importers:
       '@types/node':
         specifier: ^24.13.6
         version: 24.13.6
-      croner:
-        specifier: ^10.0.1
-        version: 10.0.1
-      jsonc-parser:
-        specifier: ^3.3.1
-        version: 3.3.1
       knip:
         specifier: ^6.37.0
         version: 6.37.0
@@ -1168,10 +1162,6 @@ packages:
     resolution: {integrity: sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==}
     engines: {node: '>=18'}
 
-  croner@10.0.1:
-    resolution: {integrity: sha512-ixNtAJndqh173VQ4KodSdJEI6nuioBWI0V1ITNKhZZsO0pEMoDxz539T4FTTbSZ/xIOSuDnzxLVRqBVSvPNE2g==}
-    engines: {node: '>=18.0'}
-
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
@@ -1225,9 +1215,6 @@ packages:
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
-
-  jsonc-parser@3.3.1:
-    resolution: {integrity: sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==}
 
   kleur@4.1.5:
     resolution: {integrity: sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==}
@@ -2138,8 +2125,6 @@ snapshots:
 
   cookie@1.1.1: {}
 
-  croner@10.0.1: {}
-
   detect-libc@2.1.2: {}
 
   effect@4.0.5: {}
@@ -2204,8 +2189,6 @@ snapshots:
       resolve-pkg-maps: 1.0.0
 
   jiti@2.7.0: {}
-
-  jsonc-parser@3.3.1: {}
 
   kleur@4.1.5: {}
 

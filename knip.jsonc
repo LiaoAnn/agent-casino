@@ -1,10 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
   "workspaces": {
-    ".": {
-      "entry": [".devcontainer/scripts/cron.mjs"],
-      "project": [".devcontainer/scripts/**/*.mjs"],
-    },
     "apps/api": {
       "project": ["src/**/*.ts"],
     },

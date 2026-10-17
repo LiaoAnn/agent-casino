@@ -8,15 +8,11 @@
     "typecheck": "tsc -p apps/api",
     "test": "vitest run",
     "dev:api": "pnpm --filter @agent-casino/api dev",
-    "dev:cron": "bash .devcontainer/scripts/cron.sh",
-    "test:cron": "node --test .devcontainer/scripts/*.test.mjs",
     "format": "biome check --write ."
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
     "@types/node": "^24.13.6",
-    "croner": "^10.0.1",
-    "jsonc-parser": "^3.3.1",
     "knip": "^6.37.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5",
