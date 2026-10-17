@@ -1,16 +1,16 @@
 {
-  "name": "cf-worker-typescript-template",
+  "name": "agent-casino",
+  "private": true,
   "type": "module",
+  "packageManager": "pnpm@12.10.1",
   "scripts": {
-    "dev": "wrangler dev",
+    "check": "biome check . && knip && pnpm typecheck && pnpm test",
+    "typecheck": "tsc -p apps/api",
+    "test": "vitest run",
+    "dev:api": "pnpm --filter @agent-casino/api dev",
     "dev:cron": "bash .devcontainer/scripts/cron.sh",
     "test:cron": "node --test .devcontainer/scripts/*.test.mjs",
-    "deploy": "wrangler deploy --minify",
-    "lint": "biome check src .devcontainer/scripts",
-    "knip": "knip",
-    "format": "biome format --write src .devcontainer/scripts",
-    "check": "biome check --write src .devcontainer/scripts",
-    "cf-typegen": "wrangler types"
+    "format": "biome check --write ."
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
@@ -19,6 +19,7 @@
     "jsonc-parser": "^3.3.1",
     "knip": "^6.37.0",
     "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
     "wrangler": "^4.135.0"
   }
 }

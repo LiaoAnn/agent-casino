@@ -1,71 +1,43 @@
-# Cloudflare Workers Project Base
+# Agent Casino
 
-A minimal, framework-neutral reference for starting TypeScript projects on
-Cloudflare Workers. Use this repository's tooling and development environment as
-a starting point for an agent to initialize a Hono HTTP server or a TanStack Start
-web application.
+A casino where AI agents play each other, with no real money. See `AGENTS.md`
+for the rules of this repo and `docs/tickets.md` for the plan.
 
-## Included
+## Layout
 
-- A native Worker entry point in `src/index.ts` that returns `Hello, World!`.
-- Wrangler configuration for local development, deployment, and binding types.
-- Biome for linting and formatting.
-- Knip for finding unused files, exports, and dependencies.
-- A Node.js 24 Dev Container with pnpm and a persistent package store.
-
-No application framework is installed. Add the framework, dependencies, and
-configuration that the new project needs.
+- `apps/api`: the Cloudflare Worker (API, Durable Objects `Room` and
+  `Matchmaker`, D1 database `DB`). `GET /health` answers `{"ok":true}`.
+- `apps/web`: the read-only website (TanStack Start, not built yet).
 
 ## Development
 
-1. Open the repository in VS Code and select **Reopen in Container**. Docker and
-   the Dev Containers extension are required.
-2. The post-create script installs `socat` and configures the pnpm store. Compose
-   creates the store volume automatically; no host store setup is needed.
-3. Set the project name in `package.json` and `wrangler.jsonc`.
-4. Install dependencies and start the Worker:
+Open the repository in its Dev Container (Node.js 24, pnpm). Then:
 
-   ```bash
-   pnpm install
-   pnpm dev
-   ```
+```bash
+pnpm install
+pnpm dev:api
+```
 
-The Worker is available at `http://localhost:8787`.
-
-The container uses the published TypeScript/Node image directly. Initialization
-lives in `.devcontainer/scripts/post-create.sh`; there is no custom Dockerfile.
-After changing container configuration, select **Rebuild Container**.
+The api Worker is available at `http://localhost:8787`.
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `pnpm dev` | Start the local Worker |
+| `pnpm check` | Biome, knip, type check and all unit tests (what CI runs) |
+| `pnpm test` | Unit tests (Vitest); `pnpm test <filter>` runs matching files |
+| `pnpm typecheck` | TypeScript, strict |
+| `pnpm format` | Apply formatting and lint fixes |
+| `pnpm dev:api` | Start the api Worker locally |
 | `pnpm dev:cron` | Run the local cron scheduler in the foreground (Linux) |
-| `pnpm test:cron` | Test cron scheduling and Worker discovery |
-| `pnpm lint` | Check source formatting and lint rules |
-| `pnpm knip` | Find unused files, exports, and dependencies |
-| `pnpm format` | Format source files |
-| `pnpm check` | Apply source formatting and lint fixes |
-| `pnpm cf-typegen` | Regenerate Worker types after changing bindings |
-| `pnpm deploy` | Deploy the Worker to Cloudflare |
+| `pnpm test:cron` | Test cron scheduling and Worker discovery (Dev Container only, not in `pnpm check`) |
+| `pnpm --filter @agent-casino/api cf-typegen` | Regenerate Worker types after changing bindings |
+
+Tests must not use `.skip` or `.only`: Biome rejects both, and Vitest also
+fails on `.only`.
 
 For Cloudflare authentication inside the container, run `bash wrangler_login.sh`.
 It uses `socat` to forward the local OAuth callback between IPv4 and IPv6.
-
-## Starting a framework project
-
-Ask your agent to use this repository as a tooling reference and initialize the
-chosen framework for Cloudflare Workers:
-
-- **Hono:** install Hono and replace the native Worker entry point with the HTTP
-  application. Add routes and bindings as needed.
-- **TanStack Start:** initialize the framework's Cloudflare setup and adapt its
-  entry points, scripts, TypeScript, and Wrangler configuration. Keep the Biome and
-  Dev Container setup as the shared baseline.
-
-This repository's `src/index.ts` and Wrangler scripts are a minimal Worker example;
-framework projects should use their own required development and build setup.
 
 ## Local cron triggers
 
