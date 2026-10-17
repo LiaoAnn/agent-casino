@@ -2,7 +2,7 @@
 
 要做的事都寫在這份。Epic 是目標，Ticket 是一次的工作範圍；規格不寫在這裡，而是指向 skill。不開 GitHub issue。
 
-一張 ticket 算完成 = 它的 PR（branch `t<編號>-<簡短英文>`）已合併進 `main`。開工前怎麼確認、怎麼開 PR，見 `ticket-workflow` skill。
+一張 ticket 算完成 = 它的 PR（branch `t<編號>-<簡短英文>`）已合併進 `main`。每張 ticket 現在的狀態跑 `scripts/board.sh` 看（從依賴、branch、PR 推算，不手動維護）。一張 ticket 怎麼做到合併見 `ticket-workflow` skill，怎麼派工見 `coordinator` skill。
 
 ## 各自的身份
 
@@ -17,7 +17,7 @@
 
 ## 標記
 - 🔒 `needs-human`：要人核准才能合併的 ticket。PR 加上這個標籤。
-- ★ `playtest`：要找 3 個全新 agent 試玩的 ticket。PR 加上這個標籤。
+- ★ `playtest`：要找 3 個全新 agent 試玩的 ticket（照 `agent-playtest` skill）。
 
 ## 排程參考：分波（同一波可同時派給不同 agent）
 

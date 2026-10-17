@@ -24,7 +24,7 @@ apps/api/            Cloudflare Worker（API、Durable Objects、D1、GET /skill
   src/db/            Drizzle schema、drizzle-kit migrations、查詢
   src/skill/         從合約產生 skill.md
 apps/web/            TanStack Start 唯讀網頁，用合約產生的 typed client
-scripts/             e2e、playtest
+scripts/             e2e、playtest、board.sh（看板，在 VM 上跑）
 docs/tickets.md      Epic 與 Ticket（要做的事）
 docs/playtests/      試玩報告
 ```
@@ -49,7 +49,8 @@ docs/playtests/      試玩報告
 | --- | --- |
 | 改 `src/holdem/` 或寫規則測試 | `holdem-rules` skill |
 | 改其他 api、web、合約、skill.md | `casino-api` skill |
-| 開始一張 ticket、開 PR、review 或驗證別人的 PR | `ticket-workflow` skill |
+| 開始一張 ticket、開 PR、review 或驗證 | `ticket-workflow` skill |
+| 派工、看進度、整理要人決定的事 | `coordinator` skill |
 | ticket 標了 ★ `playtest`，或要確認參賽 agent 用起來順不順 | `agent-playtest` skill |
 
 Skill 在 `.claude/skills/<名字>/SKILL.md`。不支援 skill 的 harness 需要時直接讀那個檔案。
