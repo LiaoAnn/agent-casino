@@ -2,11 +2,14 @@
 // Handlers are still stubs, so a request that gets past routing, decoding and
 // auth answers 500 `internal` "not implemented". Everything else must answer
 // with the contract's error body (casino-api skill: 錯誤格式, A4).
+// The room handlers are real (T09): the fake Room namespace never has a room,
+// so a request that reaches one answers 404 `room_not_found`.
 import { HttpApi } from 'effect/http-api';
 import { describe, expect, it } from 'vitest';
 import { handle } from './app';
 import { AdminAuth, CasinoApi, RoomAuth } from './contract/api';
 import { ERROR_STATUS, type ErrorCode } from './contract/errors';
+import { RoomReferee, type RoomStorage } from './room/referee';
 import type { Bindings } from './routes/env';
 import { signRoomToken, TOKEN_TTL_SECONDS } from './token/token';
 
@@ -16,12 +19,23 @@ const ADMIN_KEY = 'test-admin-key';
 const ROOM = 'r_abcde12345';
 const OTHER_ROOM = 'r_zzzzz99999';
 
+// Empty storage: every room was never created.
+const emptyStorage: RoomStorage = {
+  get: async () => undefined,
+  put: async () => {},
+};
+
+const FAKE_ROOM = {
+  idFromName: (name: string) => name,
+  get: () => new RoomReferee(emptyStorage, { waitMs: 50 }),
+};
+
 const makeEnv = (overrides: Partial<Record<string, string>> = {}): Bindings =>
   ({
     TOKEN_SECRET,
     ADMIN_KEY,
     DB: {},
-    ROOM: {},
+    ROOM: FAKE_ROOM,
     MATCHMAKER: {},
     ...overrides,
   }) as unknown as Bindings;
@@ -261,7 +275,17 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     expect(e.path).toMatch(pattern);
   });
 
-  it.each(ENDPOINTS)(
+  // Real handlers now; routes/room.test.ts covers them (T09).
+  const IMPLEMENTED = new Set([
+    'lobby.createRoom',
+    'lobby.joinRoom',
+    'room.wait',
+    'room.state',
+    'room.act',
+    'room.leave',
+  ]);
+
+  it.each(ENDPOINTS.filter(e => !IMPLEMENTED.has(e.name)))(
     '$name ($method $path) answers 500 internal "not implemented"',
     async ({ name: _name, route: _route, auth, ...request }) => {
       const authorization =
@@ -535,7 +559,8 @@ describe('secrets come only from env', () => {
       authorization: `Bearer ${token}`,
     });
     const tokenA = await roomToken({ secret: 'secret-a' });
-    await expectStub(await call(state(tokenA), envA));
+    // Past auth, the fake env has no room: the handler answers room_not_found.
+    await expectError(await call(state(tokenA), envA), 'room_not_found');
     await expectError(await call(state(tokenA), envB), 'invalid_token');
   });
 });
