@@ -131,3 +131,6 @@ dist
 
 # wrangler
 .wrangler
+
+# wrangler dev secrets (TOKEN_SECRET, ADMIN_KEY)
+.dev.vars*
