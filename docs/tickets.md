@@ -25,7 +25,8 @@
 | --- | --- | --- |
 | 1 | T01 | 1 |
 | 2 | T02、T03 | 2 |
-| 3 | T04、T05、T06、T07 | 4 |
+| 3 | T04、T06、T17 | 3 |
+| 3.5 | T05、T07 | 2 |
 | 4 | T08、T09、T10 | 3 |
 | 5 | T11、T12 | 2 |
 | 6 | T13 | 1 |
@@ -81,12 +82,24 @@
 - 驗證：`pnpm test contract`。功能驗證：偽造、過期、拿別房的 token 都被拒絕。
 - reviewer 另外對照 casino-api skill 檢查端點與欄位命名、錯誤訊息的寫法；拿不定的設計問題問人。
 
-### T07 紀錄、積分與讀取端點（約 700 行）· Blocked by：T03
+### T17 把合約接上 Worker（約 400 行）· Blocked by：T03
+- 讓 `apps/api` 的 Worker 用 T03 的 `CasinoApi` 回應所有端點，之後的 ticket 只要填自己那組 handler，不用再碰共用檔案。
+- 內容：
+  - `app.ts`、`index.ts` 改用 Effect HttpApi 提供服務，保留 `GET /health`。
+  - 共用錯誤處理：Effect 的 schema decode 錯誤、找不到路由，都轉成 casino-api skill 的錯誤格式（`invalid_request` 400；不存在的路徑維持合約的定義或 404），不新增錯誤碼。
+  - 實作 `RoomAuth`（用 `token/verifyRoomToken` 檢查簽名、過期、別房 token，失敗回 `invalid_token`）和 `AdminAuth`（比對 Worker secret `ADMIN_KEY`）。「房間結束 1 小時後拒絕」不在這裡，留給 T09 的 Room DO。
+  - 每組 handler 放在自己的檔案，先是回固定錯誤的空殼（用合約已有的錯誤碼，例如 `internal` 加上「not implemented yet」的 message）：`routes/skill.ts`（T05）、`routes/read.ts` 和 `routes/admin.ts`（T07）、`routes/room.ts`（T09：房間端點和 lobby 的開房、進房）、`routes/queue.ts`（T12：lobby 的排隊）。lobby 這組橫跨 T09、T12，要讓兩張 ticket 各自只改自己的檔案。
+  - `TOKEN_SECRET`、`ADMIN_KEY` 只從 Worker secret 讀；本機用 `.dev.vars`（gitignore）或測試用的假值，不把真的秘密寫進 repo。
+- 只改：`apps/api/src/app.ts`、`apps/api/src/index.ts`、`apps/api/src/routes/`、`apps/api/src/auth/`（新的，放兩個 middleware），以及根目錄新增 `test:api` script。不改 `contract/`、`token/`。
+- 驗證：`pnpm test:api`：每個端點都接得到（空殼回合約的錯誤格式）、壞的 JSON 回 `invalid_request`、偽造／過期／別房的 token 回 `invalid_token`、錯的管理員金鑰回 `invalid_token`、`/health` 照舊。
+- 功能驗證：起 api dev server，用 curl 打 worktree 網址：`/health`、一個空殼端點、一個壞 JSON 的請求、一個沒帶 token 的房間端點，回應都符合合約的錯誤格式。
+
+### T07 紀錄、積分與讀取端點（約 700 行）· Blocked by：T17
 - Drizzle schema 與 drizzle-kit migrations（D1）、`recordMatch()`（給房間結束時呼叫）、Elo 計算、`leaderboard`、`matches`、管理員停權。
 - 只改：`apps/api/src/db/`、`apps/api/src/routes/read.ts`、`apps/api/src/routes/admin.ts`。
 - 驗證：`pnpm test:api`。功能驗證：直接呼叫 `recordMatch()` 寫入兩場，用 curl 看排行榜分數正確。
 
-### T09 房間裁判（約 1000 行）· Blocked by：T03、T04
+### T09 房間裁判（約 1000 行）· Blocked by：T04、T17
 - Room DO（一房一個）：開房、邀請碼進房、`wait`（30 秒長輪詢）、`state`、`actions`（casino-api skill A3 的 `turn_id` 規則）、`leave`。
 - 只改：`apps/api/src/room/`、`apps/api/src/routes/room.ts`。
 - 驗證：`pnpm test:api`。功能驗證：開兩個終端機用 curl 自己跟自己打完 1 手。
@@ -110,7 +123,7 @@
 
 **完成定義**：全新的 Claude Code、Codex 只收到一句話就能自己打完一場，不問人。
 
-### T05 skill.md（約 600 行）· Blocked by：T03
+### T05 skill.md（約 600 行）· Blocked by：T17
 - casino-api skill 的 skill.md 段落與 A12：模板、從合約填入、`GET /skill.md`。範例實打檢查留到 T13。
 - 只改：`apps/api/src/skill/`、`apps/api/src/routes/skill.ts`。
 - 驗證：`pnpm test:skill`（產生的檔案包含每個端點、每個錯誤碼、frontmatter 格式正確）。
