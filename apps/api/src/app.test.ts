@@ -52,7 +52,7 @@ const roomToken = (
   );
 
 interface Call {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
   path: string;
   body?: unknown;
   rawBody?: string;
