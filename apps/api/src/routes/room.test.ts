@@ -35,8 +35,16 @@ const SEED = 12345;
 
 // --- Fakes ------------------------------------------------------------------
 
+// Every put of every room, with the value's size as JSON in UTF-8 bytes.
+interface PutRecord {
+  key: string;
+  bytes: number;
+}
+
 class MemoryStorage implements RoomStorage {
   readonly #data = new Map<string, unknown>();
+
+  constructor(private readonly puts: PutRecord[] = []) {}
 
   async get<T>(key: string): Promise<T | undefined> {
     const value = this.#data.get(key);
@@ -44,6 +52,8 @@ class MemoryStorage implements RoomStorage {
   }
 
   async put<T>(key: string, value: T): Promise<void> {
+    const bytes = new TextEncoder().encode(JSON.stringify(value)).length;
+    this.puts.push({ key, bytes });
     this.#data.set(key, structuredClone(value));
   }
 }
@@ -55,22 +65,25 @@ interface Clock {
 interface TestEnv {
   env: Bindings;
   clock: Clock;
+  puts: PutRecord[];
 }
 
 // Whole seconds, so a deadline without milliseconds still compares equal.
 const startOfSecond = () => Math.floor(Date.now() / 1000) * 1000;
 
 const makeEnv = (
-  options: { waitMs?: number; allowTestRooms?: boolean } = {},
+  // `true` sets ALLOW_TEST_ROOMS to 'true'; a string sets it as given.
+  options: { waitMs?: number; allowTestRooms?: boolean | string } = {},
 ): TestEnv => {
   const clock: Clock = { ms: startOfSecond() };
+  const puts: PutRecord[] = [];
   const referees = new Map<string, RoomReferee>();
   const ROOM = {
     idFromName: (name: string) => name,
     get: (id: string) => {
       let referee = referees.get(id);
       if (referee === undefined) {
-        referee = new RoomReferee(new MemoryStorage(), {
+        referee = new RoomReferee(new MemoryStorage(puts), {
           waitMs: options.waitMs ?? 300,
           now: () => clock.ms,
         });
@@ -85,9 +98,13 @@ const makeEnv = (
     DB: {},
     ROOM,
     MATCHMAKER: {},
-    ...(options.allowTestRooms ? { ALLOW_TEST_ROOMS: 'true' } : {}),
+    ...(options.allowTestRooms === true
+      ? { ALLOW_TEST_ROOMS: 'true' }
+      : typeof options.allowTestRooms === 'string'
+        ? { ALLOW_TEST_ROOMS: options.allowTestRooms }
+        : {}),
   } as unknown as Bindings;
-  return { env, clock };
+  return { env, clock, puts };
 };
 
 // --- HTTP helpers -----------------------------------------------------------
@@ -209,6 +226,34 @@ const wait = async (
   return { ...result, elapsedMs: performance.now() - started };
 };
 
+// Every string anywhere in a JSON value.
+const allStrings = (value: unknown): string[] =>
+  typeof value === 'string'
+    ? [value]
+    : Array.isArray(value)
+      ? value.flatMap(allStrings)
+      : value !== null && typeof value === 'object'
+        ? Object.values(value).flatMap(allStrings)
+        : [];
+
+// A card is never any string of the body (my_cards, board, history, ...),
+// nor a standalone token in the raw text (hints included). The random
+// room_id is removed first, since e.g. `r_ab9sxxxxxx` contains `9s`.
+const expectNoCards = (
+  raw: string,
+  roomId: string,
+  cards: readonly string[],
+) => {
+  const strings = allStrings(JSON.parse(raw));
+  const text = raw.split(roomId).join('');
+  for (const card of cards) {
+    expect(strings).not.toContain(card);
+    expect(text).not.toMatch(
+      new RegExp(`(?<![A-Za-z0-9])${card}(?![A-Za-z0-9])`),
+    );
+  }
+};
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // A room where alice (seat 0) and bob (seat 1) both sat down.
@@ -292,6 +337,22 @@ describe('POST /v1/rooms', () => {
     );
   });
 
+  // The house bot comes with T13; until then the request is refused instead
+  // of silently opening a room that waits for a human.
+  it('opponent "bot" is not available yet: 400 invalid_request in English', async () => {
+    const { env } = makeEnv();
+    const body = await expectError(
+      await post(env, '/v1/rooms', {
+        game: 'holdem',
+        name: 'alice',
+        opponent: 'bot',
+      }),
+      'invalid_request',
+    );
+    expect(`${body.message} ${body.hint}`).not.toMatch(/[\u3000-\u9fff]/);
+    expect(`${body.message} ${body.hint}`).toMatch(/[A-Za-z]{3}/);
+  });
+
   it.each(['house-bot', 'House-Bot'])(
     'the reserved name %s answers 400 name_invalid asking for another name',
     async name => {
@@ -357,12 +418,29 @@ describe('room settings', () => {
     expect(bob.status.view?.my_cards).toEqual(deal.holeCards[1]);
   });
 
-  it('without ALLOW_TEST_ROOMS, a room with test.seed still works', async () => {
-    const t = makeEnv();
-    const { room } = await startedRoom(t, { test: { seed: SEED } });
-    const { status } = await state(t.env, room.room_id, room.token);
-    expect(status.status).toBe('your_turn');
-  });
+  // Production ignores `test` (casino-api skill: 測試房與狀況演練): the room
+  // still opens, but the cards are not the seed's. Both seats matching
+  // dealHand(SEED, 1) by chance is negligible.
+  it.each([
+    { case: 'without ALLOW_TEST_ROOMS', allowTestRooms: undefined },
+    { case: "with ALLOW_TEST_ROOMS='TRUE'", allowTestRooms: 'TRUE' },
+    { case: "with ALLOW_TEST_ROOMS='1'", allowTestRooms: '1' },
+    { case: "with ALLOW_TEST_ROOMS='false'", allowTestRooms: 'false' },
+  ])(
+    '$case, a room with test.seed still works but ignores the seed',
+    async ({ allowTestRooms }) => {
+      const t = makeEnv({ allowTestRooms });
+      const { room, joined } = await startedRoom(t, { test: { seed: SEED } });
+      const alice = await state(t.env, room.room_id, room.token);
+      expect(alice.status.status).toBe('your_turn');
+      const bob = await state(t.env, room.room_id, joined.token);
+      const deal = dealHand(SEED, 1);
+      expect([
+        alice.status.view?.my_cards,
+        bob.status.view?.my_cards,
+      ]).not.toEqual([deal.holeCards[0], deal.holeCards[1]]);
+    },
+  );
 });
 
 // --- POST /v1/rooms/{room_id}/join -------------------------------------------
@@ -588,13 +666,13 @@ describe('hand 1 after the join', () => {
     const bobState = await state(t.env, room.room_id, joined.token);
     const bobWait = await wait(t.env, room.room_id, joined.token);
     for (const { raw } of [bobState, bobWait]) {
-      for (const card of seat0Cards) expect(raw).not.toContain(card);
+      expectNoCards(raw, room.room_id, seat0Cards);
     }
 
     const aliceState = await state(t.env, room.room_id, room.token);
     const aliceWait = await wait(t.env, room.room_id, room.token);
     for (const { raw } of [aliceState, aliceWait]) {
-      for (const card of seat1Cards) expect(raw).not.toContain(card);
+      expectNoCards(raw, room.room_id, seat1Cards);
     }
   });
 
@@ -972,6 +1050,18 @@ describe('POST /v1/rooms/{room_id}/actions: invalid_action (A3)', () => {
       );
       expect(error.message.toLowerCase()).toContain(mentions);
       expect(error.hint).toContain('legal_actions');
+      // Like not_your_turn and stale_turn, it carries the caller's current
+      // state: the same turn, still open (T09 design decision).
+      expect(errorState(error)).toMatchObject({
+        status: 'your_turn',
+        room_status: 'playing',
+        turn_id: turn.turn_id,
+        to_act_seat: 0,
+        hand_number: 1,
+        deadline: turn.deadline,
+        legal_actions: turn.legal_actions,
+        view: turn.view,
+      });
     },
   );
 
@@ -1803,4 +1893,230 @@ describe('a room that ended over an hour ago answers invalid_token (A8)', () => 
     const bob = await yourTurn(t.env, roomId, tokens[1]);
     expect(bob.to_act_seat).toBe(1);
   });
+});
+
+// --- Review follow-ups ----------------------------------------------------------
+
+describe('the one-hour limit is exact (A8 "超過 1 小時")', () => {
+  it('at end + 60 min the room answers normally; at end + 60 min + 1 ms it answers 401 invalid_token', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+    const turn = await yourTurn(t.env, roomId, tokens[0]);
+    await act(t.env, roomId, tokens[0], {
+      turn_id: turn.turn_id,
+      type: 'fold',
+    });
+    t.clock.ms += HOUR_MS;
+    for (const token of tokens) {
+      const { status } = await state(t.env, roomId, token);
+      expect(status.status).toBe('match_over');
+    }
+    t.clock.ms += 1;
+    for (const token of tokens) {
+      await expectError(
+        await get(t.env, `/v1/rooms/${roomId}/state`, token),
+        'invalid_token',
+      );
+    }
+  });
+});
+
+describe('joining a room that ended checks the invite code first', () => {
+  const endings = [
+    {
+      case: 'a cancelled waiting room',
+      end: async (t: TestEnv) => {
+        const room = await createRoom(t.env);
+        await leave(t.env, room.room_id, room.token);
+        return room;
+      },
+    },
+    {
+      case: 'a finished match',
+      end: async (t: TestEnv) => {
+        const room = await createRoom(t.env, {
+          settings: { hands: 1 },
+          test: { seed: SEED },
+        });
+        await joinRoom(t.env, room);
+        const turn = await yourTurn(t.env, room.room_id, room.token);
+        await act(t.env, room.room_id, room.token, {
+          turn_id: turn.turn_id,
+          type: 'fold',
+        });
+        return room;
+      },
+    },
+  ];
+
+  it.each(endings)(
+    'after $case, a wrong code answers 403 wrong_invite_code and the right one 409 match_over',
+    async ({ end }) => {
+      const t = makeEnv({ allowTestRooms: true });
+      const room = await end(t);
+      const wrong = room.invite_code === 'AAAAAA' ? 'BBBBBB' : 'AAAAAA';
+      await expectError(
+        await post(t.env, `/v1/rooms/${room.room_id}/join`, {
+          name: 'carol',
+          invite_code: wrong,
+        }),
+        'wrong_invite_code',
+      );
+      await expectError(
+        await post(t.env, `/v1/rooms/${room.room_id}/join`, {
+          name: 'carol',
+          invite_code: room.invite_code,
+        }),
+        'match_over',
+      );
+    },
+  );
+});
+
+describe('Durable Object errors map to the contract errors (A4)', () => {
+  // A Room namespace whose stub rejects every method call with `error`.
+  const failingEnv = (error: unknown): Bindings => {
+    const stub = new Proxy(
+      {},
+      {
+        get: (_target, prop) =>
+          prop === 'then' || typeof prop === 'symbol'
+            ? undefined
+            : () => Promise.reject(error),
+      },
+    );
+    return {
+      ...makeEnv().env,
+      ROOM: { idFromName: (name: string) => name, get: () => stub },
+    } as unknown as Bindings;
+  };
+
+  const requests = [
+    {
+      case: 'POST /v1/rooms',
+      send: (env: Bindings) =>
+        post(env, '/v1/rooms', { game: 'holdem', name: 'alice' }),
+    },
+    {
+      case: 'POST /v1/rooms/{room_id}/join',
+      send: (env: Bindings) =>
+        post(env, `/v1/rooms/${NEVER_CREATED}/join`, {
+          name: 'bob',
+          invite_code: 'ABC234',
+        }),
+    },
+    {
+      case: 'GET /v1/rooms/{room_id}/state',
+      send: async (env: Bindings) =>
+        get(
+          env,
+          `/v1/rooms/${NEVER_CREATED}/state`,
+          await signRoomToken(
+            { room_id: NEVER_CREATED, seat: 0, name: 'alice' },
+            TOKEN_SECRET,
+            Date.now(),
+          ),
+        ),
+    },
+  ];
+
+  const transient = [
+    { kind: 'retryable', flag: { retryable: true } },
+    { kind: 'overloaded', flag: { overloaded: true } },
+  ];
+
+  it.each(
+    requests.flatMap(request =>
+      transient.map(({ kind, flag }) => ({ ...request, kind, flag })),
+    ),
+  )(
+    '$case: a $kind DO error answers 503 unavailable, retryable, hint says to resend',
+    async ({ send, flag }) => {
+      const env = failingEnv(
+        Object.assign(new Error('Network connection lost.'), flag),
+      );
+      const body = await expectError(await send(env), 'unavailable', true);
+      expect(body.hint.toLowerCase()).toMatch(/retry|resend|again/);
+    },
+  );
+
+  it.each(requests)(
+    '$case: any other DO error answers 500 internal, not retryable, without leaking it',
+    async ({ send }) => {
+      const env = failingEnv(new Error('boom'));
+      const response = await send(env);
+      const raw = await response.clone().text();
+      await expectError(response, 'internal', false);
+      expect(raw).not.toContain('boom');
+    },
+  );
+});
+
+describe('Durable Object storage stays under the per-value limit', () => {
+  // Cloudflare DO storage refuses a single value over 128 KiB.
+  const MAX_VALUE_BYTES = 131_072;
+  const HANDS = 200;
+  const STACK = 2000;
+
+  it(`a full ${HANDS}-hand match with starting_stack ${STACK} never puts a value over 128 KiB`, async () => {
+    const t = makeEnv({ allowTestRooms: true, waitMs: 10 });
+    const { roomId, tokens } = await seededRoom(t, {
+      hands: HANDS,
+      starting_stack: STACK,
+    });
+    const actions: Array<readonly [Seat, Action]> = [];
+    let over: MatchOverStatus | undefined;
+
+    for (let step = 0; step < HANDS * 40 && over === undefined; step++) {
+      let turn: YourTurn | undefined;
+      let seat: Seat = 0;
+      for (const s of [0, 1] as const) {
+        const { status } = await state(t.env, roomId, tokens[s]);
+        if (status.status === 'match_over') {
+          over = status;
+          break;
+        }
+        if (status.status === 'your_turn') {
+          turn = status;
+          seat = s;
+          break;
+        }
+      }
+      if (over !== undefined) break;
+      if (turn === undefined) throw new Error('nobody has your_turn');
+
+      // Mostly check or call; every 5th step a min-raise, so hands have
+      // several actions and reach every street.
+      const raise = turn.legal_actions.find(a => a.type === 'raise');
+      const canCheck = turn.legal_actions.some(a => a.type === 'check');
+      const action: Action =
+        step % 5 === 0 && raise !== undefined && 'min' in raise
+          ? { type: 'raise', amount: raise.min }
+          : canCheck
+            ? { type: 'check' }
+            : { type: 'call' };
+      await act(t.env, roomId, tokens[seat], {
+        turn_id: turn.turn_id,
+        ...action,
+      });
+      actions.push([seat, action]);
+    }
+
+    expect(over).toBeDefined();
+    if (over === undefined) return;
+    expect(over.room_status).toBe('finished');
+    expect(over.final_stacks[0] + over.final_stacks[1]).toBe(2 * STACK);
+    const expected = engineAfter(
+      { seed: SEED, hands: HANDS, startingStack: STACK },
+      actions,
+    );
+    expect(over.final_stacks).toEqual(expected.stacks);
+    expect(expected.over).toBe(true);
+
+    expect(t.puts.length).toBeGreaterThan(0);
+    const largest = t.puts.reduce((a, b) => (b.bytes > a.bytes ? b : a));
+    expect(largest.bytes, `key ${largest.key}`).toBeLessThanOrEqual(
+      MAX_VALUE_BYTES,
+    );
+  }, 60_000);
 });

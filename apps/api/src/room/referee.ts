@@ -59,7 +59,9 @@ interface Turn {
   deadline: number;
 }
 
-// Everything the room keeps, as one JSON value in storage.
+// The room as one JSON value under KEY. Finished hands (the match record of
+// casino-api A15) are kept apart, one per key `hand:<hand_number>`, so this
+// value stays well under the DO's 128 KiB per value on 200-hand matches.
 interface RoomData {
   room_id: string;
   invite_code: string;
@@ -69,8 +71,6 @@ interface RoomData {
   names: [string, string | null];
   // `null` until the second player joins.
   match: MatchState | null;
-  // Every finished hand, in order (the match record of casino-api A15).
-  hands: HandRecord[];
   turn: Turn | null;
   // How many turns have been handed out; the next turn is `t_<count + 1>`.
   turn_count: number;
@@ -158,7 +158,6 @@ export class RoomReferee {
       ...input,
       names: [input.name, null],
       match: null,
-      hands: [],
       turn: null,
       turn_count: 0,
       used_turns: {},
@@ -314,7 +313,7 @@ export class RoomReferee {
         ),
       );
     }
-    await this.#save(done.data);
+    await this.#save(done.data, done.finishedHands);
     return ok(accepted(data));
   }
 
@@ -374,13 +373,15 @@ export class RoomReferee {
     turn: Turn,
     action: Action,
     options: { timeout?: true } = {},
-  ): { ok: true; data: RoomData } | { ok: false; message: string } {
+  ):
+    | { ok: true; data: RoomData; finishedHands: HandRecord[] }
+    | { ok: false; message: string } {
     const result = applyAction(match, turn.seat, action, options);
     if (!result.ok) return result;
+    const { finishedHands } = result;
     const next: RoomData = {
       ...data,
       match: result.state,
-      hands: [...data.hands, ...result.finishedHands],
       used_turns: {
         ...data.used_turns,
         [turn.id]: { seat: turn.seat, ...options },
@@ -393,9 +394,10 @@ export class RoomReferee {
           reason: 'complete',
           final_stacks: result.state.stacks,
         }),
+        finishedHands,
       };
     }
-    return { ok: true, data: this.#nextTurn(next) };
+    return { ok: true, data: this.#nextTurn(next), finishedHands };
   }
 
   // Where every match ends.
@@ -413,12 +415,25 @@ export class RoomReferee {
 
   // Every change goes through here, so this is where recording a match that
   // just ended (T13: replay, D1) belongs, before the caller answers.
-  async #save(data: RoomData): Promise<void> {
+  async #save(data: RoomData, finishedHands: HandRecord[] = []): Promise<void> {
     this.#data = Promise.resolve(data);
     const listeners = [...this.#listeners];
     this.#listeners.clear();
     for (const listener of listeners) listener();
-    await this.#storage.put(KEY, data);
+    // Started together, the DO commits these writes as one.
+    const writes = [
+      ...finishedHands.map(hand =>
+        this.#storage.put(`hand:${hand.hand_number}`, hand),
+      ),
+      this.#storage.put(KEY, data),
+    ];
+    try {
+      await Promise.all(writes);
+    } catch (error) {
+      // Forget the unsaved change: the next request reads storage again.
+      this.#data = undefined;
+      throw error;
+    }
   }
 
   #nextChange() {
