@@ -75,6 +75,19 @@ const API = reflectApi();
 // `/v1/rooms/:room_id/wait` -> `/v1/rooms/{room_id}/wait`
 const docPath = (path: string) => path.replace(/:(\w+)/g, '{$1}');
 
+// The endpoint a curl path (`v1/rooms/$ROOM_ID/leave?x=1`) points at, if any.
+const endpointOf = (curlPath: string): Reflected | undefined => {
+  const path = curlPath.split('?')[0] ?? '';
+  return Object.values(API).find(endpoint =>
+    new RegExp(
+      `^${endpoint.path
+        .slice(1)
+        .replace(':room_id', '\\$ROOM_ID')
+        .replace(/:\w+/g, '[^/"]+')}$`,
+    ).test(path),
+  );
+};
+
 // --- reading the markdown ---------------------------------------------------
 
 const lines = (text: string) => text.split('\n');
@@ -200,6 +213,29 @@ describe('renderSkill: generated from the contract', () => {
     },
   );
 
+  // Which credential to send, from the endpoint's middleware: the room token,
+  // nothing, or the admin key. The route cell is left out, since admin paths
+  // contain `admin` themselves.
+  it.each(Object.entries(API))(
+    '%s row says which credential to send',
+    (_key, endpoint) => {
+      const route = `\`${endpoint.method} ${docPath(endpoint.path)}\``;
+      const rest = (endpointRows.find(l => l.includes(route)) ?? '').replace(
+        route,
+        '',
+      );
+      expect(rest, route).not.toBe('');
+      if (endpoint.auth === 'room') {
+        expect(rest, route).toContain('Bearer $CASINO_TOKEN');
+      } else if (endpoint.auth === 'none') {
+        expect(rest, route).not.toMatch(/bearer/i);
+        expect(rest, route).not.toMatch(/admin/i);
+      } else {
+        expect(rest, route).toMatch(/admin/i);
+      }
+    },
+  );
+
   const errorRows = lines(section(MD, 'Error codes')).filter(l =>
     l.startsWith('|'),
   );
@@ -208,6 +244,23 @@ describe('renderSkill: generated from the contract', () => {
     const row = errorRows.find(l => l.includes(`\`${code}\``));
     expect(row, code).toBeDefined();
     expect(row).toMatch(new RegExp(`\\b${ERROR_STATUS[code]}\\b`));
+  });
+
+  // A code missing from the advice list would fall back to the same generic
+  // sentence as another one.
+  it('gives every error code its own advice in the last cell', () => {
+    const advice = ERROR_CODES.map(code => {
+      const row = errorRows.find(l => l.includes(`\`${code}\``)) ?? '';
+      const cells = row.split('|').map(cell => cell.trim());
+      // `| a | b | c |` splits into ['', 'a', 'b', 'c', ''].
+      return cells.at(-1) === '' ? (cells.at(-2) ?? '') : (cells.at(-1) ?? '');
+    });
+    ERROR_CODES.forEach((code, i) => {
+      expect(advice[i], code).not.toBe('');
+      expect(advice[i], code).not.toMatch(new RegExp(`^\`${code}\`$`));
+    });
+    const repeated = advice.filter((text, i) => advice.indexOf(text) !== i);
+    expect(repeated).toEqual([]);
   });
 });
 
@@ -254,6 +307,32 @@ describe('renderSkill: curl examples', () => {
       if (room.test(path)) expect(command).toContain(bearer);
       if (open.test(path)) expect(command).not.toContain('Authorization');
     }
+  });
+
+  // `curl -d` without -X still POSTs, but a body-less POST like leave needs
+  // -X POST, so every POST says it; a GET must not.
+  it('uses the contract method in every How to play curl', () => {
+    const post = /(^|\s)(-X|--request)\s*POST\b/;
+    const checked: string[] = [];
+    for (const { command, path } of curls(section(MD, 'How to play'))) {
+      const endpoint = path === undefined ? undefined : endpointOf(path);
+      if (!endpoint) continue;
+      checked.push(`${endpoint.method} ${endpoint.path}`);
+      if (endpoint.method === 'POST') expect(command).toMatch(post);
+      if (endpoint.method === 'GET') expect(command).not.toMatch(post);
+    }
+    expect(checked).toEqual(
+      expect.arrayContaining([
+        'POST /v1/queue',
+        'GET /v1/rooms/:room_id/wait',
+        'POST /v1/rooms/:room_id/actions',
+        'GET /v1/leaderboard',
+      ]),
+    );
+    // leave has no body, so nothing but -X POST makes it a POST.
+    const leave = GAME_CURLS.filter(c => c.path?.endsWith('/leave'));
+    expect(leave.length).toBeGreaterThan(0);
+    for (const { command } of leave) expect(command).toMatch(post);
   });
 
   it.each(Object.entries(EXAMPLES).filter(([, e]) => e.request !== undefined))(
@@ -312,6 +391,23 @@ describe('renderSkill: base URL', () => {
       expect(rest).not.toContain('}}');
     },
   );
+
+  it('writes the bare host where a host, not a URL, is meant', () => {
+    const md = renderSkill('https://other.test:8443');
+    const description = lines(md).find(l => l.startsWith('description:'));
+    expect(description).toContain('other.test:8443');
+    expect(description).not.toContain('https://');
+
+    // Codex's sandbox allow-list takes a host.
+    const sandbox = lines(section(md, 'Save as a skill')).filter(
+      l => l.includes('Codex') && /allow/i.test(l) && /network/i.test(l),
+    );
+    expect(sandbox.length).toBeGreaterThan(0);
+    for (const line of sandbox) {
+      expect(line).toContain('`other.test:8443`');
+      expect(line).not.toContain('https://');
+    }
+  });
 
   it('changes with the base URL', () => {
     const other = renderSkill('https://other.test');

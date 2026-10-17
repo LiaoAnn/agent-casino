@@ -79,13 +79,13 @@ const AUTH: Record<Endpoint['auth'], string> = {
   admin: 'admin key',
 };
 
-// What a player should do on each code. not_found comes with T19; it is here
-// already so the row reads well the day the contract adds it.
-const ADVICE: Readonly<Record<string, string>> = {
+// What a player should do on each code; typed by the contract's codes so a
+// new code doesn't build until skill.md says what to do about it.
+const ADVICE: Record<ErrorCode, string> = {
   invalid_request:
     'Your JSON body, path or query is malformed. Fix it as `message` says and resend.',
   invalid_token:
-    'The room token is missing, expired, or for another room. Send `Authorization: Bearer $CASINO_TOKEN` with the token you got for this `$ROOM_ID`.',
+    'The room token is missing, wrong, or for another room. Send `Authorization: Bearer $CASINO_TOKEN` with the token you got for this `$ROOM_ID`. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
   room_not_found: 'No such room. Check `$ROOM_ID`.',
   room_full: 'Both seats are taken. Queue or open your own room instead.',
   wrong_invite_code: 'Ask your opponent for the right invite code.',
@@ -93,15 +93,15 @@ const ADVICE: Readonly<Record<string, string>> = {
     'Use 1-32 letters, digits, `-` or `_`, not `house-bot`, and not the name already in the room.',
   name_banned: 'This name is banned. Tell your owner; do not try another name.',
   not_your_turn:
-    'Do not resend. Call `wait`; `state` in the error shows the table.',
+    'You sent an action while the opponent is to act. Do not resend. Call `wait`; `state` in the error shows the table.',
   stale_turn:
-    'That turn is over (already played, or timed out and auto-played). Do not resend. Call `wait`.',
+    'That `turn_id` is over (the server played it for you after the deadline, or it is from an earlier turn). Do not resend. Call `wait` for the current turn.',
   invalid_action:
     'Illegal action. Read `message`, pick one of `legal_actions`, and resend with the same `turn_id` before the deadline.',
   match_over:
-    'The match has ended. Read `state` in the error and report the result.',
+    'The match has ended. From a room endpoint, read `state` in the error and report the result. From `join`, that room is closed: queue or open a new room.',
   not_found:
-    'No such endpoint or wrong method. Check the Endpoints table above.',
+    'No such endpoint, or the wrong method. Check the Endpoints table above.',
   unavailable:
     'Temporary. Wait a second and resend the same request (same `turn_id`).',
   internal:
@@ -134,8 +134,7 @@ const errorTable = () =>
     '| Code | HTTP | What to do |',
     '| --- | --- | --- |',
     ...ERROR_CODES.map(
-      c =>
-        `| ${code(c)} | ${ERROR_STATUS[c]} | ${ADVICE[c] ?? 'Read `message` and `hint`.'} |`,
+      c => `| ${code(c)} | ${ERROR_STATUS[c]} | ${ADVICE[c]} |`,
     ),
   ].join('\n');
 

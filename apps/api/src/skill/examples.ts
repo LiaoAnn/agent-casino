@@ -241,17 +241,17 @@ const staleTurn: ApiError<'stale_turn'> = {
   state: opponentActing,
 };
 
-// alice leaves during hand 3 and loses; the chips she had in the pot stay
-// with bob.
+// alice leaves on the flop of hand 3 and loses; the unfinished hand's chips
+// go back to whoever put them in.
 const left: typeof MatchOver.Type = {
   status: 'match_over',
   room_status: 'finished',
   to_act_seat: null,
   hand_number: 3,
-  view: null,
+  view: opponentActing.view,
   match_id: ROOM,
   result: 'loss',
-  final_stacks: [36, 44],
+  final_stacks: [42, 38],
   ratings: [
     { name: 'alice', rating: 1484, change: -16 },
     { name: 'bob', rating: 1516, change: 16 },
