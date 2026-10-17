@@ -149,6 +149,13 @@
 - 只改：`apps/web/`。
 - 驗證：`pnpm test:web`。功能驗證：截圖貼在 PR。
 
+### T18 CI 跑網頁測試（約 100 行）· Blocked by：T06
+- `.github/workflows/ci.yml` 新增一個 job：`pnpm install --frozen-lockfile`、安裝跟 `@playwright/test` 同版的 Chromium（headless shell）、跑 `pnpm test:web`。原本的 `check` job 不動。
+- 瀏覽器版本跟 `apps/web` 的 `@playwright/test` 綁在一起（從 lockfile 或 package 讀，不要另外寫死一個版本）；能快取瀏覽器就快取。
+- 只改：`.github/workflows/ci.yml`（新增 job，不改別人寫的 job）。README 指令表裡 `pnpm test:web` 的說明「not in `pnpm check` or CI yet」改成在 CI 跑。
+- 驗證：這張 PR 自己的 CI：新 job 綠燈。另外在一個不合併的暫時 commit 故意弄壞一個網頁測試，確認新 job 會紅，再拿掉。
+- 功能驗證：PR 頁面上看得到兩個 job（check、web）都是綠的。
+
 ## Epic E5 上線
 
 **完成定義**：正式環境可用，三個 agent 試玩通過。
