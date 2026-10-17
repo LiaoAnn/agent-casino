@@ -1,4 +1,4 @@
-const RANKS = [
+export const RANKS = [
   '2',
   '3',
   '4',
@@ -13,7 +13,7 @@ const RANKS = [
   'K',
   'A',
 ] as const;
-const SUITS = ['s', 'h', 'd', 'c'] as const;
+export const SUITS = ['s', 'h', 'd', 'c'] as const;
 
 type Rank = (typeof RANKS)[number];
 type Suit = (typeof SUITS)[number];
