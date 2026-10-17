@@ -20,3 +20,28 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The browser must match apps/web's @playwright/test, so read the
+      # version from it instead of pinning a second copy here.
+      - id: playwright
+        run: |
+          version=$(pnpm --filter @agent-casino/web exec playwright --version | awk '{print $2}')
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # On a cache hit this skips the download and only installs system libraries.
+      - run: pnpm --filter @agent-casino/web exec playwright install --with-deps --only-shell chromium
+      - run: pnpm test:web
