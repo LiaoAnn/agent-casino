@@ -90,18 +90,6 @@ export async function recordMatch(
   db: Db,
   input: MatchRecordInput,
 ): Promise<RecordedMatch> {
-  const stored = await db
-    .select({ rated: matches.rated, ratingChanges: matches.ratingChanges })
-    .from(matches)
-    .where(eq(matches.matchId, input.match_id))
-    .get();
-  if (stored) {
-    return {
-      rated: stored.rated,
-      ratings: toMatchRatings(stored.ratingChanges),
-    };
-  }
-
   const keys = [nameKey(input.players[0]), nameKey(input.players[1])] as const;
   if (keys[0] === keys[1]) {
     throw new RangeError(`Both seats are ${input.players[0]}`);
@@ -120,13 +108,26 @@ export async function recordMatch(
           : null;
   const rated = score !== null && !keys.includes(HOUSE_BOT);
 
+  const [[stored], rows] = await db.batch([
+    db
+      .select({ rated: matches.rated, ratingChanges: matches.ratingChanges })
+      .from(matches)
+      .where(eq(matches.matchId, input.match_id)),
+    db
+      .select()
+      .from(ratings)
+      .where(inArray(ratings.nameKey, [...keys])),
+  ]);
+  if (stored) {
+    return {
+      rated: stored.rated,
+      ratings: toMatchRatings(stored.ratingChanges),
+    };
+  }
+
   let ratingChanges: RatingChanges | null = null;
   let ratingWrites: ReturnType<typeof upsertRating>[] = [];
   if (rated) {
-    const rows = await db
-      .select()
-      .from(ratings)
-      .where(inArray(ratings.nameKey, [...keys]));
     const seat = (n: 0 | 1) => {
       const row = rows.find(r => r.nameKey === keys[n]);
       return {
