@@ -387,15 +387,18 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
     expect(bob.deadline).toBe(iso(t.storage(roomId).alarm ?? 0));
   });
 
-  it('超時 (alarm): no alarm is scheduled while the room waits for an opponent', async () => {
+  it('超時 (alarm): while the room waits for an opponent the only alarm is the 5-minute dissolution, not a turn deadline', async () => {
     const t = makeEnv();
+    const createdAt = t.clock.ms;
     const created = await post(t.env, '/v1/rooms', {
       game: 'holdem',
       name: 'alice',
       settings: { turn_seconds: 10 },
     });
     const room = decodeCreate(await created.json());
-    expect(t.storage(room.room_id).alarm).toBeNull();
+    // spec requires 等人超過 5 分鐘 (slice 2): a waiting room is due to dissolve
+    // at created_at + 5 min, so that alarm is scheduled from the start.
+    expect(t.storage(room.room_id).alarm).toBe(createdAt + 300_000);
   });
 
   it('超時 (alarm): alarm() 1 ms before the deadline plays nothing; the turn and the alarm stay', async () => {
@@ -898,5 +901,121 @@ describe('狀況處理 斷線: the match goes on; state or wait picks it up', ()
     await act(t, roomId, tokens[1], { turn_id: back.turn_id, type: 'check' });
     match = applyOk(match, 1, { type: 'check' });
     expectPosition(await yourTurn(t, roomId, tokens[0]), match, 0);
+  });
+});
+
+// --- 收到什麼就做什麼: late or not your turn → don't resend, go back to wait ----
+
+describe('收到什麼就做什麼 (error 且太晚或沒輪到 → 不重交，回去 wait): stale_turn and not_your_turn hints', () => {
+  // The hint sends the agent back to wait and never asks for a resend.
+  const expectBackToWait = (body: ErrorBody, roomId: string) => {
+    expect(body.hint).toContain(`GET /v1/rooms/${roomId}/wait`);
+    expect(body.hint).not.toContain('turn_id');
+    expect(body.hint.toLowerCase()).not.toContain('send it with');
+    expect(body.hint).toMatch(/(do not|don't|never) resend/i);
+  };
+
+  it('stale_turn for an unknown turn_id while it IS the seat’s turn', async () => {
+    const t = makeEnv();
+    const { roomId, tokens } = await seededRoom(t, {
+      hands: 2,
+      turn_seconds: 10,
+    });
+    await yourTurn(t, roomId, tokens[0]);
+    const body = await expectError(
+      await actPost(t, roomId, tokens[0], { turn_id: 't_999', type: 'call' }),
+      'stale_turn',
+    );
+    expectBackToWait(body, roomId);
+  });
+
+  it('stale_turn for a timed-out turn_id when the same seat is to act again (A3)', async () => {
+    const t = makeEnv();
+    const { roomId, tokens, joinedAt } = await seededRoom(t, {
+      hands: 2,
+      turn_seconds: 10,
+    });
+    const alice = await yourTurn(t, roomId, tokens[0]);
+    await act(t, roomId, tokens[0], { turn_id: alice.turn_id, type: 'call' });
+    const bob = await yourTurn(t, roomId, tokens[1]);
+    t.clock.ms = joinedAt + 10_000;
+    const body = await expectError(
+      await actPost(t, roomId, tokens[1], {
+        turn_id: bob.turn_id,
+        type: 'check',
+      }),
+      'stale_turn',
+    );
+    expect(errorState(body).status).toBe('your_turn');
+    expectBackToWait(body, roomId);
+  });
+
+  it('stale_turn for a timed-out turn_id when the opponent is to act (A3)', async () => {
+    const t = makeEnv();
+    const { roomId, tokens, joinedAt } = await seededRoom(t, {
+      hands: 2,
+      turn_seconds: 10,
+    });
+    const alice = await yourTurn(t, roomId, tokens[0]);
+    t.clock.ms = joinedAt + 10_000;
+    const body = await expectError(
+      await actPost(t, roomId, tokens[0], {
+        turn_id: alice.turn_id,
+        type: 'call',
+      }),
+      'stale_turn',
+    );
+    expect(errorState(body).status).toBe('waiting');
+    expectBackToWait(body, roomId);
+  });
+
+  it("stale_turn for the other seat's accepted turn_id", async () => {
+    const t = makeEnv();
+    const { roomId, tokens } = await seededRoom(t, {
+      hands: 2,
+      turn_seconds: 10,
+    });
+    const alice = await yourTurn(t, roomId, tokens[0]);
+    await act(t, roomId, tokens[0], { turn_id: alice.turn_id, type: 'call' });
+    await yourTurn(t, roomId, tokens[1]);
+    const body = await expectError(
+      await actPost(t, roomId, tokens[1], {
+        turn_id: alice.turn_id,
+        type: 'check',
+      }),
+      'stale_turn',
+    );
+    expectBackToWait(body, roomId);
+  });
+
+  it('not_your_turn for the seat not to act, and for seat 0 before anyone joined', async () => {
+    const t = makeEnv();
+    const { roomId, tokens } = await seededRoom(t, {
+      hands: 2,
+      turn_seconds: 10,
+    });
+    const alice = await yourTurn(t, roomId, tokens[0]);
+    const body = await expectError(
+      await actPost(t, roomId, tokens[1], {
+        turn_id: alice.turn_id,
+        type: 'call',
+      }),
+      'not_your_turn',
+    );
+    expectBackToWait(body, roomId);
+
+    const created = await post(t.env, '/v1/rooms', {
+      game: 'holdem',
+      name: 'carol',
+    });
+    const waiting = decodeCreate(await created.json());
+    const early = await expectError(
+      await actPost(t, waiting.room_id, waiting.token, {
+        turn_id: 't_1',
+        type: 'check',
+      }),
+      'not_your_turn',
+    );
+    expectBackToWait(early, waiting.room_id);
   });
 });

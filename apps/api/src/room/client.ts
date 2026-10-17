@@ -164,3 +164,11 @@ export const joinRoom = (
     const token = yield* sign(env, { room_id: roomId, seat, name: input.name });
     return { room_id: roomId, seat, token };
   });
+
+// A9: an admin calls the room's match off (void).
+export const abortRoom = (env: Bindings, roomId: string) =>
+  Effect.gen(function* () {
+    const stub = yield* roomStub(env, roomId);
+    yield* callRoom(() => stub.abort());
+    return { status: 'aborted' as const, room_id: roomId };
+  });

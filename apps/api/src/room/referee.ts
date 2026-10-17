@@ -91,9 +91,10 @@ interface RoomData {
 }
 
 // `complete`: all hands played or someone ran out of chips. `left`: `loser`
-// left while playing. `cancelled`: seat 0 left before anyone joined.
+// left while playing. `cancelled`: seat 0 left, or nobody joined in time.
+// `void`: aborted by an admin, or the platform failed; never rated.
 type Ended = (
-  | { reason: 'complete' | 'cancelled' }
+  | { reason: 'complete' | 'cancelled' | 'void' }
   | { reason: 'left'; loser: Seat }
 ) & {
   final_stacks: [number, number];
@@ -114,13 +115,15 @@ type MatchOverBody = typeof MatchOver.Type;
 // call to its referee).
 export type RoomApi = Pick<
   RoomReferee,
-  'create' | 'join' | 'status' | 'act' | 'leave'
+  'create' | 'join' | 'status' | 'act' | 'leave' | 'abort'
 >;
 
 const KEY = 'room';
 const WAIT_MS = 30_000;
 // 狀況處理: three timeouts in a row and the seat is absent.
 const ABSENT_AFTER_TIMEOUTS = 3;
+// 狀況處理: a room nobody joins in 5 minutes is dissolved.
+const DISSOLVE_AFTER_MS = 5 * 60 * 1000;
 // A8: an hour after the room ended, its tokens stop working.
 const EXPIRES_AFTER_END_MS = 60 * 60 * 1000;
 const PLAY_AGAIN =
@@ -133,8 +136,6 @@ const fail = <C extends ApiError['code']>(error: ApiError<C>) => ({
 });
 
 const waitPath = (data: RoomData) => `GET /v1/rooms/${data.room_id}/wait`;
-const actionsPath = (data: RoomData) =>
-  `POST /v1/rooms/${data.room_id}/actions`;
 
 const accepted = (data: RoomData): ActionAcceptedBody => ({
   status: 'accepted',
@@ -194,17 +195,18 @@ export class RoomReferee {
       | 'name_invalid'
     >
   > {
-    const data = await this.#load();
-    if (!data) return fail(roomNotFound());
-    if (input.invite_code.toUpperCase() !== data.invite_code) {
+    const loaded = await this.#load();
+    if (!loaded) return fail(roomNotFound());
+    if (input.invite_code.toUpperCase() !== loaded.invite_code) {
       return fail(
         apiError(
           'wrong_invite_code',
-          `That invite code is not the code of room ${data.room_id}`,
+          `That invite code is not the code of room ${loaded.room_id}`,
           'Ask your opponent for the invite_code of this room and resend the join with it',
         ),
       );
     }
+    const data = await this.#settle(loaded);
     if (data.ended) return fail(matchOverError());
     if (data.names[1] !== null) {
       return fail(
@@ -300,29 +302,24 @@ export class RoomReferee {
         apiError(
           'stale_turn',
           `Turn ${input.turn_id} timed out, so the server checked or folded for you`,
-          turn?.seat === seat
-            ? `Pick an action from legal_actions in state and send it with turn_id ${turn.id} to ${actionsPath(data)}`
-            : `Do not resend. Call ${waitPath(data)} and act when it answers your_turn`,
+          doNotResend(data),
           { state },
         ),
       );
     }
     if (!match || turn?.seat !== seat) {
       return fail(
-        apiError(
-          'not_your_turn',
-          'It is not your turn',
-          `Do not resend. Call ${waitPath(data)} and act when it answers your_turn`,
-          { state },
-        ),
+        apiError('not_your_turn', 'It is not your turn', doNotResend(data), {
+          state,
+        }),
       );
     }
     if (input.turn_id !== turn.id) {
       return fail(
         apiError(
           'stale_turn',
-          `That turn_id is not your current turn; the current turn_id is ${turn.id}`,
-          `Pick an action from legal_actions in state and send it with turn_id ${turn.id} to ${actionsPath(data)}`,
+          `That turn_id is not your current turn`,
+          doNotResend(data),
           { state },
         ),
       );
@@ -359,25 +356,32 @@ export class RoomReferee {
     if (!opened.ok) return opened;
     const data = opened.value;
     if (data.ended) return fail(matchOverError(statusFor(data, seat)));
-    const { match } = data;
-    const start = data.settings.starting_stack;
-    // The unfinished hand is called off: chips in its pot go back.
     const next = this.#finish(
       data,
       this.#now(),
-      match
-        ? {
-            reason: 'left',
-            loser: seat,
-            final_stacks: [
-              match.stacks[0] + match.contributed[0],
-              match.stacks[1] + match.contributed[1],
-            ],
-          }
-        : { reason: 'cancelled', final_stacks: [start, start] },
+      data.match
+        ? { reason: 'left', loser: seat, final_stacks: calledOff(data) }
+        : { reason: 'cancelled', final_stacks: calledOff(data) },
     );
     await this.#save(next);
     return ok(matchOver(next, next.ended, seat));
+  }
+
+  // A9: an admin calls the match off; it is void and never rated. Unlike the
+  // seats' requests, a room that ended over an hour ago still answers
+  // match_over here.
+  async abort(): Promise<Result<null, 'room_not_found' | 'match_over'>> {
+    const loaded = await this.#load();
+    if (!loaded) return fail(roomNotFound());
+    const data = await this.#settle(loaded);
+    if (data.ended) return fail(matchOverError());
+    await this.#save(
+      this.#finish(data, this.#now(), {
+        reason: 'void',
+        final_stacks: calledOff(data),
+      }),
+    );
+    return ok(null);
   }
 
   // Loads the room, refusing a missing one or one that ended over an hour
@@ -449,7 +453,17 @@ export class RoomReferee {
     const finishedHands: HandRecord[] = [];
     for (;;) {
       const { match, turn } = next;
-      if (next.ended || !match || !turn) break;
+      if (next.ended) break;
+      if (!match) {
+        const at = next.created_at + DISSOLVE_AFTER_MS;
+        if (this.#now() < at) break;
+        next = this.#finish(next, at, {
+          reason: 'cancelled',
+          final_stacks: calledOff(next),
+        });
+        break;
+      }
+      if (!turn) break;
       const at = next.absent[turn.seat]
         ? turn.deadline - next.settings.turn_seconds * 1000
         : turn.deadline;
@@ -463,7 +477,16 @@ export class RoomReferee {
         at,
         { timeout: true },
       );
-      if (!done.ok) throw new Error(`Timeout action refused: ${done.message}`);
+      if (!done.ok) {
+        // A timeout action the engine refuses is a bug of ours: the match is
+        // void (狀況處理: 平台出錯) rather than stuck.
+        console.error(`Room ${next.room_id}: timeout refused: ${done.message}`);
+        next = this.#finish(next, at, {
+          reason: 'void',
+          final_stacks: calledOff(next),
+        });
+        break;
+      }
       next = done.data;
       finishedHands.push(...done.finishedHands);
     }
@@ -560,7 +583,24 @@ export class RoomReferee {
 
 // When the room next has something due (epoch ms), or null for nothing.
 const alarmAt = (data: RoomData): number | null =>
-  data.ended ? null : (data.turn?.deadline ?? null);
+  data.ended
+    ? null
+    : data.match
+      ? (data.turn?.deadline ?? null)
+      : data.created_at + DISSOLVE_AFTER_MS;
+
+// The stacks with the unfinished hand called off: chips in its pot go back.
+const calledOff = ({ match, settings }: RoomData): [number, number] =>
+  match
+    ? [
+        match.stacks[0] + match.contributed[0],
+        match.stacks[1] + match.contributed[1],
+      ]
+    : [settings.starting_stack, settings.starting_stack];
+
+// 收到什麼就做什麼: too late or not your turn → do not resend, wait.
+const doNotResend = (data: RoomData) =>
+  `Do not resend. Call ${waitPath(data)} and act when it answers your_turn`;
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
   ? Omit<T, K>
@@ -628,9 +668,9 @@ function matchOver(data: RoomData, ended: Ended, seat: Seat): MatchOverBody {
     ended.final_stacks[seat],
     ended.final_stacks[otherSeat(seat)],
   ];
-  const result: 'win' | 'loss' | 'draw' | 'cancelled' =
-    ended.reason === 'cancelled'
-      ? 'cancelled'
+  const result: MatchOverBody['result'] =
+    ended.reason === 'cancelled' || ended.reason === 'void'
+      ? ended.reason
       : ended.reason === 'left'
         ? ended.loser === seat
           ? 'loss'
@@ -642,7 +682,7 @@ function matchOver(data: RoomData, ended: Ended, seat: Seat): MatchOverBody {
             : 'draw';
   return {
     status: 'match_over',
-    room_status: 'finished',
+    room_status: ended.reason === 'void' ? 'void' : 'finished',
     to_act_seat: null,
     hand_number: seen?.hand_number ?? null,
     view: seen?.view ?? null,
@@ -655,12 +695,12 @@ function matchOver(data: RoomData, ended: Ended, seat: Seat): MatchOverBody {
   };
 }
 
-function matchOverHint(
-  ended: Ended,
-  result: 'win' | 'loss' | 'draw' | 'cancelled',
-) {
+function matchOverHint(ended: Ended, result: MatchOverBody['result']) {
   if (result === 'cancelled') {
     return `The room closed before the match started. ${PLAY_AGAIN}`;
+  }
+  if (result === 'void') {
+    return `The match was called off by the platform and does not count. ${PLAY_AGAIN}`;
   }
   const how =
     ended.reason !== 'left'
