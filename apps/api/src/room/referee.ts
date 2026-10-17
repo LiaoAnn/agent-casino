@@ -24,6 +24,9 @@ import { viewFor } from '../holdem/view';
 export interface RoomStorage {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
+  // The DO's one alarm, which calls RoomReferee.alarm().
+  setAlarm(scheduledTime: number): Promise<void>;
+  deleteAlarm(): Promise<void>;
 }
 
 export interface RefereeOptions {
@@ -78,6 +81,13 @@ interface RoomData {
   // server acted for them.
   used_turns: Record<string, { seat: Seat; timeout?: true }>;
   ended: Ended | null;
+  // Epoch ms.
+  created_at: number;
+  // Timeouts in a row per seat; a seat's own action resets its count.
+  timeouts: [number, number];
+  // A9: three timeouts in a row; the server plays every later turn of the
+  // seat at once, for the rest of the match.
+  absent: [boolean, boolean];
 }
 
 // `complete`: all hands played or someone ran out of chips. `left`: `loser`
@@ -109,6 +119,8 @@ export type RoomApi = Pick<
 
 const KEY = 'room';
 const WAIT_MS = 30_000;
+// 狀況處理: three timeouts in a row and the seat is absent.
+const ABSENT_AFTER_TIMEOUTS = 3;
 // A8: an hour after the room ended, its tokens stop working.
 const EXPIRES_AFTER_END_MS = 60 * 60 * 1000;
 const PLAY_AGAIN =
@@ -162,6 +174,9 @@ export class RoomReferee {
       turn_count: 0,
       used_turns: {},
       ended: null,
+      created_at: this.#now(),
+      timeouts: [0, 0],
+      absent: [false, false],
     });
     return ok(null);
   }
@@ -215,7 +230,10 @@ export class RoomReferee {
       startingStack: data.settings.starting_stack,
     });
     await this.#save(
-      this.#nextTurn({ ...data, names: [data.names[0], input.name], match }),
+      this.#nextTurn(
+        { ...data, names: [data.names[0], input.name], match },
+        this.#now(),
+      ),
     );
     return ok({ seat: 1 });
   }
@@ -276,6 +294,19 @@ export class RoomReferee {
     const state = statusFor(data, seat);
     if (data.ended) return fail(matchOverError(state));
     const { match, turn } = data;
+    // A3: the server already played this turn when it timed out.
+    if (used?.seat === seat) {
+      return fail(
+        apiError(
+          'stale_turn',
+          `Turn ${input.turn_id} timed out, so the server checked or folded for you`,
+          turn?.seat === seat
+            ? `Pick an action from legal_actions in state and send it with turn_id ${turn.id} to ${actionsPath(data)}`
+            : `Do not resend. Call ${waitPath(data)} and act when it answers your_turn`,
+          { state },
+        ),
+      );
+    }
     if (!match || turn?.seat !== seat) {
       return fail(
         apiError(
@@ -302,7 +333,7 @@ export class RoomReferee {
         ? { type: 'raise', amount: input.amount }
         : { type: input.type }
     ) as Action;
-    const done = this.#perform(data, match, turn, action);
+    const done = this.#perform(data, match, turn, action, this.#now());
     if (!done.ok) {
       return fail(
         apiError(
@@ -333,6 +364,7 @@ export class RoomReferee {
     // The unfinished hand is called off: chips in its pot go back.
     const next = this.#finish(
       data,
+      this.#now(),
       match
         ? {
             reason: 'left',
@@ -351,8 +383,9 @@ export class RoomReferee {
   // Loads the room, refusing a missing one or one that ended over an hour
   // ago (A8).
   async #open(): Promise<Result<RoomData, 'room_not_found' | 'invalid_token'>> {
-    const data = await this.#load();
-    if (!data) return fail(roomNotFound());
+    const loaded = await this.#load();
+    if (!loaded) return fail(roomNotFound());
+    const data = await this.#settle(loaded);
     if (data.ended && this.#now() - data.ended.at > EXPIRES_AFTER_END_MS) {
       return fail(
         apiError(
@@ -366,12 +399,13 @@ export class RoomReferee {
   }
 
   // The one way an action is applied: by a player now, by the server on a
-  // timeout later (T11).
+  // timeout. `at` (epoch ms) is when it happened, which starts the next turn.
   #perform(
     data: RoomData,
     match: MatchState,
     turn: Turn,
     action: Action,
+    at: number,
     options: { timeout?: true } = {},
   ):
     | { ok: true; data: RoomData; finishedHands: HandRecord[] }
@@ -379,6 +413,10 @@ export class RoomReferee {
     const result = applyAction(match, turn.seat, action, options);
     if (!result.ok) return result;
     const { finishedHands } = result;
+    const timeouts: [number, number] = [...data.timeouts];
+    timeouts[turn.seat] = options.timeout ? timeouts[turn.seat] + 1 : 0;
+    const absent: [boolean, boolean] = [...data.absent];
+    absent[turn.seat] ||= timeouts[turn.seat] >= ABSENT_AFTER_TIMEOUTS;
     const next: RoomData = {
       ...data,
       match: result.state,
@@ -386,26 +424,72 @@ export class RoomReferee {
         ...data.used_turns,
         [turn.id]: { seat: turn.seat, ...options },
       },
+      timeouts,
+      absent,
     };
     if (result.state.over) {
       return {
         ok: true,
-        data: this.#finish(next, {
+        data: this.#finish(next, at, {
           reason: 'complete',
           final_stacks: result.state.stacks,
         }),
         finishedHands,
       };
     }
-    return { ok: true, data: this.#nextTurn(next), finishedHands };
+    return { ok: true, data: this.#nextTurn(next, at), finishedHands };
   }
 
-  // Where every match ends.
+  // Plays everything due by now, each at the time it fell due, so a late
+  // alarm or a request ends up where an alarm on time would have: a turn past
+  // its deadline, and an absent seat's turn the moment it starts, get the
+  // timeout action (holdem-rules 超時動作: check if it can, else fold).
+  #due(data: RoomData) {
+    let next = data;
+    const finishedHands: HandRecord[] = [];
+    for (;;) {
+      const { match, turn } = next;
+      if (next.ended || !match || !turn) break;
+      const at = next.absent[turn.seat]
+        ? turn.deadline - next.settings.turn_seconds * 1000
+        : turn.deadline;
+      if (!next.absent[turn.seat] && this.#now() < turn.deadline) break;
+      const canCheck = legalActions(match).some(a => a.type === 'check');
+      const done = this.#perform(
+        next,
+        match,
+        turn,
+        { type: canCheck ? 'check' : 'fold' },
+        at,
+        { timeout: true },
+      );
+      if (!done.ok) throw new Error(`Timeout action refused: ${done.message}`);
+      next = done.data;
+      finishedHands.push(...done.finishedHands);
+    }
+    return { data: next, finishedHands };
+  }
+
+  // Saves whatever fell due before the caller looks at the room.
+  async #settle(data: RoomData): Promise<RoomData> {
+    const due = this.#due(data);
+    if (due.data !== data) await this.#save(due.data, due.finishedHands);
+    return due.data;
+  }
+
+  // The Room DO's alarm: play what is due and set the next alarm.
+  async alarm(): Promise<void> {
+    const data = await this.#load();
+    if (data) await this.#settle(data);
+  }
+
+  // Where every match ends; `at` is when (epoch ms).
   #finish(
     data: RoomData,
+    at: number,
     ended: DistributiveOmit<Ended, 'at'>,
   ): RoomData & { ended: Ended } {
-    return { ...data, turn: null, ended: { ...ended, at: this.#now() } };
+    return { ...data, turn: null, ended: { ...ended, at } };
   }
 
   #load(): Promise<RoomData | undefined> {
@@ -415,17 +499,28 @@ export class RoomReferee {
 
   // Every change goes through here, so this is where recording a match that
   // just ended (T13: replay, D1) belongs, before the caller answers.
-  async #save(data: RoomData, finishedHands: HandRecord[] = []): Promise<void> {
+  async #save(
+    unsettled: RoomData,
+    unsettledHands: HandRecord[] = [],
+  ): Promise<void> {
+    // An absent seat may be next to act: it is played before anyone looks.
+    const due = this.#due(unsettled);
+    const data = due.data;
+    const finishedHands = [...unsettledHands, ...due.finishedHands];
     this.#data = Promise.resolve(data);
     const listeners = [...this.#listeners];
     this.#listeners.clear();
     for (const listener of listeners) listener();
     // Started together, the DO commits these writes as one.
+    const alarm = alarmAt(data);
     const writes = [
       ...finishedHands.map(hand =>
         this.#storage.put(`hand:${hand.hand_number}`, hand),
       ),
       this.#storage.put(KEY, data),
+      alarm === null
+        ? this.#storage.deleteAlarm()
+        : this.#storage.setAlarm(alarm),
     ];
     try {
       await Promise.all(writes);
@@ -445,8 +540,9 @@ export class RoomReferee {
     return { promise, cancel: () => this.#listeners.delete(listener) };
   }
 
-  // Hands the next turn to whoever is to act, with a fresh turn_id.
-  #nextTurn(data: RoomData): RoomData {
+  // Hands the next turn to whoever is to act, with a fresh turn_id; `at`
+  // (epoch ms) is when the turn starts.
+  #nextTurn(data: RoomData, at: number): RoomData {
     const seat = data.match?.toAct ?? null;
     if (seat === null) return { ...data, turn: null };
     const count = data.turn_count + 1;
@@ -456,11 +552,15 @@ export class RoomReferee {
       turn: {
         id: `t_${count}`,
         seat,
-        deadline: this.#now() + data.settings.turn_seconds * 1000,
+        deadline: at + data.settings.turn_seconds * 1000,
       },
     };
   }
 }
+
+// When the room next has something due (epoch ms), or null for nothing.
+const alarmAt = (data: RoomData): number | null =>
+  data.ended ? null : (data.turn?.deadline ?? null);
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
   ? Omit<T, K>

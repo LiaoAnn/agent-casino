@@ -23,6 +23,8 @@ const OTHER_ROOM = 'r_zzzzz99999';
 const emptyStorage: RoomStorage = {
   get: async () => undefined,
   put: async () => {},
+  setAlarm: async () => {},
+  deleteAlarm: async () => {},
 };
 
 const FAKE_ROOM = {

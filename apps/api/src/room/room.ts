@@ -31,4 +31,8 @@ export class Room extends DurableObject<Env> implements RoomApi {
   leave(seat: Seat) {
     return this.#referee.leave(seat);
   }
+
+  override alarm() {
+    return this.#referee.alarm();
+  }
 }
