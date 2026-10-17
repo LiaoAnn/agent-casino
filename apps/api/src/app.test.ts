@@ -8,9 +8,10 @@ describe('handle', () => {
     expect(await response.json()).toEqual({ ok: true });
   });
 
-  it('answers unknown routes with 404', () => {
+  it('answers unknown routes with an empty 404', async () => {
     const response = handle(new Request('http://api.test/nope'));
     expect(response.status).toBe(404);
+    expect(await response.text()).toBe('');
   });
 
   it('only serves /health over GET', () => {

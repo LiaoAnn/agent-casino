@@ -33,7 +33,8 @@ The api Worker is available at `http://localhost:8787`.
 | `pnpm test:cron` | Test cron scheduling and Worker discovery |
 | `pnpm --filter @agent-casino/api cf-typegen` | Regenerate Worker types after changing bindings |
 
-Tests must not use `.skip` or `.only`; Biome and Vitest both fail on them.
+Tests must not use `.skip` or `.only`: Biome rejects both, and Vitest also
+fails on `.only`.
 
 For Cloudflare authentication inside the container, run `bash wrangler_login.sh`.
 It uses `socat` to forward the local OAuth callback between IPv4 and IPv6.
