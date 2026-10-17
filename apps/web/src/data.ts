@@ -1,10 +1,12 @@
 // The one place the web gets its data from. Shapes are the contract's
-// (GET /v1/leaderboard, GET /v1/matches) and the functions run on the server,
-// so switching to the api Worker (service binding API, T13) changes only this
-// file. Until then it serves the contract's fake data.
+// (GET /v1/leaderboard, GET /v1/matches, GET /v1/matches/{match_id}) and the
+// functions run on the server, so switching to the api Worker (service binding
+// API, T13) changes only this file. Until then it serves the contract's fake
+// data.
 import { makeFakeData } from '@agent-casino/api/src/contract/fake';
 import type {
   Leaderboard,
+  MatchDetail,
   MatchList,
 } from '@agent-casino/api/src/contract/schemas';
 import { createServerFn } from '@tanstack/react-start';
@@ -17,3 +19,12 @@ export const getLeaderboard = createServerFn({ method: 'GET' }).handler(
 export const getMatches = createServerFn({ method: 'GET' }).handler(
   async (): Promise<MatchList> => makeFakeData().matches(),
 );
+
+// One match with every hand, or null when there is no such match (the API's
+// 404).
+export const getMatch = createServerFn({ method: 'GET' })
+  .validator((matchId: string) => matchId)
+  .handler(
+    async ({ data: matchId }): Promise<MatchDetail | null> =>
+      makeFakeData().match(matchId) ?? null,
+  );

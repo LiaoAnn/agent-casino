@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -80,12 +80,12 @@ function Home() {
             {matches.matches.map(match => (
               <TableRow key={match.match_id}>
                 <TableCell>
-                  {/* A plain link: the match page comes with T10. */}
-                  <a
-                    href={`/matches/${match.match_id}`}
+                  <Link
+                    to="/matches/$matchId"
+                    params={{ matchId: match.match_id }}
                     className="underline-offset-4 hover:underline">
                     {match.players[0]} vs {match.players[1]}
-                  </a>
+                  </Link>
                   {!match.rated && <Badge className="ml-2">不計分</Badge>}
                 </TableCell>
                 <TableCell>{resultLabel(match)}</TableCell>
