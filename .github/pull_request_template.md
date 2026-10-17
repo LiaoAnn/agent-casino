@@ -6,7 +6,7 @@
 
 ## 驗證
 
-<!-- verifier subagent 從乾淨狀態重跑的結果。每個指令貼指令本身和最後幾行輸出。 -->
+<!-- verifier subagent 從乾淨狀態重跑的結果。每個指令貼指令本身和最後幾行輸出。拆開寫的 slice 另外附 test-author 交回時的 RED 輸出。 -->
 
 - `pnpm check`：
 - ticket 的驗證指令：

@@ -33,8 +33,9 @@ Ann 在 2026-10-17 同意，ticket thread 不用每次問就可以：
 ## 2. 計畫：`/plan-it`
 - **Why** 從 ticket 和 Epic 的完成定義來：這張 ticket 給誰用（後面哪些 ticket 依賴它、參賽 agent、看網頁的人）。
 - **What** 的每個 slice 都要有 Acceptance：在真的系統上怎麼證明（指令、curl、頁面），對應 ticket 的驗證指令和功能驗證。
+- **How** 要把每個 slice 的公開介面定下來（函式簽名、回應形狀），test-author 和實作者都照這份寫。
 - **Validation and Authority** 這樣填：
-  - TDD：改變行為的 slice 一律 `yes`（規則、API、資料）。純設定、骨架可以寫明豁免理由。
+  - TDD：改變行為的 slice 一律 `yes`，並標出它是哪一級（見下面「測試由誰寫」）。純設定、骨架、刪除可以寫明豁免理由。
   - 專案驗證：這個 repo 還沒有 verify skill，驗收照 ticket 的「驗證」和「功能驗證」在 worktree 網址上做。
   - Commit：每個 slice 通過後自動 commit。
   - 需要核准：只有新的設計決策（見「什麼時候停下來」）。
@@ -50,6 +51,20 @@ Ann 在 2026-10-17 同意，ticket thread 不用每次問就可以：
 - 修 bug 先用 `/diagnose-bug` 重現，寫成會失敗的測試（規則相關的就用「種子 + 動作」），再修。
 - 秘密（`TOKEN_SECRET`、`ADMIN_KEY`、Cloudflare token、登入憑證）只放在 Worker secret 或 GitHub Actions secrets。
 - 指令都在容器裡跑：`T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "<指令>"`。
+
+**測試由誰寫（slice loop 第 1 步）** 分兩級：
+
+| 級別 | 哪些 slice | 怎麼做 |
+| --- | --- | --- |
+| 拆開寫 | 規則（`holdem/`）、合約、token、API handler、DO、資料庫：碰到公開介面、持久資料或別的 ticket 會用的模組 | 照下面三步，**依序**做，不可以同時進行 |
+| 自己寫 | 設定、膠水程式、純搬移或刪除 | 同一個 agent 照 `/tdd` 做 red → green，或寫明豁免理由 |
+
+拆開寫的三步：
+1. **test-author subagent 先寫測試。** 給它：計畫的 Why、這個 slice 的 Outcome 與 Acceptance、公開介面、相關 skill 的規格。**不給**實作方式，也不讓它看實作。請它從規格和邊界情況寫測試（規則用「種子 + 動作 → 預期結果」），跑一次，交回測試和 RED 的輸出。
+2. **確認 RED 的原因是對的**：失敗是因為功能還沒做（例如找不到函式、回傳不符），不是語法、import 或設定錯。原因不對就退回 test-author 修。
+3. **確認 RED 之後才開始實作**，寫到測試全過。實作者可以讀測試（測試就是規格），但**不准改測試**；覺得某個測試錯了，連同理由退回 test-author，還有爭議就通知 coordinator 問人。
+
+PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒有 RED 證據的拆開寫 slice 不算完成。
 
 **檢查（slice loop 第 4 步）** 一律跑 `pnpm check`，它依序是：
 | 檢查 | 指令 | 管什麼 |
