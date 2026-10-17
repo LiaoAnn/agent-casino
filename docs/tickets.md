@@ -72,6 +72,18 @@
 - 只改：`apps/api/src/holdem/`、`apps/api/scripts/`。
 - 驗證：`pnpm test:fuzz`（1 萬手 0 違規）。功能驗證：用 `pnpm holdem:play` 跟機器人打 3 手，貼過程。
 
+### T20 換成密碼學洗牌（約 500 行）· Blocked by：T09、T19
+- 照 holdem-rules skill 新的「種子與洗牌」：256 位元祕密種子（64 個十六進位字元）、HMAC-SHA256 亂數流、不偏的 Fisher–Yates。取代 T02 的 32 位元種子 + mulberry32，因為舊的可以在一場比賽內被暴力猜出來（T09 的 security review 發現）。
+- 要改的地方：
+  - `holdem/`：洗牌與種子型別、`startMatch` / `replay` 的設定、T02 的標準答案測試換成新規格的標準答案（這是規格變更，不算削弱測試；舊的黃金值測試要換掉，不是刪掉不補），加上 RFC 4231 的 HMAC 測試向量。fuzz 照常 1 萬手 0 違規。
+  - `contract/`：`seed`（對局紀錄與 `test.seed`）從 `Uint32` 改成 64 個小寫十六進位字元的字串；假資料照新規格產生。這是合約變更。
+  - `room/`：開房時產生種子的那一處改用密碼學亂數；確認比賽進行中任何回應都不含種子。
+  - `db/`：如果 T07 的 `matches.seed` 不是字串欄位，加一個 migration 改掉。
+  - HMAC-SHA256 要同步：可以用經過審計的小套件（例如 `@noble/hashes`），或在 Node、workerd、網頁 server function 都可用的同步實作；在 /plan-it 決定並寫明取捨，不加多餘的依賴。
+- 只改：上面列的 `holdem/`、`contract/`、`room/` 裡產生種子的地方、`db/`（只限 seed 欄位），以及 `apps/api/package.json` 新增依賴。
+- 驗證：`pnpm check`（含新的標準答案與 HMAC 測試向量）、`pnpm test:fuzz`、`pnpm test:web`。
+- 功能驗證：起 api dev server，用 curl 開一個 `test.seed` 指定的房間，確認發出的底牌跟標準答案一致；用另一個房間確認 `state`、`wait` 的回應裡找不到種子。
+
 ## Epic E2 合約與對局服務
 
 **完成定義**：兩個只會 curl 的玩家能在測試環境排隊、打完一場、看到排行榜變動。

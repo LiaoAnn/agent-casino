@@ -56,23 +56,15 @@ description: 德州撲克單挑的完整規則、洗牌種子與邊界情況。�
 
 
 ## 種子與洗牌
-- 每場有一個 32 位元無號整數種子（正式環境隨機產生；測試房可用 `test.seed` 指定）。
-- PRNG 用 **mulberry32**。第 n 手（從 1 開始）的牌組 = 用 `mulberry32((seed + n * 0x9E3779B9) >>> 0)` 對標準 52 張（順序：點數 2→A，每個點數內 s、h、d、c）做 Fisher–Yates 洗牌。
-- mulberry32 用 bryc 公開的標準實作，每次呼叫輸出 [0, 1) 的浮點數：
-  ```js
-  function mulberry32(a) {
-    return () => {
-      a = (a + 0x6D2B79F5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-  ```
-- Fisher–Yates 用 Durstenfeld 版，從尾端開始：`for i = 51 down to 1`，`j = Math.floor(rng() * (i + 1))`，交換 `deck[i]` 和 `deck[j]`。每次交換正好用掉一個亂數，不做 rejection sampling。
-- 洗完的 `deck[0]` 是第一張發出的牌。發牌順序：座位 0 第 1 張（`deck[0]`）、座位 1 第 1 張（`deck[1]`）、座位 0 第 2 張（`deck[2]`）、座位 1 第 2 張（`deck[3]`），接著 flop 3 張（`deck[4..6]`）、turn 1 張（`deck[7]`）、river 1 張（`deck[8]`），不燒牌。
-- 這些細節決定了「同一個種子永遠同一副牌」，改了舊的對局就無法重播。測試要固定幾組「種子 + 手數 → 前 9 張牌」的標準答案。
+> 2026-10-18 改版（Ann 決定）：原本的 32 位元種子 + mulberry32 可以在一場比賽內被暴力猜出來（看到自己 2 張底牌 + flop 就能窮舉 2^32 個種子，知道對手底牌和之後的公牌）。下面是新規格，由 T20 實作；**T20 合併前，程式還是舊的 mulberry32 版本**。還沒有任何正式對局，所以不需要保留舊版重播。
 
+- **種子**：每場一個 256 位元的祕密值，寫成 64 個小寫十六進位字元的字串（正式環境用密碼學亂數產生，例如 `crypto.getRandomValues`；測試房可用 `test.seed` 指定同樣格式的字串）。比賽進行中**絕不能**出現在任何回應裡；整場結束後才在對局紀錄（`GET /v1/matches/{match_id}`）公開，讓任何人都能重播驗證。
+- **亂數流**：第 n 手（從 1 開始）用 HMAC-SHA256 產生。區塊 k（從 0 開始）= `HMAC-SHA256(key = 種子的 32 個位元組, message = UTF-8 字串 "agent-casino/deck/v1:" + n + ":" + k)`，n、k 用十進位、不補零。每個 32 位元組區塊依序切成 8 個 big-endian 的 uint32，區塊用完就算下一個 k。
+- **洗牌**：對標準 52 張（順序：點數 2→A，每個點數內 s、h、d、c）做 Durstenfeld 版 Fisher–Yates，從尾端開始：`for i = 51 down to 1`，從亂數流取 `j ∈ [0, i]`，交換 `deck[i]` 和 `deck[j]`。
+- **取 j（不偏）**：`m = i + 1`，`limit = 2^32 - (2^32 mod m)`；從亂數流取下一個 uint32 `x`，`x >= limit` 就丟掉再取，直到 `x < limit`，`j = x mod m`。
+- 洗完的 `deck[0]` 是第一張發出的牌。發牌順序：座位 0 第 1 張（`deck[0]`）、座位 1 第 1 張（`deck[1]`）、座位 0 第 2 張（`deck[2]`）、座位 1 第 2 張（`deck[3]`），接著 flop 3 張（`deck[4..6]`）、turn 1 張（`deck[7]`）、river 1 張（`deck[8]`），不燒牌。
+- 引擎是同步的純函式（`startMatch`、`applyAction`），所以 HMAC-SHA256 要用同步的實作，而且要在 Node（Vitest）、workerd（api Worker）和網頁的 server function 都能跑。
+- 這些細節決定了「同一個種子永遠同一副牌」。測試要固定幾組「種子 + 手數 → 前 9 張牌」與一整副的標準答案，並用一個公開的 HMAC-SHA256 測試向量（RFC 4231）確認 HMAC 本身正確。
 
 ## 邊界情況
 - **盲注不夠**：有多少下多少，視為全下。
