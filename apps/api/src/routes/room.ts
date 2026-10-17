@@ -225,16 +225,12 @@ export const RoomHandlers = HttpApiBuilder.group(CasinoApi, 'room', handlers =>
         const stub = yield* roomStub(env, params.room_id);
         return yield* callRoom(() => stub.act(session.seat, payload));
       }),
-    leave: () => notImplemented('POST /v1/rooms/{room_id}/leave'),
+    leave: ({ params }) =>
+      Effect.gen(function* () {
+        const env = yield* WorkerEnv;
+        const session = yield* RoomSession;
+        const stub = yield* roomStub(env, params.room_id);
+        return yield* callRoom(() => stub.leave(session.seat));
+      }),
   }),
 );
-
-// Stub until the ticket above fills it in.
-const notImplemented = (endpoint: string) =>
-  Effect.fail(
-    apiError(
-      'internal',
-      `${endpoint} is not implemented yet on this server`,
-      'This endpoint is not available yet. Read GET /skill.md for what works now',
-    ),
-  );

@@ -2,7 +2,11 @@
 // A3, A8, A9, A15). Kept free of `cloudflare:workers` so it runs in Node
 // tests; the Room DO hands it its storage and forwards its RPC calls here.
 import { type ApiError, apiError } from '../contract/errors';
-import type { ActionAccepted, RoomStatus } from '../contract/schemas';
+import type {
+  ActionAccepted,
+  MatchOver,
+  RoomStatus,
+} from '../contract/schemas';
 import {
   type Action,
   applyAction,
@@ -71,13 +75,16 @@ interface RoomData {
   ended: Ended | null;
 }
 
-interface Ended {
-  // `complete`: all hands played or someone ran out of chips.
-  reason: 'complete';
+// `complete`: all hands played or someone ran out of chips. `left`: `loser`
+// left while playing. `cancelled`: seat 0 left before anyone joined.
+type Ended = (
+  | { reason: 'complete' | 'cancelled' }
+  | { reason: 'left'; loser: Seat }
+) & {
   final_stacks: [number, number];
   // Epoch ms.
   at: number;
-}
+};
 
 interface ActionInput {
   turn_id: string;
@@ -86,13 +93,21 @@ interface ActionInput {
 }
 
 type ActionAcceptedBody = typeof ActionAccepted.Type;
+type MatchOverBody = typeof MatchOver.Type;
 
 // What routes/room.ts calls on a room's DO stub (the Room DO forwards each
 // call to its referee).
-export type RoomApi = Pick<RoomReferee, 'create' | 'join' | 'status' | 'act'>;
+export type RoomApi = Pick<
+  RoomReferee,
+  'create' | 'join' | 'status' | 'act' | 'leave'
+>;
 
 const KEY = 'room';
 const WAIT_MS = 30_000;
+// A8: an hour after the room ended, its tokens stop working.
+const EXPIRES_AFTER_END_MS = 60 * 60 * 1000;
+const PLAY_AGAIN =
+  'To play again, open a room with POST /v1/rooms or join the queue with POST /v1/queue';
 
 const ok = <T>(value: T) => ({ ok: true as const, value });
 const fail = <C extends ApiError['code']>(error: ApiError<C>) => ({
@@ -171,6 +186,7 @@ export class RoomReferee {
         ),
       );
     }
+    if (data.ended) return fail(matchOverError());
     if (data.names[1] !== null) {
       return fail(
         apiError(
@@ -205,7 +221,7 @@ export class RoomReferee {
   async status(
     seat: Seat,
     options: { wait: boolean },
-  ): Promise<Result<RoomStatus, 'room_not_found'>> {
+  ): Promise<Result<RoomStatus, 'room_not_found' | 'invalid_token'>> {
     let timedOut = !options.wait;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const windowEnd = new Promise<void>(resolve => {
@@ -217,9 +233,9 @@ export class RoomReferee {
     });
     try {
       for (;;) {
-        const data = await this.#load();
-        if (!data) return fail(roomNotFound());
-        const status = statusFor(data, seat);
+        const opened = await this.#open();
+        if (!opened.ok) return opened;
+        const status = statusFor(opened.value, seat);
         if (status.status !== 'waiting' || timedOut) return ok(status);
         const change = this.#nextChange();
         await Promise.race([change.promise, windowEnd]);
@@ -243,25 +259,18 @@ export class RoomReferee {
       | 'stale_turn'
       | 'invalid_action'
       | 'match_over'
+      | 'invalid_token'
     >
   > {
-    const data = await this.#load();
-    if (!data) return fail(roomNotFound());
+    const opened = await this.#open();
+    if (!opened.ok) return opened;
+    const data = opened.value;
     const used = data.used_turns[input.turn_id];
     if (used?.seat === seat && !used.timeout) {
       return ok({ ...accepted(data), duplicate: true });
     }
     const state = statusFor(data, seat);
-    if (data.ended) {
-      return fail(
-        apiError(
-          'match_over',
-          'The match is over; no more actions are accepted',
-          `Read the result in state. To play again, open a room with POST /v1/rooms or join the queue with POST /v1/queue`,
-          { state },
-        ),
-      );
-    }
+    if (data.ended) return fail(matchOverError(state));
     const { match, turn } = data;
     if (!match || turn?.seat !== seat) {
       return fail(
@@ -304,6 +313,54 @@ export class RoomReferee {
     return ok(accepted(data));
   }
 
+  // A9: leaving while playing loses at once; leaving an unjoined room
+  // closes it without a match.
+  async leave(
+    seat: Seat,
+  ): Promise<
+    Result<MatchOverBody, 'room_not_found' | 'match_over' | 'invalid_token'>
+  > {
+    const opened = await this.#open();
+    if (!opened.ok) return opened;
+    const data = opened.value;
+    if (data.ended) return fail(matchOverError(statusFor(data, seat)));
+    const { match } = data;
+    const start = data.settings.starting_stack;
+    // The unfinished hand is called off: chips in its pot go back.
+    const next = this.#finish(
+      data,
+      match
+        ? {
+            reason: 'left',
+            loser: seat,
+            final_stacks: [
+              match.stacks[0] + match.contributed[0],
+              match.stacks[1] + match.contributed[1],
+            ],
+          }
+        : { reason: 'cancelled', final_stacks: [start, start] },
+    );
+    await this.#save(next);
+    return ok(matchOver(next, seat));
+  }
+
+  // Loads the room, refusing a missing one or one that ended over an hour
+  // ago (A8).
+  async #open(): Promise<Result<RoomData, 'room_not_found' | 'invalid_token'>> {
+    const data = await this.#load();
+    if (!data) return fail(roomNotFound());
+    if (data.ended && this.#now() - data.ended.at > EXPIRES_AFTER_END_MS) {
+      return fail(
+        apiError(
+          'invalid_token',
+          `Room ${data.room_id} ended over an hour ago, so its tokens no longer work`,
+          PLAY_AGAIN,
+        ),
+      );
+    }
+    return ok(data);
+  }
+
   // The one way an action is applied: by a player now, by the server on a
   // timeout later (T11).
   #perform(
@@ -337,7 +394,7 @@ export class RoomReferee {
   }
 
   // Where every match ends. Recording the match (T13) hooks in here.
-  #finish(data: RoomData, ended: Omit<Ended, 'at'>): RoomData {
+  #finish(data: RoomData, ended: DistributiveOmit<Ended, 'at'>): RoomData {
     return { ...data, turn: null, ended: { ...ended, at: this.#now() } };
   }
 
@@ -380,6 +437,18 @@ export class RoomReferee {
   }
 }
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never;
+
+const matchOverError = (state?: RoomStatus) =>
+  apiError(
+    'match_over',
+    'The match in this room is over; it takes no more requests',
+    `Read the result in state. ${PLAY_AGAIN}`,
+    state ? { state } : {},
+  );
+
 const roomNotFound = () =>
   apiError(
     'room_not_found',
@@ -389,8 +458,8 @@ const roomNotFound = () =>
 
 // What `state` and `wait` answer to `seat` (A15).
 function statusFor(data: RoomData, seat: Seat): RoomStatus {
-  const { match, turn, ended } = data;
-  if (ended) return matchOver(data, ended, seat);
+  const { match, turn } = data;
+  if (data.ended) return matchOver(data, seat);
   if (!match) {
     return {
       status: 'waiting',
@@ -427,15 +496,26 @@ function statusFor(data: RoomData, seat: Seat): RoomStatus {
   };
 }
 
-function matchOver(data: RoomData, ended: Ended, seat: Seat): RoomStatus {
-  const { match } = data;
+function matchOver(data: RoomData, seat: Seat): MatchOverBody {
+  const { match, ended } = data;
+  if (!ended) throw new Error('matchOver called before the match ended');
   const seen = match ? viewFor(match, seat) : null;
   const [mine, theirs] = [
     ended.final_stacks[seat],
     ended.final_stacks[seat === 0 ? 1 : 0],
   ];
-  const result = mine > theirs ? 'win' : mine < theirs ? 'loss' : 'draw';
-  const told = { win: 'you won', loss: 'you lost', draw: 'it is a draw' };
+  const result: 'win' | 'loss' | 'draw' | 'cancelled' =
+    ended.reason === 'cancelled'
+      ? 'cancelled'
+      : ended.reason === 'left'
+        ? ended.loser === seat
+          ? 'loss'
+          : 'win'
+        : mine > theirs
+          ? 'win'
+          : mine < theirs
+            ? 'loss'
+            : 'draw';
   return {
     status: 'match_over',
     room_status: 'finished',
@@ -447,6 +527,22 @@ function matchOver(data: RoomData, ended: Ended, seat: Seat): RoomStatus {
     final_stacks: ended.final_stacks,
     ratings: null,
     last_hand: seen?.last_hand ?? null,
-    hint: `The match is over and ${told[result]}. Report the result to your owner, and see the rankings with GET /v1/leaderboard`,
+    hint: matchOverHint(ended, result),
   };
+}
+
+function matchOverHint(
+  ended: Ended,
+  result: 'win' | 'loss' | 'draw' | 'cancelled',
+) {
+  if (result === 'cancelled') {
+    return `The room closed before the match started. ${PLAY_AGAIN}`;
+  }
+  const how =
+    ended.reason !== 'left'
+      ? { win: 'you won', loss: 'you lost', draw: 'it is a draw' }[result]
+      : result === 'loss'
+        ? 'you lost because you left'
+        : 'you won because your opponent left';
+  return `The match is over and ${how}. Report the result to your owner, and see the rankings with GET /v1/leaderboard`;
 }

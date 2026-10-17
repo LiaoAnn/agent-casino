@@ -1328,3 +1328,479 @@ describe('POST /v1/rooms/{room_id}/actions: the next hand', () => {
     expect(result.elapsedMs).toBeLessThan(1000);
   });
 });
+
+// --- T09 slice 3: POST /v1/rooms/{room_id}/leave and the one-hour rule --------
+// (casino-api skill: 狀況處理 (主動離開), A4, A8, A9, A15). Leaving while
+// playing loses at once; the abandoned hand's chips go back, so final_stacks
+// are the stacks before that hand. Leaving a waiting room cancels it. Requests
+// for a room that ended over an hour ago (by the referee's clock) answer
+// invalid_token.
+
+const leavePost = (env: Bindings, roomId: string, token: string) =>
+  handle(
+    new Request(`${BASE}/v1/rooms/${roomId}/leave`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+    }),
+    env,
+  );
+
+const leave = async (
+  env: Bindings,
+  roomId: string,
+  token: string,
+): Promise<MatchOverStatus> =>
+  asMatchOver((await readStatus(await leavePost(env, roomId, token))).status);
+
+const HOUR_MS = 60 * 60 * 1000;
+
+describe('POST /v1/rooms/{room_id}/leave while playing', () => {
+  it('answers 200 match_over: loss, finished, match_id, ratings null, starting stacks right after the join', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t);
+    const response = await leavePost(t.env, roomId, tokens[0]);
+    expect(response.headers.get('content-type') ?? '').toContain(
+      'application/json',
+    );
+    const over = asMatchOver((await readStatus(response)).status);
+    expect(over).toMatchObject({
+      status: 'match_over',
+      room_status: 'finished',
+      match_id: roomId,
+      result: 'loss',
+      final_stacks: [40, 40],
+      ratings: null,
+      to_act_seat: null,
+      last_hand: null,
+    });
+    expect(over.view).not.toBeNull();
+    expect(over.hint.length).toBeGreaterThan(0);
+    expect(over.hint).not.toMatch(/[\u3000-\u9fff]/);
+  });
+
+  it("works when it is not the leaver's turn; chips already bet in the hand go back", async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t);
+    const first = await yourTurn(t.env, roomId, tokens[0]);
+    await act(t.env, roomId, tokens[0], {
+      turn_id: first.turn_id,
+      type: 'raise',
+      amount: 6,
+    });
+    // Seat 1 is to act; seat 0 leaves.
+    const over = await leave(t.env, roomId, tokens[0]);
+    expect(over).toMatchObject({
+      result: 'loss',
+      room_status: 'finished',
+      final_stacks: [40, 40],
+      last_hand: null,
+    });
+  });
+
+  it('the seat to act may leave too (seat 1 after a raise)', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t);
+    const first = await yourTurn(t.env, roomId, tokens[0]);
+    await act(t.env, roomId, tokens[0], {
+      turn_id: first.turn_id,
+      type: 'raise',
+      amount: 6,
+    });
+    const over = await leave(t.env, roomId, tokens[1]);
+    expect(over).toMatchObject({
+      result: 'loss',
+      final_stacks: [40, 40],
+      match_id: roomId,
+    });
+    expect(over.final_stacks[0] + over.final_stacks[1]).toBe(80);
+  });
+
+  it('after a finished hand, final_stacks are the stacks before the abandoned hand and last_hand is the finished one', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t, { hands: 3 });
+    const turn = await yourTurn(t.env, roomId, tokens[0]);
+    await act(t.env, roomId, tokens[0], {
+      turn_id: turn.turn_id,
+      type: 'fold',
+    });
+    const expected = engineAfter({ seed: SEED, hands: 3 }, [
+      [0, { type: 'fold' }],
+    ]);
+    // Hand 2: seat 1 is to act; seat 1 raises, then seat 0 leaves.
+    const bob = await yourTurn(t.env, roomId, tokens[1]);
+    await act(t.env, roomId, tokens[1], {
+      turn_id: bob.turn_id,
+      type: 'raise',
+      amount: 6,
+    });
+    const over = await leave(t.env, roomId, tokens[0]);
+    expect(over.final_stacks).toEqual([39, 41]);
+    expect(over.last_hand).toEqual(expected.lastHand);
+    expect(over.last_hand).toMatchObject({ hand_number: 1, ended_by: 'fold' });
+    expect(over.result).toBe('loss');
+  });
+
+  it('the opponent then gets match_over with result win on state and wait', async () => {
+    const t = makeEnv({ allowTestRooms: true, waitMs: 2000 });
+    const { roomId, tokens } = await seededRoom(t);
+    await leave(t.env, roomId, tokens[0]);
+    const fromState = asMatchOver(
+      (await state(t.env, roomId, tokens[1])).status,
+    );
+    expect(fromState).toMatchObject({
+      room_status: 'finished',
+      match_id: roomId,
+      result: 'win',
+      final_stacks: [40, 40],
+      ratings: null,
+    });
+    const fromWait = await wait(t.env, roomId, tokens[1]);
+    expect(asMatchOver(fromWait.status).result).toBe('win');
+    expect(fromWait.elapsedMs).toBeLessThan(1000);
+    // The leaver keeps seeing its loss.
+    const leaver = asMatchOver((await state(t.env, roomId, tokens[0])).status);
+    expect(leaver.result).toBe('loss');
+  });
+
+  it('the opponent wins even with fewer chips', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t, { hands: 3 });
+    const turn = await yourTurn(t.env, roomId, tokens[0]);
+    await act(t.env, roomId, tokens[0], {
+      turn_id: turn.turn_id,
+      type: 'fold',
+    });
+    // Seat 0 has 39, seat 1 has 41; seat 1 leaves.
+    const over = await leave(t.env, roomId, tokens[1]);
+    expect(over).toMatchObject({ result: 'loss', final_stacks: [39, 41] });
+    const alice = asMatchOver((await state(t.env, roomId, tokens[0])).status);
+    expect(alice).toMatchObject({ result: 'win', final_stacks: [39, 41] });
+  });
+
+  it("the opponent's pending wait answers match_over (win) as soon as the leaver leaves", async () => {
+    const t = makeEnv({ allowTestRooms: true, waitMs: 2000 });
+    const { roomId, tokens } = await seededRoom(t);
+    // Seat 1 is not to act, so its wait is held.
+    const pending = wait(t.env, roomId, tokens[1]);
+    await sleep(50);
+    await leave(t.env, roomId, tokens[0]);
+    const result = await pending;
+    expect(asMatchOver(result.status).result).toBe('win');
+    expect(result.elapsedMs).toBeLessThan(1000);
+  });
+
+  it('after leaving, an action from either seat answers 409 match_over with the match_over state', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t);
+    await leave(t.env, roomId, tokens[0]);
+    for (const seat of [0, 1] as const) {
+      const error = await expectError(
+        await actPost(t.env, roomId, tokens[seat], {
+          turn_id: 't_999',
+          type: 'call',
+        }),
+        'match_over',
+      );
+      expect(errorState(error)).toMatchObject({
+        status: 'match_over',
+        room_status: 'finished',
+        match_id: roomId,
+        result: seat === 0 ? 'loss' : 'win',
+      });
+    }
+  });
+
+  it('after leaving, leaving again from either seat answers 409 match_over with the match_over state', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t);
+    await leave(t.env, roomId, tokens[0]);
+    for (const seat of [0, 1] as const) {
+      const error = await expectError(
+        await leavePost(t.env, roomId, tokens[seat]),
+        'match_over',
+      );
+      expect(errorState(error)).toMatchObject({
+        status: 'match_over',
+        room_status: 'finished',
+        result: seat === 0 ? 'loss' : 'win',
+        final_stacks: [40, 40],
+      });
+    }
+  });
+});
+
+describe('POST /v1/rooms/{room_id}/leave while waiting for an opponent', () => {
+  it('answers 200 match_over cancelled with no view, no hand and starting stacks', async () => {
+    const t = makeEnv();
+    const room = await createRoom(t.env);
+    const over = await leave(t.env, room.room_id, room.token);
+    expect(over).toMatchObject({
+      status: 'match_over',
+      room_status: 'finished',
+      match_id: room.room_id,
+      result: 'cancelled',
+      view: null,
+      hand_number: null,
+      to_act_seat: null,
+      ratings: null,
+      last_hand: null,
+      final_stacks: [40, 40],
+    });
+    expect(over.hint.length).toBeGreaterThan(0);
+  });
+
+  it('final_stacks use the room starting_stack', async () => {
+    const t = makeEnv();
+    const room = await createRoom(t.env, {
+      settings: { starting_stack: 100 },
+    });
+    const over = await leave(t.env, room.room_id, room.token);
+    expect(over.final_stacks).toEqual([100, 100]);
+  });
+
+  it('afterwards state of seat 0 is the same cancelled match_over', async () => {
+    const t = makeEnv();
+    const room = await createRoom(t.env);
+    const over = await leave(t.env, room.room_id, room.token);
+    const after = asMatchOver(
+      (await state(t.env, room.room_id, room.token)).status,
+    );
+    expect(after).toMatchObject({
+      result: 'cancelled',
+      room_status: 'finished',
+      view: null,
+      hand_number: null,
+      final_stacks: over.final_stacks,
+    });
+  });
+
+  it("seat 0's pending wait answers the cancelled match_over at once", async () => {
+    const t = makeEnv({ waitMs: 2000 });
+    const room = await createRoom(t.env);
+    const pending = wait(t.env, room.room_id, room.token);
+    await sleep(50);
+    await leave(t.env, room.room_id, room.token);
+    const result = await pending;
+    expect(asMatchOver(result.status).result).toBe('cancelled');
+    expect(result.elapsedMs).toBeLessThan(1000);
+  });
+
+  it('joining with the invite code afterwards answers 409 match_over', async () => {
+    const t = makeEnv();
+    const room = await createRoom(t.env);
+    await leave(t.env, room.room_id, room.token);
+    await expectError(
+      await post(t.env, `/v1/rooms/${room.room_id}/join`, {
+        name: 'bob',
+        invite_code: room.invite_code,
+      }),
+      'match_over',
+    );
+  });
+
+  it('leaving again answers 409 match_over with the cancelled state', async () => {
+    const t = makeEnv();
+    const room = await createRoom(t.env);
+    await leave(t.env, room.room_id, room.token);
+    const error = await expectError(
+      await leavePost(t.env, room.room_id, room.token),
+      'match_over',
+    );
+    expect(errorState(error)).toMatchObject({
+      status: 'match_over',
+      result: 'cancelled',
+    });
+  });
+});
+
+describe('POST /v1/rooms/{room_id}/leave after the match finished', () => {
+  it('answers 409 match_over and the real result is unchanged', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+    const turn = await yourTurn(t.env, roomId, tokens[0]);
+    await act(t.env, roomId, tokens[0], {
+      turn_id: turn.turn_id,
+      type: 'fold',
+    });
+    const results = ['loss', 'win'] as const;
+    // The winner (seat 1) leaving must not turn its win into a loss.
+    for (const seat of [1, 0] as const) {
+      const error = await expectError(
+        await leavePost(t.env, roomId, tokens[seat]),
+        'match_over',
+      );
+      expect(errorState(error)).toMatchObject({
+        status: 'match_over',
+        result: results[seat],
+        final_stacks: [39, 41],
+      });
+    }
+    for (const seat of [0, 1] as const) {
+      const over = asMatchOver(
+        (await state(t.env, roomId, tokens[seat])).status,
+      );
+      expect(over).toMatchObject({
+        result: results[seat],
+        final_stacks: [39, 41],
+      });
+    }
+  });
+});
+
+describe('a room that ended over an hour ago answers invalid_token (A8)', () => {
+  // Each ending returns the room, the tokens and the turn_id of the last
+  // accepted action (for the duplicate case); the clock is at the end time.
+  const endings = [
+    {
+      case: 'a normal finish',
+      end: async (t: TestEnv) => {
+        const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+        const turn = await yourTurn(t.env, roomId, tokens[0]);
+        await act(t.env, roomId, tokens[0], {
+          turn_id: turn.turn_id,
+          type: 'fold',
+        });
+        return { roomId, tokens: [...tokens], acceptedTurn: turn.turn_id };
+      },
+    },
+    {
+      case: 'a leave while playing',
+      end: async (t: TestEnv) => {
+        const { roomId, tokens } = await seededRoom(t);
+        const turn = await yourTurn(t.env, roomId, tokens[0]);
+        await act(t.env, roomId, tokens[0], {
+          turn_id: turn.turn_id,
+          type: 'call',
+        });
+        t.clock.ms += 5_000;
+        await leave(t.env, roomId, tokens[1]);
+        return { roomId, tokens: [...tokens], acceptedTurn: turn.turn_id };
+      },
+    },
+    {
+      case: 'a cancelled waiting room',
+      end: async (t: TestEnv) => {
+        const room = await createRoom(t.env);
+        t.clock.ms += 5_000;
+        await leave(t.env, room.room_id, room.token);
+        return {
+          roomId: room.room_id,
+          tokens: [room.token],
+          acceptedTurn: 't_1',
+        };
+      },
+    },
+  ];
+
+  const expectExpired = async (response: Response) => {
+    const body = await expectError(response, 'invalid_token');
+    expect(body.message.toLowerCase()).toContain('hour');
+    expect(body.hint).toMatch(/\/v1\/rooms|queue/i);
+    return body;
+  };
+
+  it.each(endings)(
+    'after $case, state, wait, actions and leave at end + 60 min + 1 s answer 401 invalid_token',
+    async ({ end }) => {
+      const t = makeEnv({ allowTestRooms: true, waitMs: 2000 });
+      const { roomId, tokens, acceptedTurn } = await end(t);
+      t.clock.ms += HOUR_MS + 1_000;
+      for (const token of tokens) {
+        await expectExpired(
+          await get(t.env, `/v1/rooms/${roomId}/state`, token),
+        );
+        const started = performance.now();
+        await expectExpired(
+          await get(t.env, `/v1/rooms/${roomId}/wait`, token),
+        );
+        expect(performance.now() - started).toBeLessThan(1000);
+        await expectExpired(
+          await actPost(t.env, roomId, token, {
+            turn_id: 't_999',
+            type: 'check',
+          }),
+        );
+        await expectExpired(
+          await actPost(t.env, roomId, token, {
+            turn_id: acceptedTurn,
+            type: 'fold',
+          }),
+        );
+        await expectExpired(await leavePost(t.env, roomId, token));
+      }
+    },
+  );
+
+  it.each(endings)(
+    'after $case, at end + 59 min the same requests still answer normally',
+    async ({ end }) => {
+      const t = makeEnv({ allowTestRooms: true, waitMs: 2000 });
+      const { roomId, tokens } = await end(t);
+      t.clock.ms += 59 * 60 * 1000;
+      for (const token of tokens) {
+        const fromState = await state(t.env, roomId, token);
+        expect(fromState.status.status).toBe('match_over');
+        const fromWait = await wait(t.env, roomId, token);
+        expect(fromWait.status.status).toBe('match_over');
+        expect(fromWait.elapsedMs).toBeLessThan(1000);
+        const actError = await expectError(
+          await actPost(t.env, roomId, token, {
+            turn_id: 't_999',
+            type: 'check',
+          }),
+          'match_over',
+        );
+        expect(errorState(actError).status).toBe('match_over');
+        const leaveError = await expectError(
+          await leavePost(t.env, roomId, token),
+          'match_over',
+        );
+        expect(errorState(leaveError).status).toBe('match_over');
+      }
+    },
+  );
+
+  it('after a normal finish, the duplicate of the accepted turn_id still answers accepted at end + 59 min', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+    const turn = await yourTurn(t.env, roomId, tokens[0]);
+    const accepted = await act(t.env, roomId, tokens[0], {
+      turn_id: turn.turn_id,
+      type: 'fold',
+    });
+    t.clock.ms += 59 * 60 * 1000;
+    const again = await act(t.env, roomId, tokens[0], {
+      turn_id: turn.turn_id,
+      type: 'fold',
+    });
+    expect(again).toEqual({ ...accepted, duplicate: true });
+  });
+
+  it('the hour counts from the end, not from the start of the room', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+    // Playing for 50 minutes before the match ends.
+    t.clock.ms += 50 * 60 * 1000;
+    const turn = await yourTurn(t.env, roomId, tokens[0]);
+    await act(t.env, roomId, tokens[0], {
+      turn_id: turn.turn_id,
+      type: 'fold',
+    });
+    t.clock.ms += 30 * 60 * 1000;
+    const { status } = await state(t.env, roomId, tokens[1]);
+    expect(status.status).toBe('match_over');
+  });
+
+  it('a room still playing never expires by this rule (2 hours later state and actions still work)', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t);
+    t.clock.ms += 2 * HOUR_MS;
+    const turn = await yourTurn(t.env, roomId, tokens[0]);
+    await act(t.env, roomId, tokens[0], {
+      turn_id: turn.turn_id,
+      type: 'call',
+    });
+    const bob = await yourTurn(t.env, roomId, tokens[1]);
+    expect(bob.to_act_seat).toBe(1);
+  });
+});

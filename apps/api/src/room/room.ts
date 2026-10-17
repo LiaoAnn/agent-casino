@@ -27,4 +27,8 @@ export class Room extends DurableObject<Env> implements RoomApi {
   act(seat: Seat, input: Parameters<RoomReferee['act']>[1]) {
     return this.#referee.act(seat, input);
   }
+
+  leave(seat: Seat) {
+    return this.#referee.leave(seat);
+  }
 }
