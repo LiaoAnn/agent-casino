@@ -1,5 +1,7 @@
 import { Exit, Schema } from 'effect';
 import { describe, expect, it } from 'vitest';
+import { compareHands, evaluateHand } from '../holdem/hand';
+import { dealHand } from '../holdem/shuffle';
 import { makeFakeData } from './fake';
 import { Leaderboard, MatchDetail, MatchList } from './schemas';
 
@@ -55,6 +57,47 @@ describe('makeFakeData', () => {
       next: null,
     });
     expect(makeFakeData({ matches: 5 }).matches().matches).toHaveLength(5);
+  });
+
+  it('ends paging exactly at the last match', () => {
+    const twenty = makeFakeData({ matches: 20 });
+    expect(twenty.matches().matches).toHaveLength(20);
+    expect(twenty.matches().next).toBeNull();
+    expect(data.matches({ before: 'r_0000000000' })).toEqual({
+      matches: [],
+      next: null,
+    });
+  });
+
+  it('deals every hand from the match seed and pays the better hand', () => {
+    for (const detail of details) {
+      for (const hand of detail.hands) {
+        if (hand.hole_cards === null) continue;
+        const deal = dealHand(detail.seed, hand.hand_number);
+        expect(hand.hole_cards).toEqual(deal.holeCards);
+        expect(hand.board).toEqual(deal.board);
+        const [a, b] = deal.holeCards.map(hole =>
+          evaluateHand([...hole, ...deal.board]),
+        );
+        const order = a && b ? compareHands(a, b) : Number.NaN;
+        expect(hand.winner_seat).toBe(order === 0 ? null : order > 0 ? 0 : 1);
+      }
+    }
+  });
+
+  it('matches results, stacks and rating changes', () => {
+    for (const detail of details) {
+      const [s0, s1] = detail.final_stacks;
+      if (detail.result === 'seat0_win') expect(s0).toBeGreaterThan(s1);
+      if (detail.result === 'seat1_win') expect(s1).toBeGreaterThan(s0);
+      if (detail.result === 'draw') expect(s0).toBe(s1);
+      expect(detail.rating_changes !== null).toBe(detail.rated);
+      const [c0, c1] = detail.rating_changes ?? [];
+      if (c0 && c1 && detail.result !== 'draw') {
+        const winner = detail.result === 'seat0_win' ? c0 : c1;
+        expect(winner.after).toBeGreaterThan(winner.before);
+      }
+    }
   });
 
   it('returns undefined for an unknown match', () => {

@@ -159,9 +159,26 @@ describe('signRoomToken / verifyRoomToken', () => {
     ['no dot', 'abc'],
     ['three parts', 'a.b.c'],
     ['not base64', '!!!.???'],
-    ['payload is not JSON', `${toBase64Url(new TextEncoder().encode('hi'))}.x`],
   ])('rejects a malformed token (%s)', async (_label, token) => {
     const result = await verifyRoomToken(token, SECRET, ROOM, ISSUED_MS);
+    expect(result).toEqual({ ok: false, reason: 'malformed' });
+  });
+
+  it('rejects a validly signed payload that is not JSON', async () => {
+    const payload = toBase64Url(new TextEncoder().encode('not json'));
+    const token = `${payload}.${await hmac(SECRET, payload)}`;
+    const result = await verifyRoomToken(token, SECRET, ROOM, ISSUED_MS);
+    expect(result).toEqual({ ok: false, reason: 'malformed' });
+  });
+
+  it('rejects a valid token with an extra segment appended', async () => {
+    const token = await signRoomToken(CLAIMS, SECRET, ISSUED_MS);
+    const result = await verifyRoomToken(
+      `${token}.${token.split('.')[1]}`,
+      SECRET,
+      ROOM,
+      ISSUED_MS,
+    );
     expect(result).toEqual({ ok: false, reason: 'malformed' });
   });
 
@@ -195,4 +212,14 @@ describe('tokenRejectionError', () => {
       expect(error).not.toHaveProperty('state');
     },
   );
+
+  it('tells the agent what went wrong for each reason', () => {
+    expect(tokenRejectionError('malformed').message).toMatch(/Bearer/);
+    expect(tokenRejectionError('bad_signature').message).toMatch(/signature/);
+    expect(tokenRejectionError('expired').message).toMatch(/expired/);
+    expect(tokenRejectionError('expired').message).toContain(
+      `${TOKEN_TTL_SECONDS / 3600} hours`,
+    );
+    expect(tokenRejectionError('wrong_room').message).toMatch(/different room/);
+  });
 });

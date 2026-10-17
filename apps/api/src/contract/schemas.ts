@@ -23,7 +23,7 @@ const pattern = (regExp: RegExp) =>
   Schema.String.check(Schema.isPattern(regExp));
 const between = (minimum: number, maximum: number) =>
   Schema.Int.check(Schema.isBetween({ minimum, maximum }));
-const Chips = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const Uint32 = between(0, 0xffff_ffff);
 
 export const Name = pattern(NAME_PATTERN);
@@ -40,7 +40,7 @@ const Hint = Schema.String;
 const Token = Schema.String;
 const HoleCards = Schema.Tuple([Card, Card]);
 const Board = Schema.Array(Card).check(Schema.isMaxLength(5));
-const Stacks = Schema.Tuple([Chips, Chips]);
+const Stacks = Schema.Tuple([NonNegativeInt, NonNegativeInt]);
 
 // --- Requests ---------------------------------------------------------------
 
@@ -61,7 +61,7 @@ export const TestSettings = Schema.Struct({
   chaos: Schema.optionalKey(
     Schema.Struct({
       reject_first_action: Schema.optionalKey(Schema.Boolean),
-      extra_waiting: Schema.optionalKey(Chips),
+      extra_waiting: Schema.optionalKey(NonNegativeInt),
       fail_request_every: Schema.optionalKey(
         Schema.Int.check(Schema.isGreaterThanOrEqualTo(2)),
       ),
@@ -134,15 +134,19 @@ const HistoryEntry = Schema.Struct({
   seat: Seat,
   street: Street,
   type: Schema.Literals(['post_blind', 'fold', 'check', 'call', 'raise']),
-  amount: Schema.optionalKey(Chips),
+  amount: Schema.optionalKey(NonNegativeInt),
   timeout: Schema.optionalKey(Schema.Literal(true)),
 });
 
 const LegalAction = Schema.Union([
   Schema.Struct({ type: Schema.Literal('fold') }),
   Schema.Struct({ type: Schema.Literal('check') }),
-  Schema.Struct({ type: Schema.Literal('call'), amount: Chips }),
-  Schema.Struct({ type: Schema.Literal('raise'), min: Chips, max: Chips }),
+  Schema.Struct({ type: Schema.Literal('call'), amount: NonNegativeInt }),
+  Schema.Struct({
+    type: Schema.Literal('raise'),
+    min: NonNegativeInt,
+    max: NonNegativeInt,
+  }),
 ]);
 
 const View = Schema.Struct({
@@ -151,11 +155,11 @@ const View = Schema.Struct({
   button_seat: Seat,
   my_cards: HoleCards,
   board: Board,
-  pot: Chips,
-  my_stack: Chips,
-  opponent_stack: Chips,
-  my_bet_this_street: Chips,
-  opponent_bet_this_street: Chips,
+  pot: NonNegativeInt,
+  my_stack: NonNegativeInt,
+  opponent_stack: NonNegativeInt,
+  my_bet_this_street: NonNegativeInt,
+  opponent_bet_this_street: NonNegativeInt,
   history: Schema.Array(HistoryEntry),
 });
 
@@ -166,7 +170,7 @@ const ShownCards = Schema.NullOr(Schema.Tuple([HoleCards, HoleCards]));
 const LastHand = Schema.Struct({
   hand_number: Schema.Int,
   winner_seat: Schema.NullOr(Seat),
-  pot: Chips,
+  pot: NonNegativeInt,
   ended_by: EndedBy,
   board: Board,
   hole_cards: ShownCards,
@@ -232,10 +236,10 @@ export const Leaderboard = Schema.Struct({
       rank: Schema.Int,
       name: Name,
       rating: Rating,
-      games: Chips,
-      wins: Chips,
-      losses: Chips,
-      draws: Chips,
+      games: NonNegativeInt,
+      wins: NonNegativeInt,
+      losses: NonNegativeInt,
+      draws: NonNegativeInt,
     }),
   ),
 });
@@ -278,7 +282,7 @@ export const MatchHand = Schema.Struct({
   hole_cards: ShownCards,
   events: Schema.Array(HistoryEntry),
   winner_seat: Schema.NullOr(Seat),
-  pot: Chips,
+  pot: NonNegativeInt,
   ended_by: EndedBy,
   stacks: Stacks,
 });

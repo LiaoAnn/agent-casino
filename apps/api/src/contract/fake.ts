@@ -1,7 +1,10 @@
 // Fake data shaped by the contract, for the web (T06, T10) until the real read
 // endpoints exist. Deterministic per seed and self-consistent: chips add up,
 // cards are not repeated within a hand, and the leaderboard is the Elo result
-// of the rated matches. Showdown winners are random, not hand strength.
+// of the rated matches. Cards come from each match's seed through the real
+// dealer, and showdowns go to the better hand.
+import { compareHands, evaluateHand } from '../holdem/hand';
+import { dealHand, mulberry32 } from '../holdem/shuffle';
 import type {
   Leaderboard,
   MatchDetail,
@@ -17,47 +20,25 @@ type HistoryEntry = MatchHand['events'][number];
 const PAGE_SIZE = 20;
 const PLAYERS = ['alice', 'Bob', 'carol', 'dave-7', 'eve_x', 'Frank', 'grace'];
 const BOT = 'house-bot';
-const RANKS = '23456789TJQKA';
-const SUITS = 'shdc';
 const START_TIME = Date.parse('2026-10-01T00:00:00Z');
 
-// mulberry32, the same PRNG the dealer uses.
 function makeRandom(seed: number) {
-  let state = seed >>> 0;
-  const next = () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+  const next = mulberry32(seed);
   const int = (n: number) => Math.floor(next() * n);
   const pick = <T>(items: readonly T[]): T => items[int(items.length)] as T;
   return { next, int, pick };
 }
 type Random = ReturnType<typeof makeRandom>;
 
-function shuffledDeck(random: Random): string[] {
-  const deck = [...RANKS].flatMap(rank => [...SUITS].map(s => rank + s));
-  for (let i = deck.length - 1; i > 0; i--) {
-    const j = random.int(i + 1);
-    [deck[i], deck[j]] = [deck[j] as string, deck[i] as string];
-  }
-  return deck;
-}
-
 function playHand(
   random: Random,
+  matchSeed: number,
   handNumber: number,
   stacks: [number, number],
 ): MatchHand {
   const button = ((handNumber - 1) % 2) as Seat;
   const big = (1 - button) as Seat;
-  const deck = shuffledDeck(random);
-  const hole: [[string, string], [string, string]] = [
-    [deck[0] as string, deck[2] as string],
-    [deck[1] as string, deck[3] as string],
-  ];
+  const { holeCards, board } = dealHand(matchSeed, handNumber);
   const events: HistoryEntry[] = [
     { seat: button, street: 'preflop', type: 'post_blind', amount: 1 },
     { seat: big, street: 'preflop', type: 'post_blind', amount: 2 },
@@ -88,7 +69,11 @@ function playHand(
     }
     paid[0] = 2;
     paid[1] = 2;
-    winner = random.int(10) === 0 ? null : (random.int(2) as Seat);
+    const [first, second] = holeCards.map(hole =>
+      evaluateHand([...hole, ...board]),
+    ) as [ReturnType<typeof evaluateHand>, ReturnType<typeof evaluateHand>];
+    const order = compareHands(first, second);
+    winner = order === 0 ? null : order > 0 ? 0 : 1;
   }
   const pot = paid[0] + paid[1];
   const showdown = scenario === 'show';
@@ -100,8 +85,8 @@ function playHand(
   return {
     hand_number: handNumber,
     button_seat: button,
-    board: showdown ? deck.slice(4, 9) : [],
-    hole_cards: showdown ? hole : null,
+    board: showdown ? board : [],
+    hole_cards: showdown ? holeCards : null,
     events,
     winner_seat: winner,
     pot,
@@ -161,13 +146,14 @@ export function makeFakeData(
       settings.starting_stack,
       settings.starting_stack,
     ];
+    const matchSeed = Math.floor(random.next() * 0x1_0000_0000);
     const hands: MatchHand[] = [];
     for (
       let n = 1;
       !cancelled && n <= settings.hands && Math.min(...stacks) > 0;
       n++
     ) {
-      hands.push(playHand(random, n, stacks));
+      hands.push(playHand(random, matchSeed, n, stacks));
     }
     const result = cancelled
       ? 'cancelled'
@@ -206,7 +192,7 @@ export function makeFakeData(
       match_id: roomId(random),
       players: [first, second],
       settings,
-      seed: Math.floor(random.next() * 0x1_0000_0000),
+      seed: matchSeed,
       result,
       rated,
       ended_at: new Date(START_TIME + i * 37 * 60_000).toISOString(),

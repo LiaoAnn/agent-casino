@@ -129,7 +129,7 @@ const REJECTIONS: Record<TokenRejection, [message: string, hint: string]> = {
     JOIN_AGAIN,
   ],
   expired: [
-    'Token expired. Tokens last 24 hours after they are issued',
+    `Token expired. Tokens last ${TOKEN_TTL_SECONDS / 3600} hours after they are issued`,
     JOIN_AGAIN,
   ],
   wrong_room: [
