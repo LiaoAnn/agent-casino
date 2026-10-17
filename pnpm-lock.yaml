@@ -191,7 +191,11 @@ importers:
         specifier: ^4.135.0
         version: 4.135.0(@types/node@24.13.6)
 
-  apps/api: {}
+  apps/api:
+    dependencies:
+      effect:
+        specifier: 4.0.5
+        version: 4.0.5
 
   apps/web: {}
 
@@ -1172,6 +1176,9 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
+  effect@4.0.5:
+    resolution: {integrity: sha512-BY4/28NlpOd99yzmV741xbVGmp+1U7tks4oB7F/Png64bTa5tm5eCA6W0RiXsnuLDDoJpjfVSo4Dnq4BZb/89Q==}
+
   error-stack-parser-es@1.0.5:
     resolution: {integrity: sha512-5qucVt2XcuGMcEGgWI7i+yZpmpByQ8J1lHhcL7PwqCwu9FPP3VUXzT4ltHe5i2z9dePwEHcDVOAfSnHsOlCXRA==}
 
@@ -2134,6 +2141,8 @@ snapshots:
   croner@10.0.1: {}
 
   detect-libc@2.1.2: {}
+
+  effect@4.0.5: {}
 
   error-stack-parser-es@1.0.5: {}
 
