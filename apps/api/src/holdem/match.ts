@@ -3,7 +3,7 @@ import { compareHands, evaluateHand } from './hand';
 import { dealHand } from './shuffle';
 
 export type Seat = 0 | 1;
-type Street = 'preflop' | 'flop' | 'turn' | 'river';
+export type Street = 'preflop' | 'flop' | 'turn' | 'river';
 
 export interface MatchConfig {
   seed: number;
@@ -36,7 +36,7 @@ export interface HistoryEvent {
 }
 
 /** The `last_hand` response shape (casino-api A15). */
-interface LastHand {
+export interface LastHand {
   hand_number: number;
   /** `null` is a split pot. */
   winner_seat: Seat | null;
@@ -104,7 +104,7 @@ const BOARD_SIZE: Record<Street, number> = {
   river: 5,
 };
 
-const otherSeat = (seat: Seat): Seat => (seat === 0 ? 1 : 0);
+export const otherSeat = (seat: Seat): Seat => (seat === 0 ? 1 : 0);
 
 /** Deals hand 1 and posts its blinds. Throws RangeError on a bad config. */
 export function startMatch(config: MatchConfig): MatchState {
