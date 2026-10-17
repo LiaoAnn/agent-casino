@@ -21,8 +21,8 @@ import { ReadHandlers } from './routes/read';
 import { RoomHandlers } from './routes/room';
 import { SkillHandlers } from './routes/skill';
 
-const errorResponse = (error: ApiError, status = ERROR_STATUS[error.code]) =>
-  HttpServerResponse.jsonUnsafe(error, { status });
+const errorResponse = (error: ApiError) =>
+  HttpServerResponse.jsonUnsafe(error, { status: ERROR_STATUS[error.code] });
 
 const READ_THE_SKILL = 'Read GET /skill.md for the endpoints and examples';
 
@@ -46,11 +46,10 @@ const contractError = (cause: Cause.Cause<unknown>, route: string) => {
   ) {
     return errorResponse(
       apiError(
-        'invalid_request',
+        'not_found',
         `There is no endpoint ${route}`,
         `Check the method and path. ${READ_THE_SKILL}`,
       ),
-      404,
     );
   }
 

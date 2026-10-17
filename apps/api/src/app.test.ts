@@ -102,6 +102,9 @@ const readError = async (response: Response): Promise<ErrorBody> => {
   });
   expect(body.message.length).toBeGreaterThan(0);
   expect(body.hint.length).toBeGreaterThan(0);
+  // The code alone decides the HTTP status (A4).
+  expect(body.code in ERROR_STATUS).toBe(true);
+  expect(response.status).toBe(ERROR_STATUS[body.code as ErrorCode]);
   return body;
 };
 
@@ -359,8 +362,17 @@ describe('unknown path or method answers 404 pointing to /skill.md', () => {
     { method: 'GET', path: '/nope' },
     { method: 'GET', path: '/v1/queue' },
     { method: 'POST', path: '/health' },
+    { method: 'DELETE', path: '/skill.md' },
+    { method: 'PUT', path: '/v1/rooms' },
+    { method: 'GET', path: '/v1/rooms/r_abcde12345/nope' },
   ] as const)('$method $path', async request => {
-    const body = await expectError(await call(request), 'invalid_request', 404);
+    const response = await call(request);
+    const body = await expectError(response, 'not_found');
+    expect(response.status).toBe(404);
+    expect(ERROR_STATUS.not_found).toBe(404);
+    expect(body.retryable).toBe(false);
+    expect(body.message).toContain(request.method);
+    expect(body.message).toContain(request.path);
     expect(body.hint).toContain('/skill.md');
   });
 });
