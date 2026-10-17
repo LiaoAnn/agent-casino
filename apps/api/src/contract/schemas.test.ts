@@ -229,6 +229,7 @@ describe('requests', () => {
     expect(decodes(TestSettings, { seed: 4_294_967_295 })).toBe(true);
     expect(decodes(TestSettings, { seed: 4_294_967_296 })).toBe(false);
     expect(decodes(TestSettings, { seed: -1 })).toBe(false);
+    expect(decodes(TestSettings, { seed: 1.5 })).toBe(false);
     expect(decodes(TestSettings, { chaos: { fail_request_every: 1 } })).toBe(
       false,
     );
