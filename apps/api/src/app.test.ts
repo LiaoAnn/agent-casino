@@ -261,7 +261,17 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     expect(e.path).toMatch(pattern);
   });
 
-  it.each(ENDPOINTS)(
+  // Real handlers now; routes/room.test.ts covers them (T09).
+  const IMPLEMENTED = new Set([
+    'lobby.createRoom',
+    'lobby.joinRoom',
+    'room.wait',
+    'room.state',
+    'room.act',
+    'room.leave',
+  ]);
+
+  it.each(ENDPOINTS.filter(e => !IMPLEMENTED.has(e.name)))(
     '$name ($method $path) answers 500 internal "not implemented"',
     async ({ name: _name, route: _route, auth, ...request }) => {
       const authorization =
@@ -535,7 +545,9 @@ describe('secrets come only from env', () => {
       authorization: `Bearer ${token}`,
     });
     const tokenA = await roomToken({ secret: 'secret-a' });
-    await expectStub(await call(state(tokenA), envA));
+    // Past auth, the fake env has no room: anything but invalid_token.
+    const passed = await readError(await call(state(tokenA), envA));
+    expect(passed.code).not.toBe('invalid_token');
     await expectError(await call(state(tokenA), envB), 'invalid_token');
   });
 });
