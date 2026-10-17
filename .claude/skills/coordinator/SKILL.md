@@ -1,20 +1,23 @@
 ---
 name: coordinator
-description: 當 coordinator（敏捷團隊的 scrum master）的 SOP：看板、用 t3 為 Ready 的 ticket 開 worktree thread 派工、追進度、把需要人決定的事整理給人、每一波結束的回顧。人要你派工、問進度、或 ticket thread 通知你時使用。
+description: 當 coordinator（敏捷團隊的 scrum master）的 SOP：看板、用 t3 為 Ready 的 ticket 開 worktree thread 派工、追進度、把需要人決定的事整理給人、每一波結束的回顧。只由人輸入 /coordinator 啟動。
+disable-model-invocation: true
 ---
 
 # Coordinator
 
-你不寫程式。你讓 ticket 一張接一張往前走，讓人只需要處理「等你核准」和「卡住」兩種事。
+人輸入 `/coordinator` 之後，這個 thread 在整個 session 裡都是 coordinator。同一時間只會有一個。
+
+你不寫程式。你讓 ticket 一張接一張往前走，讓人只需要處理設計問題和非人不可的事。
 
 | 角色 | 是誰 | 負責 |
 | --- | --- | --- |
-| PO | Ann | 核准 🔒 ticket、決定範圍與合約變更、同意部署 |
-| Coordinator | 跑在 main checkout 的 Local thread | 看板、派工、追進度、整理要人決定的事、回顧 |
+| PO | Ann | 回答設計問題、同意部署正式環境與呼叫外部服務 |
+| Coordinator | 人輸入 `/coordinator` 的 thread（main checkout 的 Local thread） | 看板、派工、追進度、整理要人決定的事、回顧 |
 | Ticket thread | 每張 ticket 一個，各自一個 t3 worktree | 照 `ticket-workflow` skill 從實作做到合併 |
 
 ## 每一輪
-人叫你、或 ticket thread 用 `t3_thread_send` 通知你時，跑一輪：
+被 `/coordinator` 啟動時、人問進度時、或 ticket thread 用 `t3_thread_send` 通知你時，跑一輪：
 
 1. `git -C /data/code/agent-casino pull --ff-only`，讓 `main` 跟上已合併的 PR。
 2. 跑 `scripts/board.sh` 看每張 ticket 的狀態。狀態全部由依賴、本地 branch 和 PR 推算，不要手動記。
@@ -47,13 +50,18 @@ description: 當 coordinator（敏捷團隊的 scrum master）的 SOP：看板�
 
 開完記下回傳的 threadId，用 `t3_thread_read` 確認它開始工作了。
 
+## ticket thread 卡住時
+- **自我檢查三輪還過不了**：先自己重新規劃，例如把 ticket 拆小、換一個新 thread 從頭做。還是不行才放進「等你」。
+- **設計問題**（規格不合理、互相矛盾、範圍不對、要改合約）：不要自己裁決，放進「等你」問人。人決定後，改 `docs/tickets.md` 或 skill，commit 到 `main` 並 push，再轉告 ticket thread。
+- **部署正式環境、呼叫外部服務**：放進「等你」，人同意後轉告。每次都要問，之前的同意不算數。
+
 ## 等你
 需要人決定的事整理成清單，每項一段：
 - 哪張 ticket、哪個 thread（`[標題](t3-thread://v1/<threadId>)`）、PR 網址。
-- 要人決定什麼（核准合併、改範圍、改合約、部署、外部服務）。
+- 要人決定什麼，有選項就列出選項和你的建議。
 - 證據摘要：改了什麼、驗證結果、可以點的 worktree 網址。
 
-人同意核准後，用 `t3_thread_send` 轉告那個 ticket thread 合併。
+人回答後，用 `t3_thread_send` 轉告那個 ticket thread。
 
 ## 回顧
 同一波（`docs/tickets.md` 的分波表）的 ticket 都 Done 後：

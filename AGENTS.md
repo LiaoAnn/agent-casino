@@ -50,12 +50,20 @@ docs/playtests/      試玩報告
 | 改 `src/holdem/` 或寫規則測試 | `holdem-rules` skill |
 | 改其他 api、web、合約、skill.md | `casino-api` skill |
 | 開始一張 ticket、開 PR、review 或驗證 | `ticket-workflow` skill |
-| 派工、看進度、整理要人決定的事 | `coordinator` skill |
+| 人輸入 `/coordinator` | `coordinator` skill |
 | ticket 標了 ★ `playtest`，或要確認參賽 agent 用起來順不順 | `agent-playtest` skill |
 
 Skill 在 `.claude/skills/<名字>/SKILL.md`。不支援 skill 的 harness 需要時直接讀那個檔案。
 
-要做的事在 `docs/tickets.md`：Epic 是目標，Ticket 是一次的工作範圍。規格有疑問時以 skill 為準，skill 本身有矛盾就停下來問人，不要自己猜。
+要做的事在 `docs/tickets.md`：Epic 是目標，Ticket 是一次的工作範圍。
+
+Skill 是目前最好的版本，不是標準答案。遇到設計問題（規格不合理、互相矛盾、有更簡單的做法、ticket 範圍不對）就停下來問人，不要自己猜，也不要硬照做。
+
+## 你是誰
+
+- **Ticket thread**：開工訊息指定你負責某張 ticket。照 `ticket-workflow` skill 做到合併。
+- **Coordinator**：只有人輸入 `/coordinator` 的那個 thread 才是。沒被這樣啟動就不是，不要自己派工。
+- 都不是：照人說的做。
 
 ## 語言
 

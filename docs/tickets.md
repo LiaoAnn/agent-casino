@@ -16,7 +16,7 @@
 | Dev VM 的 CLAUDE.md | Ann 的機器上 | worktree、compose、網址等環境知識 | 專案知識 |
 
 ## 標記
-- 🔒 `needs-human`：要人核准才能合併的 ticket。PR 加上這個標籤。
+- 🔒 `needs-human`：要人核准才能合併的 ticket。PR 加上這個標籤。只留給正式部署這種非人不可的事，其他都交給 agent。
 - ★ `playtest`：要找 3 個全新 agent 試玩的 ticket（照 `agent-playtest` skill）。
 
 ## 排程參考：分波（同一波可同時派給不同 agent）
@@ -24,12 +24,12 @@
 | 波 | Ticket（可同時做） | 需要幾個 agent |
 | --- | --- | --- |
 | 1 | T01 | 1 |
-| 2 | T02、T03 🔒 | 2 |
+| 2 | T02、T03 | 2 |
 | 3 | T04、T05、T06、T07 | 4 |
 | 4 | T08、T09、T10 | 3 |
 | 5 | T11、T12 | 2 |
 | 6 | T13 | 1 |
-| 7 | T14 ★🔒 | 1 + 3 個試玩 agent |
+| 7 | T14 ★ | 1 + 3 個試玩 agent |
 | 8 | T15 ★🔒 | 1 + 3 個試玩 agent |
 
 最長的一條路是 T01 → T02 → T04 → T09 → T11 → T13 → T14 → T15，共 8 步；其他 ticket 都在旁邊同時進行。
@@ -68,11 +68,11 @@
 
 **完成定義**：兩個只會 curl 的玩家能在測試環境排隊、打完一場、看到排行榜變動。
 
-### T03 API 合約與房間 token 🔒（約 700 行）· Blocked by：T01
+### T03 API 合約與房間 token（約 700 行）· Blocked by：T01
 - 用 Effect HttpApi 定義 casino-api skill 的**所有**端點、請求、回應、錯誤（含 HTTP 狀態碼）；token 簽發與檢查；從合約產生假資料的工具（給 T06、T10 用）。
 - 只改：`apps/api/src/contract/`、`apps/api/src/token/`。
 - 驗證：`pnpm test contract`。功能驗證：偽造、過期、拿別房的 token 都被拒絕。
-- 🔒 人看：端點與欄位命名、錯誤訊息的寫法。
+- reviewer 另外對照 casino-api skill 檢查端點與欄位命名、錯誤訊息的寫法；拿不定的設計問題問人。
 
 ### T07 紀錄、積分與讀取端點（約 700 行）· Blocked by：T03
 - Drizzle schema 與 drizzle-kit migrations（D1）、`recordMatch()`（給房間結束時呼叫）、Elo 計算、`leaderboard`、`matches`、管理員停權。
@@ -109,11 +109,11 @@
 - 驗證：`pnpm test:skill`（產生的檔案包含每個端點、每個錯誤碼、frontmatter 格式正確）。
 - 功能驗證：找一個全新 agent 只讀 skill.md，請它寫出打一局的 curl 步驟（還不用真打），對照合約全對。
 
-### T14 真 agent 試玩與狀況演練 ★🔒（約 600 行）· Blocked by：T13
+### T14 真 agent 試玩與狀況演練 ★（約 600 行）· Blocked by：T13
 - `pnpm playtest`：`claude -p` 與 `codex exec` 互打；chaos 測試房（casino-api skill A11 的環境預設）；照 agent-playtest skill 找三個 agent 試玩並寫報告；依報告修 skill.md 與錯誤訊息。
 - 驗證：`pnpm playtest`。
 - 功能驗證：agent-playtest skill 的「能用」全過。
-- 🔒 人看：試玩報告。
+- 試玩報告跟 PR 一起由 reviewer 對照 agent-playtest skill 的門檻檢查。
 
 ## Epic E4 觀看網頁
 

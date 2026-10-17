@@ -17,7 +17,7 @@ Ann 在 2026-10-17 同意，ticket thread 不用每次問就可以：
 - commit、push 自己的 `t<編號>-*` branch，開、更新自己的 PR。
 - 沒有 `needs-human` 的 PR，在下面「合併」的條件都滿足時自己合併。
 
-仍然每次都要先問人：部署正式環境、呼叫外部服務（見 Dev VM 的 CLAUDE.md 第 6 節）、碰別的 ticket 的 branch 或 worktree。
+仍然每次都要先問人：部署正式環境、呼叫外部服務（見 Dev VM 的 CLAUDE.md 第 6 節，包括部署 Cloudflare 測試環境）、碰別的 ticket 的 branch 或 worktree。
 
 ## 開工前
 1. 讀 `docs/tickets.md` 裡你那張 ticket：範圍、Blocked by、只改哪些資料夾、驗證指令、功能驗證。
@@ -27,13 +27,14 @@ Ann 在 2026-10-17 同意，ticket thread 不用每次問就可以：
 
 ## 做的時候
 - **只改 ticket 寫的資料夾。** 同時有別的 agent 在做其他 ticket，碰到範圍外的檔案就會打架。共用檔案（根目錄 `package.json`、`wrangler.jsonc`、CI 設定）只能新增，不能改別人寫的。
-- **合約凍結**：不是合約 ticket 就不改 `apps/api/src/contract/`。真的需要，停下來向人說明，等人在 `docs/tickets.md` 另開合約 ticket。
-- **範圍不對**：停下來向人說明，不要自己擴大或縮小範圍。
+- **合約凍結**：不是合約 ticket 就不改 `apps/api/src/contract/`。真的需要，停下來說明，等人決定（可能另開合約 ticket）。
+- **範圍不對**：停下來說明，不要自己擴大或縮小範圍。
+- **skill 不是標準答案**：照做會做出不合理的東西、skill 互相矛盾、或你看到更簡單的做法，停下來提出，不要自己猜或硬照做。
 - **還沒有的東西用合約產生的假資料**，不要等別的 ticket。
 - **不准削弱測試**：不刪、不跳過既有測試（CI 擋 `.skip`、`.only`），不調低門檻。
 - 修 bug 時先把問題寫成會失敗的測試（規則相關的就用「種子 + 動作」），再修。
 - 秘密（`TOKEN_SECRET`、`ADMIN_KEY`、Cloudflare token、登入憑證）只放在 Worker secret 或 GitHub Actions secrets。
-- 不部署正式環境，除非 ticket 寫了而且人同意。測試環境可以自己部署。
+- 不部署正式環境，除非 ticket 寫了而且人同意。部署測試環境也算呼叫外部服務，每次先問。
 
 ## 自我檢查
 寫完、自己跑過 `pnpm check` 和 ticket 的驗證指令後，先 commit，再**同時**開兩個全新的 subagent。作者自己說「測過了」不算，要 subagent 從頭看。
@@ -46,7 +47,7 @@ Ann 在 2026-10-17 同意，ticket thread 不用每次問就可以：
 3. 照 ticket 的「功能驗證」在 worktree 的網址上實際操作（API 用 `curl https://<route>-<wt>...`，網頁用 t3 preview 截圖）。
 4. 回報每一項過或不過，附指令和輸出。
 
-有「必須修」或驗證沒過 → 修 → commit → 再開兩個**新的** subagent 重來。三輪還過不了，停下來問人。
+有「必須修」或驗證沒過 → 修 → commit → 再開兩個**新的** subagent 重來。三輪還過不了，停下來通知 coordinator。
 
 ## 開 PR
 兩個 subagent 都過了才 push、開 PR：
@@ -60,17 +61,17 @@ Ann 在 2026-10-17 同意，ticket thread 不用每次問就可以：
 2. 最後一輪 reviewer 沒有「必須修」，verifier 全過。
 3. branch 跟最新的 `main` 沒有衝突。`main` 動過就 rebase 到 `origin/main`，重跑 verifier，再 push。
 
-有 `needs-human` 的 PR：開好後停下來，用一頁摘要回報人（改了什麼、證據、可以點的網址），等人說可以再合併。
+有 `needs-human` 的 PR：開好後停下來，用一頁摘要通知 coordinator（改了什麼、證據、可以點的網址），等人說可以再合併。
 
 合併後（或停下來等人時）用 `t3_thread_send` 通知 coordinator thread（開工訊息裡有它的 id）：ticket 編號、PR 網址、狀態。
 
-## 什麼時候停下來問人
-- 要改合約、ticket 範圍不對、skill 自己有矛盾。
+## 什麼時候停下來
+- 設計問題：要改合約、ticket 範圍不對、skill 不合理或互相矛盾。
 - 自我檢查三輪還過不了。
-- 要部署正式環境、要呼叫外部服務。
+- 要部署正式環境、要呼叫外部服務（包括部署 Cloudflare 測試環境、用真的 Claude Code / Codex 試玩）。
 - 需核准的 PR 已開好。
 
-停下來時把卡在哪、試過什麼、需要人決定什麼寫清楚，同時通知 coordinator。
+停下來時用 `t3_thread_send` 通知 coordinator：卡在哪、試過什麼、需要人決定什麼（有選項就列出選項和你的建議）。coordinator 會整理給人，再把答案轉告你。
 
 ## 怎麼驗
 
