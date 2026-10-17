@@ -44,6 +44,13 @@
 - 只改：根目錄設定、`.github/`、`apps/*` 的骨架。
 - 驗證：`pnpm check` 全過。功能驗證：啟動 api 後 `curl /health` 回 ok。
 
+### T16 拿掉範本的本機 cron 排程器（約 300 行，大多是刪除）· Blocked by：T01
+- 平台不用 cron（超時代打用 Room DO 的 alarm），範本附的本機 cron 排程器用不到，還有雙堆疊環境的 bug（`dev-servers.mjs` 的 `wranglerOrigin()` 把 `127.0.0.1` 和 `::1` 當成兩台伺服器）。整個拿掉，需要時再從 git 歷史找回來。
+- 拿掉：`.devcontainer/devcontainer.json` 的 `postStartCommand`、`.devcontainer/scripts/` 的 `cron.*` 與 `dev-servers.*`、`.devcontainer/cron-targets.jsonc`（如果有）、根目錄 `package.json` 的 `dev:cron`、`test:cron` 和只為它們存在的依賴、`knip.jsonc` 裡相關的設定、README 的「Local cron triggers」段與指令表裡的兩列。
+- 只改：上面列的檔案。`post-create.sh` 和其他 devcontainer 設定不動。
+- 驗證：`pnpm check` 全過（knip 不再報出多的依賴或檔案）。
+- 功能驗證：`wt-up` 重建後容器正常起來，`/health` 回 `{"ok":true}`，容器裡沒有 cron 程序在跑。
+
 ## Epic E1 德州規則（`apps/api/src/holdem`，純函式）
 
 **完成定義**：不碰網路就能用「種子 + 動作」打完並重播任何一場，1 萬手 fuzz 0 違規。
