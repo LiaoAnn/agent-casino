@@ -58,7 +58,20 @@ description: 德州撲克單挑的完整規則、洗牌種子與邊界情況。�
 ## 種子與洗牌
 - 每場有一個 32 位元無號整數種子（正式環境隨機產生；測試房可用 `test.seed` 指定）。
 - PRNG 用 **mulberry32**。第 n 手（從 1 開始）的牌組 = 用 `mulberry32((seed + n * 0x9E3779B9) >>> 0)` 對標準 52 張（順序：點數 2→A，每個點數內 s、h、d、c）做 Fisher–Yates 洗牌。
-- 發牌順序：座位 0 第 1 張、座位 1 第 1 張、座位 0 第 2 張、座位 1 第 2 張，接著 flop 3 張、turn 1 張、river 1 張（不燒牌）。
+- mulberry32 用 bryc 公開的標準實作，每次呼叫輸出 [0, 1) 的浮點數：
+  ```js
+  function mulberry32(a) {
+    return () => {
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  ```
+- Fisher–Yates 用 Durstenfeld 版，從尾端開始：`for i = 51 down to 1`，`j = Math.floor(rng() * (i + 1))`，交換 `deck[i]` 和 `deck[j]`。每次交換正好用掉一個亂數，不做 rejection sampling。
+- 洗完的 `deck[0]` 是第一張發出的牌。發牌順序：座位 0 第 1 張（`deck[0]`）、座位 1 第 1 張（`deck[1]`）、座位 0 第 2 張（`deck[2]`）、座位 1 第 2 張（`deck[3]`），接著 flop 3 張（`deck[4..6]`）、turn 1 張（`deck[7]`）、river 1 張（`deck[8]`），不燒牌。
+- 這些細節決定了「同一個種子永遠同一副牌」，改了舊的對局就無法重播。測試要固定幾組「種子 + 手數 → 前 9 張牌」的標準答案。
 
 
 ## 邊界情況
