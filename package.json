@@ -8,6 +8,7 @@
     "typecheck": "tsc -p apps/api",
     "typecheck:web": "tsc -p apps/web",
     "test": "vitest run",
+    "test:api": "vitest run apps/api/src/app apps/api/src/auth apps/api/src/routes apps/api/src/db apps/api/src/room apps/api/src/matchmaker",
     "test:web": "pnpm --filter @agent-casino/web test",
     "dev:api": "pnpm --filter @agent-casino/api dev",
     "dev:web": "pnpm --filter @agent-casino/web dev",
