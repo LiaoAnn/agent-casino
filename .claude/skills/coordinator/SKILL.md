@@ -21,7 +21,7 @@ disable-model-invocation: true
 
 1. `git -C /data/code/agent-casino pull --ff-only`，讓 `main` 跟上已合併的 PR。
 2. 跑 `scripts/board.sh` 看每張 ticket 的狀態。狀態全部由依賴、本地 branch 和 PR 推算，不要手動記。
-3. 為 Ready 的 ticket 派工（見下面「派工」）。同時進行的 ticket thread 最多 4 個，VM 資源是共用的。
+3. 為 Ready 的 ticket 派工（見下面「派工」）。同時進行的 ticket thread 最多 4 個；VM 資源是共用的，派之前看 `free -h`，可用記憶體不到 1.5 GB 就先不派，等前面的做完。
 4. 回報人：看板（給人看時用 `html_render` 畫成看板），加上「等你」清單。
 
 狀態的意思：
@@ -40,12 +40,39 @@ disable-model-invocation: true
 
 - `title`：`T<編號> <中文標題>`
 - `workspaceStrategy`：`{"type":"worktree","baseRef":"main","branch":"t<編號>-<簡短英文>","startFromOrigin":true}`
-- `message`：
+- `message`：照下面的模板寫。
+
+### 開工訊息
+把 ticket thread 當成**能力很強、但第一天來的新人**：它不知道這個平台在做什麼、前面的 ticket 做了什麼、程式碼放在哪、這台 VM 有什麼坑。開工訊息要讓它不用回頭問就能開始。派工前先做功課：讀這張 ticket、它依賴的 ticket 的 PR 內文（`gh pr view <號碼>`）、`main` 上相關的程式碼，以及前面 ticket thread 通知你的提醒。
 
 ```
-你負責 docs/tickets.md 的 T<編號>。照 ticket-workflow skill 從頭做到合併，中間不用等我。
+你負責 docs/tickets.md 的 T<編號>「<標題>」。照 ticket-workflow skill 從頭做到合併，中間不用等我。
+
+## 這個平台在做什麼
+<兩三句：Agent Casino 是什麼、參賽 agent 怎麼用、人怎麼看。>
+
+## 這張 ticket 為什麼重要
+<它屬於哪個 Epic、Epic 的完成定義；後面哪些 ticket 會用到它、會怎麼用（例如「T09 的 Room DO 會呼叫你的開局、執行動作、給某座位看局面」）。>
+
+## 範圍
+<貼 docs/tickets.md 這張 ticket 的原文：要做什麼、只改哪些資料夾、驗證指令、功能驗證。>
+規格在 <skill 名稱> skill；有疑問以 skill 為準，skill 不合理就停下來問。
+
+## 現在的程式碼
+<前面合併了哪些 ticket、各自留下什麼可以用（檔案路徑、函式、指令）；這張 ticket 要接在哪裡；還沒有的東西用什麼代替（例如合約產生的假資料）。>
+
+## 這台 VM 的注意事項
+- 指令在容器裡跑：T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "<指令>"。git 和 gh 在 VM 上跑。
+- 跑 pnpm check 前先 export KNIP_DISABLE_RAW_TRANSFER=1，不要寫進 repo。
+- api dev server：pnpm dev:api --ip 0.0.0.0 --port 8787，開在 tmux，健康檢查 /health，用完就關。
+<其他前面 ticket 踩過、跟這張有關的坑。>
+
+## 流程與授權
+/plan-it → /implement-plan → 整體 /review-change → 獨立 verifier → PR → 合併，細節見 ticket-workflow skill。
 授權：可以 commit、push 這個 branch、開 PR；沒有 needs-human 的 PR 條件滿足就自己合併。部署正式環境、呼叫外部服務仍要先問人。
-完成、停下來等人、或卡住時，用 t3_thread_send 通知 coordinator thread <你自己的 threadId>：ticket 編號、PR 網址、狀態、需要人決定什麼。
+
+## 回報
+完成、停下來等人、或卡住時，用 t3_thread_send 通知 coordinator thread <你自己的 threadId>：ticket 編號、PR 網址、狀態、需要人決定什麼，以及給後面 ticket 的提醒。
 ```
 
 開完記下回傳的 threadId，用 `t3_thread_read` 確認它開始工作了。

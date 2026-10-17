@@ -2,7 +2,7 @@
 
 ## 做了什麼
 
-<!-- 對照 docs/tickets.md 的這張 ticket：做了哪些、改了哪些資料夾。 -->
+<!-- /plan-it 的摘要：Why、每個 slice 的結果。對照 docs/tickets.md 的這張 ticket，改了哪些資料夾。 -->
 
 ## 驗證
 
@@ -14,7 +14,7 @@
 
 ## Review
 
-<!-- reviewer subagent 的結論：最後一輪沒有「必須修」；之前幾輪修了什麼；留下來沒修的建議。 -->
+<!-- 整體 /review-change 的結論：跑了哪些 lenses、修了哪些 Blocker、Residual Risk。 -->
 
 ## 範圍外與風險
 
