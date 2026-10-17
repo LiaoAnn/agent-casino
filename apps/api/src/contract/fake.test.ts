@@ -1,6 +1,18 @@
 import { Exit, Schema } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { compareHands, evaluateHand } from '../holdem/hand';
+import { checkHand } from '../holdem/invariants';
+import {
+  applyAction,
+  type HandRecord,
+  type HistoryEvent,
+  type LegalAction,
+  legalActions,
+  type MatchConfig,
+  type MatchState,
+  startMatch,
+} from '../holdem/match';
+import { replay } from '../holdem/replay';
 import { dealHand } from '../holdem/shuffle';
 import { makeFakeData } from './fake';
 import { Leaderboard, MatchDetail, MatchList } from './schemas';
@@ -18,6 +30,43 @@ const allSummaries = (data: ReturnType<typeof makeFakeData>) => {
     pages.push(data.matches({ before: next }));
   }
   return { pages, summaries: pages.flatMap(page => page.matches) };
+};
+
+const configOf = (detail: MatchDetail): MatchConfig => ({
+  seed: detail.seed,
+  hands: detail.settings.hands,
+  startingStack: detail.settings.starting_stack,
+});
+
+const eventsOf = (detail: MatchDetail): HistoryEvent[] =>
+  detail.hands.flatMap(hand => hand.events.map(event => ({ ...event })));
+
+/** Each non-blind event of a match with the engine state it was made in. */
+const walk = (detail: MatchDetail) => {
+  let state = startMatch(configOf(detail));
+  const steps: {
+    event: HistoryEvent;
+    before: MatchState;
+    legal: LegalAction[];
+  }[] = [];
+  for (const event of eventsOf(detail)) {
+    if (event.type === 'post_blind') continue;
+    const legal = legalActions(state);
+    steps.push({ event, before: state, legal });
+    const result = applyAction(
+      state,
+      event.seat,
+      event.type === 'raise'
+        ? { type: 'raise', amount: event.amount ?? Number.NaN }
+        : { type: event.type },
+      { timeout: event.timeout },
+    );
+    if (!result.ok) {
+      throw new Error(`${detail.match_id}: engine rejected ${result.message}`);
+    }
+    state = result.state;
+  }
+  return steps;
 };
 
 describe('makeFakeData', () => {
@@ -161,5 +210,144 @@ describe('makeFakeData', () => {
         expect(summary.rated).toBe(false);
       }
     }
+  });
+
+  it('replays every match to exactly its hands with the holdem engine', () => {
+    for (const detail of details) {
+      const result = replay(configOf(detail), eventsOf(detail));
+      expect(result, detail.match_id).toMatchObject({ ok: true });
+      if (!result.ok) continue;
+      expect(result.hands, detail.match_id).toEqual(detail.hands);
+      expect(detail.final_stacks, detail.match_id).toEqual(
+        detail.hands.at(-1)?.stacks ?? [
+          detail.settings.starting_stack,
+          detail.settings.starting_stack,
+        ],
+      );
+      if (detail.result === 'cancelled') expect(detail.hands).toEqual([]);
+      if (
+        detail.result === 'seat0_win' ||
+        detail.result === 'seat1_win' ||
+        detail.result === 'draw'
+      ) {
+        // A finished match ran every hand or ended when a player busted.
+        expect(result.state.over, detail.match_id).toBe(true);
+      }
+      expect(detail.hands.length).toBeLessThanOrEqual(detail.settings.hands);
+      if (detail.hands.length < detail.settings.hands) {
+        const last = detail.hands.at(-1);
+        if (detail.result !== 'void' && detail.result !== 'cancelled') {
+          expect(last?.stacks, detail.match_id).toContain(0);
+        }
+      }
+    }
+  });
+
+  it('keeps every hand within the holdem invariants', () => {
+    for (const detail of details) {
+      for (const hand of detail.hands) {
+        expect(
+          checkHand(hand as unknown as HandRecord, configOf(detail)),
+          `${detail.match_id} hand ${hand.hand_number}`,
+        ).toEqual([]);
+      }
+    }
+  });
+
+  it('times out only to a check, or to a fold when there is a bet to call', () => {
+    let timeouts = 0;
+    for (const detail of details) {
+      for (const { event, legal } of walk(detail)) {
+        if (event.timeout !== true) continue;
+        timeouts++;
+        const canCheck = legal.some(action => action.type === 'check');
+        expect(event.type, detail.match_id).toBe(canCheck ? 'check' : 'fold');
+      }
+    }
+    expect(timeouts).toBeGreaterThan(0);
+  });
+
+  it('counts only the chips the winner wins as the pot', () => {
+    const preflopFolds = details.flatMap(detail =>
+      detail.hands
+        .filter(hand => hand.ended_by === 'fold' && hand.board.length === 0)
+        .map(hand => ({
+          hand,
+          blinds: hand.events
+            .filter(e => e.type === 'post_blind')
+            .map(e => e.amount),
+          actions: hand.events
+            .filter(e => e.type !== 'post_blind')
+            .map(e => e.type),
+        }))
+        .filter(({ blinds }) => blinds.join() === '1,2'),
+    );
+    // Button raises, big blind folds: the raise beyond 2 goes back.
+    const raiseFold = preflopFolds.filter(
+      ({ actions }) => actions.join() === 'raise,fold',
+    );
+    expect(raiseFold.length).toBeGreaterThan(0);
+    for (const { hand } of raiseFold) expect(hand.pot).toBe(4);
+    // Button folds the small blind: the big blind's extra 1 goes back.
+    const buttonFold = preflopFolds.filter(
+      ({ actions }) => actions.join() === 'fold',
+    );
+    expect(buttonFold.length).toBeGreaterThan(0);
+    for (const { hand } of buttonFold) expect(hand.pot).toBe(2);
+  });
+
+  it('covers a fold after the flop, a timed-out check and an all-in', () => {
+    const hands = details.flatMap(detail => detail.hands);
+    expect(
+      hands.some(
+        h =>
+          h.ended_by === 'fold' &&
+          (h.board.length === 3 || h.board.length === 4),
+      ),
+    ).toBe(true);
+    expect(
+      hands.some(h =>
+        h.events.some(e => e.timeout === true && e.type === 'check'),
+      ),
+    ).toBe(true);
+    const allIn = details.some(detail =>
+      walk(detail).some(({ event, before, legal }) => {
+        const stack = before.stacks[event.seat];
+        if (event.type === 'call') {
+          const call = legal.find(action => action.type === 'call');
+          return call?.type === 'call' && call.amount === stack;
+        }
+        if (event.type === 'raise') {
+          return event.amount === before.bets[event.seat] + stack;
+        }
+        return false;
+      }),
+    );
+    expect(allIn).toBe(true);
+  });
+
+  it('covers every case the match page shows', () => {
+    const hands = details.flatMap(detail => detail.hands);
+    expect(new Set(details.map(d => d.result))).toEqual(
+      new Set(['seat0_win', 'seat1_win', 'draw', 'void', 'cancelled']),
+    );
+    expect(details.find(d => d.hands.length === 0)?.result).toBe('cancelled');
+    expect(details.some(d => d.rating_changes !== null)).toBe(true);
+    expect(details.some(d => d.rating_changes === null)).toBe(true);
+    expect(
+      hands.some(h => h.ended_by === 'showdown' && h.winner_seat !== null),
+    ).toBe(true);
+    expect(hands.some(h => h.ended_by === 'fold')).toBe(true);
+    const split = hands.find(h => h.winner_seat === null);
+    expect(split?.ended_by).toBe('showdown');
+    expect(hands.some(h => h.events.some(e => e.timeout === true))).toBe(true);
+    expect(hands.some(h => h.events.some(e => !e.timeout))).toBe(true);
+    expect(hands.some(h => h.events.some(e => e.type === 'raise'))).toBe(true);
+    expect(hands.some(h => h.events.some(e => e.type === 'call'))).toBe(true);
+    const deltas = details.flatMap(d =>
+      (d.rating_changes ?? []).map(c => c.after - c.before),
+    );
+    expect(deltas.some(d => d > 0)).toBe(true);
+    expect(deltas.some(d => d < 0)).toBe(true);
   });
 });

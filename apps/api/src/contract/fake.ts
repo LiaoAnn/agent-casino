@@ -1,9 +1,17 @@
 // Fake data shaped by the contract, for the web (T06, T10) until the real read
-// endpoints exist. Deterministic per seed and self-consistent: chips add up,
-// cards are not repeated within a hand, and the leaderboard is the Elo result
-// of the rated matches. Cards come from each match's seed through the real
-// dealer, and showdowns go to the better hand.
+// endpoints exist. Deterministic per seed and self-consistent: every hand is
+// played by the holdem engine from the match seed, and the leaderboard is the
+// Elo result of the rated matches.
 import { compareHands, evaluateHand } from '../holdem/hand';
+import {
+  type Action,
+  applyAction,
+  legalActions,
+  type MatchConfig,
+  type MatchState,
+  type Street,
+  startMatch,
+} from '../holdem/match';
 import { dealHand, mulberry32 } from '../holdem/shuffle';
 import type {
   Leaderboard,
@@ -13,9 +21,6 @@ import type {
   MatchSummary,
 } from './schemas';
 import { SETTINGS_DEFAULTS } from './schemas';
-
-type Seat = 0 | 1;
-type HistoryEntry = MatchHand['events'][number];
 
 const PAGE_SIZE = 20;
 const PLAYERS = ['alice', 'Bob', 'carol', 'dave-7', 'eve_x', 'Frank', 'grace'];
@@ -30,69 +35,121 @@ function makeRandom(seed: number) {
 }
 type Random = ReturnType<typeof makeRandom>;
 
-function playHand(
-  random: Random,
-  matchSeed: number,
-  handNumber: number,
-  stacks: [number, number],
-): MatchHand {
-  const button = ((handNumber - 1) % 2) as Seat;
-  const big = (1 - button) as Seat;
-  const { holeCards, board } = dealHand(matchSeed, handNumber);
-  const events: HistoryEntry[] = [
-    { seat: button, street: 'preflop', type: 'post_blind', amount: 1 },
-    { seat: big, street: 'preflop', type: 'post_blind', amount: 2 },
-  ];
-  // Each hand moves at most 2 chips, so nobody runs out within 200 hands of
-  // the default 40-chip stacks and no all-in case is needed.
-  const scenario = random.pick(['fold', 'steal', 'show', 'show'] as const);
-  const paid: [number, number] = [0, 0];
-  let winner: Seat | null;
-  if (scenario === 'fold') {
-    const timeout = random.int(5) === 0 ? { timeout: true as const } : {};
-    events.push({ seat: button, street: 'preflop', type: 'fold', ...timeout });
-    paid[button] = 1;
-    paid[big] = 2;
-    winner = big;
-  } else if (scenario === 'steal') {
-    events.push({ seat: button, street: 'preflop', type: 'raise', amount: 6 });
-    events.push({ seat: big, street: 'preflop', type: 'fold' });
-    paid[button] = 6;
-    paid[big] = 2;
-    winner = button;
-  } else {
-    events.push({ seat: button, street: 'preflop', type: 'call', amount: 1 });
-    events.push({ seat: big, street: 'preflop', type: 'check' });
-    for (const street of ['flop', 'turn', 'river'] as const) {
-      events.push({ seat: big, street, type: 'check' });
-      events.push({ seat: button, street, type: 'check' });
-    }
-    paid[0] = 2;
-    paid[1] = 2;
-    const [first, second] = holeCards.map(hole =>
-      evaluateHand([...hole, ...board]),
-    ) as [ReturnType<typeof evaluateHand>, ReturnType<typeof evaluateHand>];
-    const order = compareHands(first, second);
-    winner = order === 0 ? null : order > 0 ? 0 : 1;
-  }
-  const pot = paid[0] + paid[1];
-  const showdown = scenario === 'show';
-  for (const seat of [0, 1] as const) {
-    const won = winner === null ? pot / 2 : winner === seat ? pot : 0;
-    stacks[seat] += won - paid[seat];
-  }
+// The only place a match seed is made.
+const matchSeed = (random: Random): number =>
+  Math.floor(random.next() * 0x1_0000_0000);
 
-  return {
-    hand_number: handNumber,
-    button_seat: button,
-    board: showdown ? board : [],
-    hole_cards: showdown ? holeCards : null,
-    events,
-    winner_seat: winner,
-    pot,
-    ended_by: showdown ? 'showdown' : 'fold',
-    stacks: [stacks[0], stacks[1]],
-  };
+// A seed whose first hand splits the pot at showdown.
+function splitSeed(random: Random): number {
+  for (;;) {
+    const seed = matchSeed(random);
+    const { holeCards, board } = dealHand(seed, 1);
+    const [a, b] = holeCards.map(hole => evaluateHand([...hole, ...board]));
+    if (a && b && compareHands(a, b) === 0) return seed;
+  }
+}
+
+// How a hand goes, so the data shows every case the match page renders:
+// - fold: the button folds the small blind;
+// - steal: the button raises to 6 and the big blind folds;
+// - bet_fold: checked to `street`, where the big blind bets and the button
+//   folds, leaving part of the board shown;
+// - show: checked or called down to a showdown;
+// - all_in: the button moves all in and the big blind calls or folds.
+type Plan =
+  | { kind: 'fold' | 'steal' | 'show' }
+  | { kind: 'bet_fold'; street: Street }
+  | { kind: 'all_in'; call: boolean };
+
+function pickPlan(random: Random): Plan {
+  const roll = random.int(20);
+  if (roll === 0) return { kind: 'all_in', call: random.int(3) > 0 };
+  if (roll < 5) return { kind: 'fold' };
+  if (roll < 9) return { kind: 'steal' };
+  if (roll < 12) {
+    return { kind: 'bet_fold', street: random.pick(['flop', 'turn'] as const) };
+  }
+  return { kind: 'show' };
+}
+
+// The next move of the seat to act. A timeout makes the engine's timeout
+// move (check if possible, else fold), so only those are marked as one.
+function nextMove(
+  state: MatchState,
+  plan: Plan,
+  random: Random,
+): { action: Action; timeout: boolean } {
+  const legal = legalActions(state);
+  const raise = legal.find(action => action.type === 'raise');
+  const facingBet = !legal.some(action => action.type === 'check');
+  const passive: Action = facingBet ? { type: 'call' } : { type: 'check' };
+  const raised = state.history.some(event => event.type === 'raise');
+  const fold = () => ({
+    action: { type: 'fold' } as const,
+    timeout: random.int(5) === 0,
+  });
+
+  switch (plan.kind) {
+    case 'fold':
+      return facingBet ? fold() : { action: passive, timeout: false };
+    case 'steal':
+      if (!raised && raise?.type === 'raise') {
+        const amount = Math.min(Math.max(6, raise.min), raise.max);
+        return { action: { type: 'raise', amount }, timeout: false };
+      }
+      return facingBet ? fold() : { action: passive, timeout: false };
+    case 'bet_fold':
+      if (state.street === plan.street) {
+        if (facingBet) return fold();
+        if (raise?.type === 'raise') {
+          return {
+            action: { type: 'raise', amount: raise.min },
+            timeout: false,
+          };
+        }
+      }
+      return { action: passive, timeout: false };
+    case 'all_in':
+      if (!raised && raise?.type === 'raise') {
+        return {
+          action: { type: 'raise', amount: raise.max },
+          timeout: false,
+        };
+      }
+      if (facingBet && !plan.call)
+        return { action: { type: 'fold' }, timeout: false };
+      return { action: passive, timeout: false };
+    case 'show':
+      return {
+        action: passive,
+        timeout: passive.type === 'check' && random.int(10) === 0,
+      };
+  }
+}
+
+// Plays a whole match with the engine; it stops when the hands run out or a
+// player is busted. A quiet match only has button folds; a split match
+// shows the first hand down.
+function playMatch(
+  random: Random,
+  config: MatchConfig,
+  style: 'quiet' | 'split' | 'mixed',
+): MatchHand[] {
+  let state = startMatch(config);
+  const hands: MatchHand[] = [];
+  const nextPlan = (): Plan =>
+    style === 'quiet' ? { kind: 'fold' } : pickPlan(random);
+  let plan: Plan = style === 'split' ? { kind: 'show' } : nextPlan();
+  while (!state.over && state.toAct !== null) {
+    const { action, timeout } = nextMove(state, plan, random);
+    const result = applyAction(state, state.toAct, action, { timeout });
+    if (!result.ok)
+      throw new Error(`Fake data broke a rule: ${result.message}`);
+    if (result.state.handNumber !== state.handNumber) plan = nextPlan();
+    hands.push(...result.finishedHands);
+    state = result.state;
+  }
+  return hands;
 }
 
 function roomId(random: Random): string {
@@ -135,26 +192,32 @@ export function makeFakeData(
     const first = random.pick(PLAYERS);
     const vsBot = random.int(6) === 0;
     const second = vsBot ? BOT : random.pick(PLAYERS.filter(p => p !== first));
-    const roll = random.int(15);
-    const cancelled = roll === 0;
-    const voided = roll === 1;
+    // Fixed slots, so every seed has each result the match page shows.
+    const cancelled = i % 15 === 3;
+    const voided = i % 15 === 8;
+    // Every hand a button fold over an even number of hands: a draw.
+    const quiet = i % 10 === 6;
+    const split = i % 10 === 1;
     const settings = {
       ...SETTINGS_DEFAULTS,
-      hands: random.pick([3, 5, 10]),
+      hands: quiet ? 10 : random.pick([3, 5, 10]),
     };
-    const stacks: [number, number] = [
+    const seed = split ? splitSeed(random) : matchSeed(random);
+    const hands = cancelled
+      ? []
+      : playMatch(
+          random,
+          {
+            seed,
+            hands: settings.hands,
+            startingStack: settings.starting_stack,
+          },
+          quiet ? 'quiet' : split ? 'split' : 'mixed',
+        );
+    const stacks = hands.at(-1)?.stacks ?? [
       settings.starting_stack,
       settings.starting_stack,
     ];
-    const matchSeed = Math.floor(random.next() * 0x1_0000_0000);
-    const hands: MatchHand[] = [];
-    for (
-      let n = 1;
-      !cancelled && n <= settings.hands && Math.min(...stacks) > 0;
-      n++
-    ) {
-      hands.push(playHand(random, matchSeed, n, stacks));
-    }
     const result = cancelled
       ? 'cancelled'
       : voided
@@ -192,7 +255,7 @@ export function makeFakeData(
       match_id: roomId(random),
       players: [first, second],
       settings,
-      seed: matchSeed,
+      seed,
       result,
       rated,
       ended_at: new Date(START_TIME + i * 37 * 60_000).toISOString(),

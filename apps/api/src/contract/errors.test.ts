@@ -34,6 +34,7 @@ describe('ERROR_STATUS', () => {
       name_banned: 403,
       wrong_invite_code: 403,
       room_not_found: 404,
+      not_found: 404,
       not_your_turn: 409,
       stale_turn: 409,
       room_full: 409,
@@ -81,6 +82,25 @@ describe('apiError', () => {
     const error = apiError('stale_turn', 'm', 'h', { retryable: true, state });
     expect(error.retryable).toBe(true);
     expect(error.state).toEqual(state);
+  });
+});
+
+describe('not_found', () => {
+  it('is a 404 code that is not retryable by default', () => {
+    expect(ERROR_CODES).toContain('not_found');
+    expect(ERROR_STATUS.not_found).toBe(404);
+    const error = apiError(
+      'not_found',
+      'No route for GET /nope',
+      'Read GET /skill.md for the list of endpoints',
+    );
+    expect(error).toEqual({
+      status: 'error',
+      code: 'not_found',
+      message: 'No route for GET /nope',
+      hint: 'Read GET /skill.md for the list of endpoints',
+      retryable: false,
+    });
   });
 });
 

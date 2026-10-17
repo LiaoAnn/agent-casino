@@ -15,6 +15,7 @@ export const ERROR_CODES = [
   'stale_turn',
   'invalid_action',
   'match_over',
+  'not_found',
   'unavailable',
   'internal',
 ] as const;
@@ -28,6 +29,8 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   name_banned: 403,
   wrong_invite_code: 403,
   room_not_found: 404,
+  // An unknown path, or a known path with the wrong method.
+  not_found: 404,
   not_your_turn: 409,
   stale_turn: 409,
   room_full: 409,
