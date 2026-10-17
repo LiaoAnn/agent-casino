@@ -239,7 +239,8 @@ function matchLegal(
       amount < offered.min ||
       amount > offered.max
     ) {
-      return `Raise amount is the street total to raise to and must be a whole number from ${offered.min} to ${offered.max}; you sent ${amount}`;
+      const sent = amount === undefined ? 'no amount' : String(amount);
+      return `Raise amount is the street total to raise to and must be a whole number from ${offered.min} to ${offered.max}; you sent ${sent}`;
     }
   }
   return offered;
