@@ -111,8 +111,8 @@
 - 驗證：`pnpm test:api`。功能驗證：開兩個終端機用 curl 自己跟自己打完 1 手。
 
 ### T11 超時與狀況處理（約 600 行）· Blocked by：T09
-- DO alarm 超時代打、連 3 次離席、5 分鐘解散、非法 / 太晚 / 重複 / 離開、測試房的 `test.seed` 與 `test.chaos`（casino-api skill A11）。
-- 只改：`apps/api/src/room/`。
+- DO alarm 超時代打、連 3 次離席、5 分鐘解散、非法 / 太晚 / 重複 / 離開、測試房的 `test.seed` 與 `test.chaos`（casino-api skill A11）、管理員中止房間（A9：這場標 `void`，不計分）。
+- 只改：`apps/api/src/room/`，以及 `apps/api/src/routes/admin.ts` 裡的 `abortRoom` 這一個 handler（T07 留下的空殼）。
 - 驗證：`pnpm test:api`，casino-api skill「狀況處理」表與 A11 每項一個測試。
 
 ### T12 配對排隊（約 600 行）· Blocked by：T07、T09
