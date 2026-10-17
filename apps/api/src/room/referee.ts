@@ -6,6 +6,7 @@ import type {
   ActionAccepted,
   MatchOver,
   RoomStatus,
+  TestSettings,
 } from '../contract/schemas';
 import {
   type Action,
@@ -13,6 +14,7 @@ import {
   type HandRecord,
   legalActions,
   type MatchState,
+  otherSeat,
   type Seat,
   startMatch,
 } from '../holdem/match';
@@ -42,6 +44,8 @@ export interface CreateInput {
   name: string;
   settings: RoomSettings;
   seed: number;
+  // Only where ALLOW_TEST_ROOMS=true; `chaos` is for T11.
+  test: typeof TestSettings.Type | null;
 }
 
 type Result<T, C extends ApiError['code']> =
@@ -61,6 +65,7 @@ interface RoomData {
   invite_code: string;
   settings: RoomSettings;
   seed: number;
+  test: typeof TestSettings.Type | null;
   names: [string, string | null];
   // `null` until the second player joins.
   match: MatchState | null;
@@ -181,7 +186,7 @@ export class RoomReferee {
       return fail(
         apiError(
           'wrong_invite_code',
-          `The invite code ${JSON.stringify(input.invite_code)} is not the code of room ${data.room_id}`,
+          `That invite code is not the code of room ${data.room_id}`,
           'Ask your opponent for the invite_code of this room and resend the join with it',
         ),
       );
@@ -286,7 +291,7 @@ export class RoomReferee {
       return fail(
         apiError(
           'stale_turn',
-          `turn_id ${JSON.stringify(input.turn_id)} is not your current turn; the current turn_id is ${turn.id}`,
+          `That turn_id is not your current turn; the current turn_id is ${turn.id}`,
           `Pick an action from legal_actions in state and send it with turn_id ${turn.id} to ${actionsPath(data)}`,
           { state },
         ),
@@ -341,7 +346,7 @@ export class RoomReferee {
         : { reason: 'cancelled', final_stacks: [start, start] },
     );
     await this.#save(next);
-    return ok(matchOver(next, seat));
+    return ok(matchOver(next, next.ended, seat));
   }
 
   // Loads the room, refusing a missing one or one that ended over an hour
@@ -393,8 +398,11 @@ export class RoomReferee {
     return { ok: true, data: this.#nextTurn(next) };
   }
 
-  // Where every match ends. Recording the match (T13) hooks in here.
-  #finish(data: RoomData, ended: DistributiveOmit<Ended, 'at'>): RoomData {
+  // Where every match ends.
+  #finish(
+    data: RoomData,
+    ended: DistributiveOmit<Ended, 'at'>,
+  ): RoomData & { ended: Ended } {
     return { ...data, turn: null, ended: { ...ended, at: this.#now() } };
   }
 
@@ -403,6 +411,8 @@ export class RoomReferee {
     return this.#data;
   }
 
+  // Every change goes through here, so this is where recording a match that
+  // just ended (T13: replay, D1) belongs, before the caller answers.
   async #save(data: RoomData): Promise<void> {
     this.#data = Promise.resolve(data);
     const listeners = [...this.#listeners];
@@ -459,7 +469,7 @@ const roomNotFound = () =>
 // What `state` and `wait` answer to `seat` (A15).
 function statusFor(data: RoomData, seat: Seat): RoomStatus {
   const { match, turn } = data;
-  if (data.ended) return matchOver(data, seat);
+  if (data.ended) return matchOver(data, data.ended, seat);
   if (!match) {
     return {
       status: 'waiting',
@@ -496,13 +506,12 @@ function statusFor(data: RoomData, seat: Seat): RoomStatus {
   };
 }
 
-function matchOver(data: RoomData, seat: Seat): MatchOverBody {
-  const { match, ended } = data;
-  if (!ended) throw new Error('matchOver called before the match ended');
+function matchOver(data: RoomData, ended: Ended, seat: Seat): MatchOverBody {
+  const { match } = data;
   const seen = match ? viewFor(match, seat) : null;
   const [mine, theirs] = [
     ended.final_stacks[seat],
-    ended.final_stacks[seat === 0 ? 1 : 0],
+    ended.final_stacks[otherSeat(seat)],
   ];
   const result: 'win' | 'loss' | 'draw' | 'cancelled' =
     ended.reason === 'cancelled'
