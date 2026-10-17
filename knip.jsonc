@@ -1,9 +1,19 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
-  "entry": [".devcontainer/scripts/cron.mjs"],
-  "project": ["src/**/*.{ts,tsx}", ".devcontainer/scripts/**/*.mjs"],
+  "workspaces": {
+    ".": {
+      "entry": [".devcontainer/scripts/cron.mjs"],
+      "project": [".devcontainer/scripts/**/*.mjs"],
+    },
+    "apps/api": {
+      "project": ["src/**/*.ts"],
+    },
+    "apps/web": {},
+  },
   "ignoreDependencies": [
     // Loaded from a Vite app's own dependencies only when that app has a Vite config.
     "vite",
+    // `cloudflare:workers` is provided by the Workers runtime.
+    "cloudflare",
   ],
 }
