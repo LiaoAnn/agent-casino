@@ -12,6 +12,7 @@ import {
 } from './match';
 import { type Deal, dealHand } from './shuffle';
 
+// Restated here, not imported, so a wrong table in the engine can't hide.
 const STREETS: Street[] = ['preflop', 'flop', 'turn', 'river'];
 const BOARD_SIZE: Record<Street, number> = {
   preflop: 0,
@@ -38,6 +39,7 @@ export function checkState(state: MatchState): string[] {
       errors.push(`Seat ${seat} bet more this street than this hand`);
     }
   }
+  errors.push(...checkConfig(config));
   errors.push(...checkHandNumber(state.handNumber, state.button, config));
   errors.push(...checkOrder(state.history, state.button));
 
@@ -94,9 +96,11 @@ export function checkHand(hand: HandRecord, config: MatchConfig): string[] {
       `Stacks ${hand.stacks.join(', ')} don't add up to ${2 * config.startingStack}`,
     );
   }
-  if (!Number.isInteger(hand.pot) || hand.pot <= 0) {
-    errors.push(`Pot must be a whole number above 0: ${hand.pot}`);
+  const expectedPot = potOf(hand.events);
+  if (hand.pot !== expectedPot || hand.pot <= 0) {
+    errors.push(`Pot is ${hand.pot}, but the events put in ${expectedPot}`);
   }
+  errors.push(...checkConfig(config));
   errors.push(...checkHandNumber(hand.hand_number, hand.button_seat, config));
   errors.push(...checkOrder(hand.events, hand.button_seat));
 
@@ -176,6 +180,35 @@ function checkLegal(state: MatchState, seat: Seat): string[] {
     errors.push('Unexpected extra legal actions');
   }
   return errors;
+}
+
+function checkConfig({ seed }: MatchConfig): string[] {
+  return Number.isInteger(seed) && seed >= 0 && seed <= 0xffffffff
+    ? []
+    : [`Seed must be a 32-bit unsigned integer: ${seed}`];
+}
+
+/**
+ * The chips both seats put in according to `events`, less the part of the
+ * bigger last-street bet nobody matched (it goes back to its owner).
+ */
+function potOf(events: HistoryEvent[]): number {
+  let total = 0;
+  let bets = [0, 0];
+  let street: Street = 'preflop';
+  for (const event of events) {
+    if (event.street !== street) {
+      total += bets[0] + bets[1];
+      bets = [0, 0];
+      street = event.street;
+    }
+    const amount = event.amount ?? 0;
+    if (event.type === 'raise') bets[event.seat] = amount;
+    else if (event.type !== 'fold' && event.type !== 'check') {
+      bets[event.seat] += amount;
+    }
+  }
+  return total + 2 * Math.min(bets[0], bets[1]);
 }
 
 function checkHandNumber(

@@ -1,4 +1,5 @@
 import {
+  type ApplyResult,
   applyAction,
   type HandRecord,
   type HistoryEvent,
@@ -13,7 +14,7 @@ export type ReplayResult =
       ok: false;
       /** Position in `events` of the first event the engine rejected. */
       index: number;
-      code: 'not_your_turn' | 'match_over' | 'invalid_action';
+      code: Extract<ApplyResult, { ok: false }>['code'];
       message: string;
     };
 

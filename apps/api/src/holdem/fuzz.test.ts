@@ -1,9 +1,11 @@
+/// <reference types="node" />
 import { describe, expect, it } from 'vitest';
 import { randomAction } from './bot';
 import { checkHand, checkState } from './invariants';
 import {
   type Action,
   applyAction,
+  type HandRecord,
   type HistoryEvent,
   type LegalAction,
   legalActions,
@@ -108,6 +110,24 @@ function invalidAction(
     : choices[Math.floor(random() * choices.length)];
 }
 
+/** The pot went the wrong way: `start` is the stacks before the blinds. */
+function payoutProblem(
+  start: [number, number],
+  hand: HandRecord,
+): string | null {
+  const { winner_seat: winner, stacks } = hand;
+  const shown = `from ${start} to ${stacks} (winner ${winner})`;
+  if (winner === null) {
+    return stacks[0] === start[0] && stacks[1] === start[1]
+      ? null
+      : `split pot changed the stacks ${shown}`;
+  }
+  const loser = otherSeat(winner);
+  if (stacks[winner] < start[winner]) return `winner lost chips ${shown}`;
+  if (stacks[loser] > start[loser]) return `loser gained chips ${shown}`;
+  return null;
+}
+
 describe('fuzz: random legal play', () => {
   it(
     `plays at least ${FUZZ_HANDS} hands (seed ${FUZZ_SEED}) with 0 violations`,
@@ -134,6 +154,11 @@ describe('fuzz: random legal play', () => {
         const events: HistoryEvent[] = [];
         const allHands: string[] = [];
         let expectedHand = 1;
+        /** Stacks at the start of the hand being played (before blinds). */
+        let handStart: [number, number] = [
+          config.startingStack,
+          config.startingStack,
+        ];
         let actions = 0;
         let broken = false;
 
@@ -198,9 +223,9 @@ describe('fuzz: random legal play', () => {
               );
             }
             expectedHand = hand.hand_number + 1;
-            if (hand.stacks[0] + hand.stacks[1] !== 2 * config.startingStack) {
-              report(state, `hand ${hand.hand_number} stacks ${hand.stacks}`);
-            }
+            const payout = payoutProblem(handStart, hand);
+            if (payout) report(state, `hand ${hand.hand_number}: ${payout}`);
+            handStart = [hand.stacks[0], hand.stacks[1]];
             for (const message of checkHand(hand, config)) {
               report(state, `hand ${hand.hand_number}: ${message}`);
             }

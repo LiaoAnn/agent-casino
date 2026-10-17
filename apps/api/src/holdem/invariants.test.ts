@@ -1028,3 +1028,244 @@ describe('checkHand reports broken records', () => {
     expectViolations(checkHand(hand, matchConfig));
   });
 });
+
+describe('checkHand: pot matches the events', () => {
+  // Pot = chips put in per the events, minus the uncalled excess returned.
+  const showdown = () => trace({}, CHECK_DOWN_HAND_1).hands[0]; // pot 4
+  // Flop: seat 1 bets 6, seat 0 folds: 6 returned, pot 4 (not 10).
+  const flopFold = () =>
+    trace({}, [
+      [0, CALL],
+      [1, CHECK],
+      [1, raise(6)],
+      [0, FOLD],
+    ]).hands[0];
+  // Preflop shove to 40, big blind folds: 38 returned, pot 4 (not 42).
+  const shoveFold = () =>
+    trace({}, [
+      [0, raise(40)],
+      [1, FOLD],
+    ]).hands[0];
+  // Hand 2: seat 1 shoves 42, seat 0 calls all-in for 36 more: 4 returned,
+  // pot 76 (not 80).
+  const shortCall = () =>
+    trace({}, [...CHECK_DOWN_HAND_1, [1, raise(42)], [0, CALL]]).hands[1];
+  // Hand 3 at 10 chips: small blind all-in with 1, big blind posts 2:
+  // 1 returned, pot 2 (not 3).
+  const blindRunout = () =>
+    trace({ startingStack: 10 }, BLIND_ALL_IN_SCRIPT).hands.find(
+      h => h.hand_number === 3,
+    ) as HandRecord;
+  // Raises on two streets, then a split (seed 42): pot 28.
+  const multiStreet = () => trace({ seed: 42 }, SCENARIOS[1][2]).hands[0];
+
+  const bases: [string, () => HandRecord, MatchConfig, number, number][] = [
+    ['check-down', showdown, config(), 4, 4],
+    ['fold to a flop bet', flopFold, config(), 4, 10],
+    ['fold to a preflop shove', shoveFold, config(), 4, 42],
+    ['short all-in call', shortCall, config(), 76, 80],
+    [
+      'small blind all-in by posting',
+      blindRunout,
+      config({ startingStack: 10 }),
+      2,
+      3,
+    ],
+    ['raises on two streets', multiStreet, config({ seed: 42 }), 28, 28],
+  ];
+
+  it.each(bases)(
+    '%s: the real pot gives no violation',
+    (_name, make, matchConfig, pot) => {
+      const hand = make();
+      expect(hand.pot).toBe(pot);
+      expect(checkHand(hand, matchConfig)).toEqual([]);
+    },
+  );
+
+  it.each(bases)('%s: pot + 1 is reported', (_name, make, matchConfig) => {
+    const hand = structuredClone(make());
+    hand.pot += 1;
+    expectViolations(checkHand(hand, matchConfig));
+  });
+
+  it.each(bases)(
+    '%s: pot - 1 (still positive) is reported',
+    (_name, make, matchConfig) => {
+      const hand = structuredClone(make());
+      hand.pot -= 1;
+      expect(hand.pot).toBeGreaterThan(0);
+      expectViolations(checkHand(hand, matchConfig));
+    },
+  );
+
+  it.each(bases.filter(([, , , pot, total]) => total !== pot))(
+    '%s: pot counting the returned excess is reported',
+    (_name, make, matchConfig, _pot, total) => {
+      const hand = structuredClone(make());
+      hand.pot = total;
+      expectViolations(checkHand(hand, matchConfig));
+    },
+  );
+});
+
+describe('order rules on their own', () => {
+  // Each corruption breaks exactly one rule: chips, cards, turn order and
+  // who acts next stay right, so only that rule's check can report it.
+  const preflopBlindsSwapped = (events: HistoryEvent[]) => {
+    events.splice(0, 2, events[1], events[0]);
+  };
+  // A post_blind for 0 chips among the preflop actions.
+  const extraZeroBlind = (events: HistoryEvent[]) => {
+    const seat = events[3].seat;
+    events.splice(3, 0, {
+      seat,
+      street: 'preflop',
+      type: 'post_blind',
+      amount: 0,
+    });
+  };
+  // Flop events relabelled turn and turn events flop: turn comes before the
+  // flop, but each street still starts with the non-button and alternates.
+  const turnBeforeFlop = (events: HistoryEvent[]) => {
+    for (const event of events) {
+      if (event.street === 'flop') event.street = 'turn';
+      else if (event.street === 'turn') event.street = 'flop';
+    }
+    expect(events.map(e => e.street)).toContain('turn');
+  };
+
+  // Seed 1, checked down to the river: seat 1 (non-button) to act.
+  const river = () => stateAfter({}, CHECK_DOWN_HAND_1.slice(0, -2));
+  const showdown = () => trace({}, CHECK_DOWN_HAND_1).hands[0];
+
+  it('the base state and record are fine', () => {
+    expect(river()).toMatchObject({ street: 'river', toAct: 1 });
+    expect(checkState(river())).toEqual([]);
+    expect(checkHand(showdown(), config())).toEqual([]);
+  });
+
+  it.each([
+    ['blinds swapped (big blind posted first)', preflopBlindsSwapped],
+    ['an extra post_blind for 0 chips', extraZeroBlind],
+    ['turn before flop, seats still alternating', turnBeforeFlop],
+  ])('checkState: %s', (_name, corrupt) => {
+    const state = structuredClone(river());
+    corrupt(state.history);
+    expectViolations(checkState(state));
+  });
+
+  it.each([
+    ['blinds swapped (big blind posted first)', preflopBlindsSwapped],
+    ['an extra post_blind for 0 chips', extraZeroBlind],
+    ['turn before flop, seats still alternating', turnBeforeFlop],
+  ])('checkHand: %s', (_name, corrupt) => {
+    const hand = structuredClone(showdown());
+    corrupt(hand.events);
+    expectViolations(checkHand(hand, config()));
+  });
+});
+
+describe('bad numbers are reported, not thrown', () => {
+  const flop = () =>
+    stateAfter({}, [
+      [0, CALL],
+      [1, CHECK],
+    ]);
+  const showdown = () => trace({}, CHECK_DOWN_HAND_1).hands[0];
+
+  it.each<[string, (s: MatchState) => void]>([
+    [
+      'handNumber 0',
+      s => {
+        s.handNumber = 0;
+      },
+    ],
+    [
+      'handNumber -1',
+      s => {
+        s.handNumber = -1;
+      },
+    ],
+    [
+      'handNumber above config.hands',
+      s => {
+        s.handNumber = 11;
+      },
+    ],
+    [
+      'handNumber 1.5',
+      s => {
+        s.handNumber = 1.5;
+      },
+    ],
+    [
+      'seed -1',
+      s => {
+        s.config.seed = -1;
+      },
+    ],
+    [
+      'seed 2^32',
+      s => {
+        s.config.seed = 2 ** 32;
+      },
+    ],
+    [
+      'seed 1.5',
+      s => {
+        s.config.seed = 1.5;
+      },
+    ],
+  ])('checkState: %s', (_name, corrupt) => {
+    const state = structuredClone(flop());
+    corrupt(state);
+    let found: unknown;
+    expect(() => {
+      found = checkState(state);
+    }).not.toThrow();
+    expectViolations(found);
+  });
+
+  it.each<[string, (h: HandRecord) => void, MatchConfig]>([
+    [
+      'hand_number 0',
+      h => {
+        h.hand_number = 0;
+      },
+      config(),
+    ],
+    [
+      'hand_number -1',
+      h => {
+        h.hand_number = -1;
+      },
+      config(),
+    ],
+    [
+      'hand_number above config.hands',
+      h => {
+        h.hand_number = 11;
+      },
+      config(),
+    ],
+    [
+      'hand_number 1.5',
+      h => {
+        h.hand_number = 1.5;
+      },
+      config(),
+    ],
+    ['seed -1', () => {}, config({ seed: -1 })],
+    ['seed 2^32', () => {}, config({ seed: 2 ** 32 })],
+    ['seed 1.5', () => {}, config({ seed: 1.5 })],
+  ])('checkHand: %s', (_name, corrupt, matchConfig) => {
+    const hand = structuredClone(showdown());
+    corrupt(hand);
+    let found: unknown;
+    expect(() => {
+      found = checkHand(hand, matchConfig);
+    }).not.toThrow();
+    expectViolations(found);
+  });
+});
