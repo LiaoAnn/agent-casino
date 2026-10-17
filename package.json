@@ -13,7 +13,8 @@
     "dev:api": "pnpm --filter @agent-casino/api dev",
     "dev:web": "pnpm --filter @agent-casino/web dev",
     "format": "biome check --write .",
-    "test:fuzz": "FUZZ_HANDS=10000 vitest run apps/api/src/holdem/fuzz.test.ts"
+    "test:fuzz": "FUZZ_HANDS=10000 vitest run apps/api/src/holdem/fuzz.test.ts",
+    "holdem:play": "node apps/api/scripts/holdem-play.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
