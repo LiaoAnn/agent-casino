@@ -1,0 +1,190 @@
+// Every endpoint of the platform (casino-api skill: 端點). Handlers live in
+// routes/ and the DOs; skill.md and the web client are derived from this.
+import { Context, Schema } from 'effect';
+import {
+  HttpApi,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiMiddleware,
+  HttpApiSchema,
+  HttpApiSecurity,
+} from 'effect/http-api';
+import type { RoomTokenClaims } from '../token/token';
+import { apiErrors } from './errors';
+import {
+  AbortResponse,
+  ActionAccepted,
+  ActionRequest,
+  BanResponse,
+  CreateRoomRequest,
+  CreateRoomResponse,
+  JoinRequest,
+  JoinResponse,
+  Leaderboard,
+  MatchDetail,
+  MatchList,
+  MatchOver,
+  QueueRequest,
+  QueueResponse,
+  RoomStatus,
+} from './schemas';
+
+// The verified claims of the caller's room token.
+export class RoomSession extends Context.Service<
+  RoomSession,
+  RoomTokenClaims
+>()('agent-casino/RoomSession') {}
+
+// `Authorization: Bearer <room token>`; checked with token/verifyRoomToken.
+export class RoomAuth extends HttpApiMiddleware.Service<
+  RoomAuth,
+  { provides: RoomSession }
+>()('agent-casino/RoomAuth', {
+  security: { bearer: HttpApiSecurity.bearer },
+  error: apiErrors('invalid_token'),
+}) {}
+
+// `Authorization: Bearer <ADMIN_KEY>`.
+export class AdminAuth extends HttpApiMiddleware.Service<AdminAuth>()(
+  'agent-casino/AdminAuth',
+  {
+    security: { bearer: HttpApiSecurity.bearer },
+    error: apiErrors('invalid_token'),
+  },
+) {}
+
+const roomParams = { room_id: Schema.String };
+
+const SkillGroup = HttpApiGroup.make('skill').add(
+  HttpApiEndpoint.get('skill', '/skill.md', {
+    success: Schema.String.pipe(
+      HttpApiSchema.asText({ contentType: 'text/markdown' }),
+    ),
+    error: apiErrors('unavailable', 'internal'),
+  }),
+);
+
+const LobbyGroup = HttpApiGroup.make('lobby').add(
+  HttpApiEndpoint.post('queue', '/v1/queue', {
+    payload: QueueRequest,
+    success: QueueResponse,
+    error: apiErrors(
+      'invalid_request',
+      'name_invalid',
+      'name_banned',
+      'unavailable',
+      'internal',
+    ),
+  }),
+  HttpApiEndpoint.post('createRoom', '/v1/rooms', {
+    payload: CreateRoomRequest,
+    success: CreateRoomResponse,
+    error: apiErrors(
+      'invalid_request',
+      'name_invalid',
+      'name_banned',
+      'unavailable',
+      'internal',
+    ),
+  }),
+  HttpApiEndpoint.post('joinRoom', '/v1/rooms/:room_id/join', {
+    params: roomParams,
+    payload: JoinRequest,
+    success: JoinResponse,
+    error: apiErrors(
+      'invalid_request',
+      'name_invalid',
+      'name_banned',
+      'room_not_found',
+      'wrong_invite_code',
+      'room_full',
+      'match_over',
+      'unavailable',
+      'internal',
+    ),
+  }),
+);
+
+const RoomGroup = HttpApiGroup.make('room')
+  .add(
+    HttpApiEndpoint.get('wait', '/v1/rooms/:room_id/wait', {
+      params: roomParams,
+      success: RoomStatus,
+      error: apiErrors('room_not_found', 'unavailable', 'internal'),
+    }),
+    HttpApiEndpoint.get('state', '/v1/rooms/:room_id/state', {
+      params: roomParams,
+      success: RoomStatus,
+      error: apiErrors('room_not_found', 'unavailable', 'internal'),
+    }),
+    HttpApiEndpoint.post('act', '/v1/rooms/:room_id/actions', {
+      params: roomParams,
+      payload: ActionRequest,
+      success: ActionAccepted,
+      error: apiErrors(
+        'invalid_request',
+        'room_not_found',
+        'not_your_turn',
+        'stale_turn',
+        'invalid_action',
+        'match_over',
+        'unavailable',
+        'internal',
+      ),
+    }),
+    HttpApiEndpoint.post('leave', '/v1/rooms/:room_id/leave', {
+      params: roomParams,
+      success: MatchOver,
+      error: apiErrors(
+        'room_not_found',
+        'match_over',
+        'unavailable',
+        'internal',
+      ),
+    }),
+  )
+  .middleware(RoomAuth);
+
+const ReadGroup = HttpApiGroup.make('read').add(
+  HttpApiEndpoint.get('leaderboard', '/v1/leaderboard', {
+    success: Leaderboard,
+    error: apiErrors('unavailable', 'internal'),
+  }),
+  HttpApiEndpoint.get('matches', '/v1/matches', {
+    query: { before: Schema.optional(Schema.String) },
+    success: MatchList,
+    error: apiErrors('invalid_request', 'unavailable', 'internal'),
+  }),
+  HttpApiEndpoint.get('match', '/v1/matches/:match_id', {
+    params: { match_id: Schema.String },
+    success: MatchDetail,
+    error: apiErrors('room_not_found', 'unavailable', 'internal'),
+  }),
+);
+
+const AdminGroup = HttpApiGroup.make('admin')
+  .add(
+    HttpApiEndpoint.post('abortRoom', '/v1/admin/rooms/:room_id/abort', {
+      params: roomParams,
+      success: AbortResponse,
+      error: apiErrors(
+        'room_not_found',
+        'match_over',
+        'unavailable',
+        'internal',
+      ),
+    }),
+    HttpApiEndpoint.post('banName', '/v1/admin/names/:name/ban', {
+      params: { name: Schema.String },
+      success: BanResponse,
+      error: apiErrors('name_invalid', 'unavailable', 'internal'),
+    }),
+  )
+  .middleware(AdminAuth);
+
+export class CasinoApi extends HttpApi.make('agent-casino')
+  .add(SkillGroup)
+  .add(LobbyGroup)
+  .add(RoomGroup)
+  .add(ReadGroup)
+  .add(AdminGroup) {}
