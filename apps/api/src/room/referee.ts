@@ -2,8 +2,10 @@
 // A3, A8, A9, A15). Kept free of `cloudflare:workers` so it runs in Node
 // tests; the Room DO hands it its storage and forwards its RPC calls here.
 import { type ApiError, apiError } from '../contract/errors';
-import type { RoomStatus } from '../contract/schemas';
+import type { ActionAccepted, RoomStatus } from '../contract/schemas';
 import {
+  type Action,
+  applyAction,
   type HandRecord,
   legalActions,
   type MatchState,
@@ -63,11 +65,31 @@ interface RoomData {
   turn: Turn | null;
   // How many turns have been handed out; the next turn is `t_<count + 1>`.
   turn_count: number;
+  // Turns already used up, by turn_id (A3): who acted, and whether the
+  // server acted for them.
+  used_turns: Record<string, { seat: Seat; timeout?: true }>;
+  ended: Ended | null;
 }
+
+interface Ended {
+  // `complete`: all hands played or someone ran out of chips.
+  reason: 'complete';
+  final_stacks: [number, number];
+  // Epoch ms.
+  at: number;
+}
+
+interface ActionInput {
+  turn_id: string;
+  type: Action['type'];
+  amount?: number;
+}
+
+type ActionAcceptedBody = typeof ActionAccepted.Type;
 
 // What routes/room.ts calls on a room's DO stub (the Room DO forwards each
 // call to its referee).
-export type RoomApi = Pick<RoomReferee, 'create' | 'join' | 'status'>;
+export type RoomApi = Pick<RoomReferee, 'create' | 'join' | 'status' | 'act'>;
 
 const KEY = 'room';
 const WAIT_MS = 30_000;
@@ -79,6 +101,13 @@ const fail = <C extends ApiError['code']>(error: ApiError<C>) => ({
 });
 
 const waitPath = (data: RoomData) => `GET /v1/rooms/${data.room_id}/wait`;
+const actionsPath = (data: RoomData) =>
+  `POST /v1/rooms/${data.room_id}/actions`;
+
+const accepted = (data: RoomData): ActionAcceptedBody => ({
+  status: 'accepted',
+  hint: `Accepted. Call ${waitPath(data)} for your next turn`,
+});
 
 export class RoomReferee {
   readonly #storage: RoomStorage;
@@ -112,6 +141,8 @@ export class RoomReferee {
       hands: [],
       turn: null,
       turn_count: 0,
+      used_turns: {},
+      ended: null,
     });
     return ok(null);
   }
@@ -199,6 +230,117 @@ export class RoomReferee {
     }
   }
 
+  // A3: a used turn_id answers its first result again; a rejected action
+  // leaves the turn_id usable.
+  async act(
+    seat: Seat,
+    input: ActionInput,
+  ): Promise<
+    Result<
+      ActionAcceptedBody,
+      | 'room_not_found'
+      | 'not_your_turn'
+      | 'stale_turn'
+      | 'invalid_action'
+      | 'match_over'
+    >
+  > {
+    const data = await this.#load();
+    if (!data) return fail(roomNotFound());
+    const used = data.used_turns[input.turn_id];
+    if (used?.seat === seat && !used.timeout) {
+      return ok({ ...accepted(data), duplicate: true });
+    }
+    const state = statusFor(data, seat);
+    if (data.ended) {
+      return fail(
+        apiError(
+          'match_over',
+          'The match is over; no more actions are accepted',
+          `Read the result in state. To play again, open a room with POST /v1/rooms or join the queue with POST /v1/queue`,
+          { state },
+        ),
+      );
+    }
+    const { match, turn } = data;
+    if (!match || turn?.seat !== seat) {
+      return fail(
+        apiError(
+          'not_your_turn',
+          'It is not your turn',
+          `Do not resend. Call ${waitPath(data)} and act when it answers your_turn`,
+          { state },
+        ),
+      );
+    }
+    if (input.turn_id !== turn.id) {
+      return fail(
+        apiError(
+          'stale_turn',
+          `turn_id ${JSON.stringify(input.turn_id)} is not your current turn; the current turn_id is ${turn.id}`,
+          `Pick an action from legal_actions in state and send it with turn_id ${turn.id} to ${actionsPath(data)}`,
+          { state },
+        ),
+      );
+    }
+    // A raise without an amount is passed on for the engine to refuse.
+    const action = (
+      input.type === 'raise'
+        ? { type: 'raise', amount: input.amount }
+        : { type: input.type }
+    ) as Action;
+    const done = this.#perform(data, match, turn, action);
+    if (!done.ok) {
+      return fail(
+        apiError(
+          'invalid_action',
+          done.message,
+          `Pick a legal action from legal_actions and resubmit it with the same turn_id before the deadline`,
+          { state },
+        ),
+      );
+    }
+    await this.#save(done.data);
+    return ok(accepted(data));
+  }
+
+  // The one way an action is applied: by a player now, by the server on a
+  // timeout later (T11).
+  #perform(
+    data: RoomData,
+    match: MatchState,
+    turn: Turn,
+    action: Action,
+    options: { timeout?: true } = {},
+  ): { ok: true; data: RoomData } | { ok: false; message: string } {
+    const result = applyAction(match, turn.seat, action, options);
+    if (!result.ok) return result;
+    const next: RoomData = {
+      ...data,
+      match: result.state,
+      hands: [...data.hands, ...result.finishedHands],
+      used_turns: {
+        ...data.used_turns,
+        [turn.id]: { seat: turn.seat, ...options },
+      },
+    };
+    if (result.state.over) {
+      return {
+        ok: true,
+        data: this.#finish(next, {
+          reason: 'complete',
+          final_stacks: result.state.stacks,
+        }),
+      };
+    }
+    return { ok: true, data: this.#nextTurn(next) };
+  }
+
+  // Where every match ends. Recording the match (T13) hooks in here.
+  #finish(data: RoomData, ended: Omit<Ended, 'at'>): RoomData {
+    return { ...data, turn: null, ended: { ...ended, at: this.#now() } };
+  }
+
   #load(): Promise<RoomData | undefined> {
     this.#data ??= this.#storage.get<RoomData>(KEY);
     return this.#data;
@@ -247,7 +389,8 @@ const roomNotFound = () =>
 
 // What `state` and `wait` answer to `seat` (A15).
 function statusFor(data: RoomData, seat: Seat): RoomStatus {
-  const { match, turn } = data;
+  const { match, turn, ended } = data;
+  if (ended) return matchOver(data, ended, seat);
   if (!match) {
     return {
       status: 'waiting',
@@ -281,5 +424,29 @@ function statusFor(data: RoomData, seat: Seat): RoomStatus {
     status: 'waiting',
     ...common,
     hint: `Your opponent is to act. Call ${waitPath(data)} again`,
+  };
+}
+
+function matchOver(data: RoomData, ended: Ended, seat: Seat): RoomStatus {
+  const { match } = data;
+  const seen = match ? viewFor(match, seat) : null;
+  const [mine, theirs] = [
+    ended.final_stacks[seat],
+    ended.final_stacks[seat === 0 ? 1 : 0],
+  ];
+  const result = mine > theirs ? 'win' : mine < theirs ? 'loss' : 'draw';
+  const told = { win: 'you won', loss: 'you lost', draw: 'it is a draw' };
+  return {
+    status: 'match_over',
+    room_status: 'finished',
+    to_act_seat: null,
+    hand_number: seen?.hand_number ?? null,
+    view: seen?.view ?? null,
+    match_id: data.room_id,
+    result,
+    final_stacks: ended.final_stacks,
+    ratings: null,
+    last_hand: seen?.last_hand ?? null,
+    hint: `The match is over and ${told[result]}. Report the result to your owner, and see the rankings with GET /v1/leaderboard`,
   };
 }

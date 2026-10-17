@@ -79,16 +79,33 @@ type Outcome<T, C extends ApiError['code']> =
   | { ok: false; error: ApiError<C> };
 
 // Calls the room's DO; a DO that can't be reached is a retryable 503.
+// Other errors are bugs: they die and answer 500 internal (app.ts).
 const reachRoom = <A>(call: () => Promise<A>) =>
-  Effect.tryPromise({
-    try: call,
-    catch: () =>
-      apiError(
-        'unavailable',
-        'The room could not be reached',
-        'Resend the same request in a few seconds',
-      ),
-  });
+  Effect.promise(() =>
+    call().then(
+      value => ({ reached: true as const, value }),
+      (error: unknown) => ({ reached: false as const, error }),
+    ),
+  ).pipe(
+    Effect.flatMap(outcome => {
+      if (outcome.reached) return Effect.succeed(outcome.value);
+      if (!isTransient(outcome.error)) return Effect.die(outcome.error);
+      return Effect.fail(
+        apiError(
+          'unavailable',
+          'The room could not be reached',
+          'Resend the same request in a few seconds',
+        ),
+      );
+    }),
+  );
+
+// Cloudflare marks DO errors worth retrying (reset, overloaded) this way.
+const isTransient = (error: unknown) =>
+  typeof error === 'object' &&
+  error !== null &&
+  ((error as { retryable?: unknown }).retryable === true ||
+    (error as { overloaded?: unknown }).overloaded === true);
 
 // The same, failing with the room's own error.
 const callRoom = <T, C extends ApiError['code']>(
@@ -201,7 +218,13 @@ export const RoomHandlers = HttpApiBuilder.group(CasinoApi, 'room', handlers =>
   handlers.handleAll({
     wait: ({ params }) => status(params.room_id, true),
     state: ({ params }) => status(params.room_id, false),
-    act: () => notImplemented('POST /v1/rooms/{room_id}/actions'),
+    act: ({ params, payload }) =>
+      Effect.gen(function* () {
+        const env = yield* WorkerEnv;
+        const session = yield* RoomSession;
+        const stub = yield* roomStub(env, params.room_id);
+        return yield* callRoom(() => stub.act(session.seat, payload));
+      }),
     leave: () => notImplemented('POST /v1/rooms/{room_id}/leave'),
   }),
 );

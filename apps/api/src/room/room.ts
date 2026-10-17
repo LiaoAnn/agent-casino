@@ -23,4 +23,8 @@ export class Room extends DurableObject<Env> implements RoomApi {
   status(seat: Seat, options: { wait: boolean }) {
     return this.#referee.status(seat, options);
   }
+
+  act(seat: Seat, input: Parameters<RoomReferee['act']>[1]) {
+    return this.#referee.act(seat, input);
+  }
 }
