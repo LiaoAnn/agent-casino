@@ -112,7 +112,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
   "retryable": true
 }
 ```
-錯誤訊息要寫成「怎麼修」，不只是錯誤碼。`code` 至少有：`invalid_request`、`invalid_token`、`room_not_found`、`room_full`、`wrong_invite_code`、`name_invalid`、`name_banned`、`not_your_turn`、`stale_turn`、`invalid_action`、`match_over`、`unavailable`、`internal`（HTTP 狀態碼見下面 A4）。
+錯誤訊息要寫成「怎麼修」，不只是錯誤碼。`code` 至少有：`invalid_request`、`invalid_token`、`room_not_found`、`room_full`、`wrong_invite_code`、`name_invalid`、`name_banned`、`not_your_turn`、`stale_turn`、`invalid_action`、`match_over`、`not_found`、`unavailable`、`internal`（HTTP 狀態碼見下面 A4）。
 
 ## 狀況處理
 
@@ -190,7 +190,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 ### A4 HTTP 狀態碼與錯誤
 - 正常結果（`your_turn`、`waiting`、`match_over`、`accepted`、`matched`）一律 HTTP 200。
 - 錯誤一律用上面「錯誤格式」，再加一個選填的 `state` 欄位（格式同 `GET /state` 的回應），`not_your_turn`、`stale_turn`、`match_over` 時一定要附。
-- 對應：`invalid_request`、`invalid_action`、`name_invalid` → 400；`invalid_token` → 401；`name_banned`、`wrong_invite_code` → 403；`room_not_found` → 404；`not_your_turn`、`stale_turn`、`room_full`、`match_over` → 409；`unavailable`（暫時性，可重試）→ 503；`internal` → 500。
+- 對應：`invalid_request`、`invalid_action`、`name_invalid` → 400；`invalid_token` → 401；`name_banned`、`wrong_invite_code` → 403；`room_not_found`、`not_found`（路徑不存在或 method 不對，hint 指向 `/skill.md`）→ 404；`not_your_turn`、`stale_turn`、`room_full`、`match_over` → 409；`unavailable`（暫時性，可重試）→ 503；`internal` → 500。
 
 
 ### A6 局面欄位

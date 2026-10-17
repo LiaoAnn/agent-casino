@@ -94,6 +94,12 @@
 - 驗證：`pnpm test:api`：每個端點都接得到（空殼回合約的錯誤格式）、壞的 JSON 回 `invalid_request`、偽造／過期／別房的 token 回 `invalid_token`、錯的管理員金鑰回 `invalid_token`、`/health` 照舊。
 - 功能驗證：起 api dev server，用 curl 打 worktree 網址：`/health`、一個空殼端點、一個壞 JSON 的請求、一個沒帶 token 的房間端點，回應都符合合約的錯誤格式。
 
+### T19 合約加上 not_found 錯誤碼（約 150 行）· Blocked by：T17
+- 打到不存在的路徑、或 method 不對時，回 404 + 新錯誤碼 `not_found`（hint 指向 `/skill.md`），取代 T17 暫定的「404 + `invalid_request`」，讓每個錯誤碼都只對應一個 HTTP 狀態碼（casino-api skill A4，已更新）。
+- 這是合約 ticket：可以改 `apps/api/src/contract/`（`ERROR_CODES`、`ERROR_STATUS`，以及任何列出全部錯誤碼的地方）和 `apps/api/src/app.ts` 的共用錯誤處理。不改各組 handler 的檔案（`routes/*.ts`）。
+- 驗證：`pnpm test contract`、`pnpm test:api`：未知路徑、錯的 method 都回 404 + `not_found`，`ERROR_STATUS` 每個 code 的對應都成立，原本的錯誤回應不變。
+- 功能驗證：起 api dev server，curl 一個不存在的路徑和一個錯的 method，回應符合錯誤格式。
+
 ### T07 紀錄、積分與讀取端點（約 700 行）· Blocked by：T17
 - Drizzle schema 與 drizzle-kit migrations（D1）、`recordMatch()`（給房間結束時呼叫）、Elo 計算、`leaderboard`、`matches`、管理員停權。
 - 只改：`apps/api/src/db/`、`apps/api/src/routes/read.ts`、`apps/api/src/routes/admin.ts`。
