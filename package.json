@@ -4,10 +4,13 @@
   "type": "module",
   "packageManager": "pnpm@12.10.1",
   "scripts": {
-    "check": "biome check . && knip && pnpm typecheck && pnpm test",
+    "check": "biome check . && knip && pnpm typecheck && pnpm typecheck:web && pnpm test",
     "typecheck": "tsc -p apps/api",
+    "typecheck:web": "tsc -p apps/web",
     "test": "vitest run",
+    "test:web": "pnpm --filter @agent-casino/web test",
     "dev:api": "pnpm --filter @agent-casino/api dev",
+    "dev:web": "pnpm --filter @agent-casino/web dev",
     "format": "biome check --write ."
   },
   "devDependencies": {
