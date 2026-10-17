@@ -247,3 +247,18 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - `room_id`：`r_` + 10 個小寫英數字。`match_id` = `room_id`。
 - `invite_code`：6 個大寫英數字（排除 0、O、1、I），比對時不分大小寫。
 - 排行榜以名字的小寫當 key，顯示第一次出現時的寫法。
+
+### A15 回應形狀（2026-10-17 T03 定案）
+- **`wait` 與 `state` 共用一個回應 schema**，差別只在 `wait` 會等。`status` 是 `your_turn` / `waiting` / `match_over` 三種之一；每種都帶 `room_status`、`to_act_seat`（`0` / `1` / `null`）、`hand_number`、`view`（對手還沒進房時是 `null`）。`your_turn` 另外帶 `turn_id`、`deadline`、`legal_actions`。錯誤裡選填的 `state` 欄位也用這個形狀。
+- **`match_over`**：`{status:"match_over", match_id, result, final_stacks:[座位0, 座位1], ratings, last_hand, hint}`。
+  - `result` 從呼叫者角度看：`win` / `loss` / `draw` / `cancelled` / `void`。（對局列表和單場紀錄用座位角度：`seat0_win` / `seat1_win` / `draw` / `void` / `cancelled`。）
+  - `ratings`：`[{name, rating, change}]`，座位 0、1 各一筆；不計分（有 `house-bot`、`void`、`cancelled`）時是 `null`。
+- **`last_hand`**：`{hand_number, winner_seat, pot, ended_by:"fold"|"showdown", board, hole_cards, stacks:[s0, s1]}`。`winner_seat` 為 `null` 代表平分；`hole_cards` 是 `[[座位0兩張],[座位1兩張]]`，只在攤牌時有，否則 `null`。
+- **`history` 每一筆**：`{seat, street, type:"post_blind"|"fold"|"check"|"call"|"raise", amount?, timeout?}`。`call` 的 `amount` 是補了多少，`raise` 是加注到的總額；超時代打的那一步加 `timeout:true`。
+- **`room_status`**：`waiting` / `playing` / `finished` / `void`。房間解散算 `finished`（`result` 為 `cancelled`），管理員中止算 `void`。
+- **名字**：同房間第二個座位同名、或用保留名字 `house-bot`，回 `name_invalid`（400），`message` 說明要換名字。
+- **管理端點**：金鑰錯或沒帶回 `invalid_token`（401）。成功：abort → `{status:"aborted", room_id}`，ban → `{status:"banned", name}`。中止已結束的房間回 409 `match_over`。
+- **`POST /leave` 成功**：直接回 `match_over` 的形狀（進行中離開 `result` 是 `loss`；還在 `waiting` 時離開是 `cancelled`）。
+- **`GET /v1/matches/{match_id}`**：`{match_id, players:[a,b], settings:{hands, turn_seconds, starting_stack}, seed, result, rated, ended_at, final_stacks, rating_changes:[{name, before, after}]|null, hands:[{hand_number, button_seat, board, hole_cards, events, winner_seat, pot, ended_by, stacks}]}`。`events` 跟 `history` 同格式；`hole_cards` 只在攤牌的手有。
+- **格式**：rating 一律四捨五入成整數；`deadline`、`ended_at` 用 ISO-8601 UTC 字串。`settings` 照 holdem-rules 的允許範圍驗證，超出回 `invalid_request`。
+- **實作提醒**：用 Effect v4（`effect` 4.x，HttpApi 在 `effect/http-api`）。Effect 預設的 schema decode 錯誤不是上面的錯誤格式，實作 handler 的 ticket（T07、T09、T12）要把它轉成 `invalid_request`。
