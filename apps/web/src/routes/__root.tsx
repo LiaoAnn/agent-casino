@@ -2,7 +2,6 @@ import {
   createRootRoute,
   HeadContent,
   Link,
-  Outlet,
   Scripts,
 } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
@@ -18,7 +17,6 @@ export const Route = createRootRoute({
     links: [{ rel: 'stylesheet', href: styles }],
   }),
   shellComponent: Shell,
-  component: Outlet,
 });
 
 function Shell({ children }: { children: ReactNode }) {

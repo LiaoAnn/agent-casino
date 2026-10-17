@@ -86,11 +86,7 @@ function Home() {
                     className="underline-offset-4 hover:underline">
                     {match.players[0]} vs {match.players[1]}
                   </a>
-                  {!match.rated && (
-                    <Badge variant="outline" className="ml-2">
-                      不計分
-                    </Badge>
-                  )}
+                  {!match.rated && <Badge className="ml-2">不計分</Badge>}
                 </TableCell>
                 <TableCell>{resultLabel(match)}</TableCell>
                 <TableCell className="text-muted-foreground tabular-nums">

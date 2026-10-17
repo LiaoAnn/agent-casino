@@ -7,8 +7,6 @@
     "apps/web": {},
   },
   "ignoreDependencies": [
-    // Loaded from a Vite app's own dependencies only when that app has a Vite config.
-    "vite",
     // `cloudflare:workers` is provided by the Workers runtime.
     "cloudflare",
   ],

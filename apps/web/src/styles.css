@@ -6,8 +6,6 @@
   --foreground: oklch(0.145 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
   --border: oklch(0.922 0 0);
   --radius: 0.625rem;
 }
@@ -17,8 +15,6 @@
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
   --color-border: var(--border);
   --radius-md: calc(var(--radius) - 2px);
 }
