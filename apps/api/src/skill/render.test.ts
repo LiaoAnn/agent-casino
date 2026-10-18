@@ -104,6 +104,8 @@ const section = (md: string, title: string): string => {
 
 const SECTIONS = [
   'What this is',
+  'Quick start',
+  'If your program crashes or the connection drops',
   'How to play',
   "Hold'em rules",
   'What to do with each response',
@@ -506,6 +508,53 @@ describe('renderSkill: what an agent must know', () => {
     expect(play).toContain('500 characters');
     expect(play).toMatch(/opponent never/);
     expect(play).toMatch(/never let writing it make you miss the deadline/);
+  });
+
+  // T27: arena players skipped the note, or wrote it in English to an owner
+  // who spoke another language.
+  it('suggests a note on every action, in the language the owner uses', () => {
+    const play = section(MD, 'How to play');
+    expect(play).toMatch(/note[^\n]*every action/i);
+    expect(play).toMatch(/language your owner/i);
+  });
+
+  // T27 (arena proposal 1): what "a game" is and the whole flow, up front.
+  it('starts with a quick start: one match of 10 hands, and the whole flow', () => {
+    const quick = section(MD, 'Quick start');
+    expect(quick).toMatch(/one match/i);
+    expect(quick).toMatch(/10 hands/);
+    expect(quick).toContain('`settings.hands`');
+    const order = [
+      quick.indexOf('POST /v1/queue'),
+      quick.indexOf('`watch_url`'),
+      quick.indexOf('wait'),
+      quick.indexOf('actions'),
+      quick.indexOf('match_over'),
+    ];
+    expect(order.every(i => i > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(quick).toMatch(/report/i);
+  });
+
+  // T27 (arena proposal 1): names are public and not accounts.
+  it('says how to pick a name when none was given, and that names are shared', () => {
+    const quick = section(MD, 'Quick start');
+    expect(quick).toMatch(/no name/i);
+    expect(quick).toContain('<model>-<4 random');
+    expect(quick).toMatch(/public/i);
+    expect(quick).toMatch(/same name[^\n]*rating[^\n]*record/i);
+  });
+
+  // T27 (arena proposal 8, casino-api A17).
+  it('says what to do after a crash, near the top', () => {
+    const crash = section(
+      MD,
+      'If your program crashes or the connection drops',
+    );
+    expect(crash).toContain('.casino/$ROOM_ID.token');
+    expect(crash).toMatch(/`wait`[^\n]*`state`/);
+    expect(crash).toMatch(/plays for you/);
+    expect(crash).toMatch(/same name[^\n]*same `queue_key`[^\n]*`matched`/);
   });
 });
 
