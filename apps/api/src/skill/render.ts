@@ -10,7 +10,7 @@ import {
   ERROR_STATUS,
   type ErrorCode,
 } from '../contract/errors';
-import { EXAMPLES } from './examples';
+import { EXAMPLE_ORIGIN, EXAMPLES } from './examples';
 import template from './template.md?raw' with { type: 'text' };
 
 interface Endpoint {
@@ -77,9 +77,13 @@ const PURPOSE: Readonly<Record<string, string>> = {
   'admin.banName': 'Admin only, not for players',
 };
 
+// The room token comes from the file skill.md saves it in, so an agent never
+// pastes it by hand (T27).
+const BEARER = 'Authorization: Bearer $(cat .casino/$ROOM_ID.token)';
+
 const AUTH: Record<Endpoint['auth'], string> = {
   none: 'none',
-  room: '`Authorization: Bearer $CASINO_TOKEN`',
+  room: `\`${BEARER}\``,
   watch: 'the token in `watch_url`',
   admin: 'admin key',
 };
@@ -90,7 +94,7 @@ const ADVICE: Record<ErrorCode, string> = {
   invalid_request:
     'Your JSON body, path or query is malformed. Fix it as `message` says and resend.',
   invalid_token:
-    'The room token is missing, wrong, or for another room. Send `Authorization: Bearer $CASINO_TOKEN` with the token you got for this `$ROOM_ID`. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
+    'The room token is missing, wrong, or for another room. Send `Authorization: Bearer $(cat .casino/$ROOM_ID.token)`, with the token you saved for this room. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
   room_not_found: 'No such room. Check `$ROOM_ID`.',
   room_full: 'Both seats are taken. Queue or open your own room instead.',
   wrong_invite_code: 'Ask your opponent for the right invite code.',
@@ -161,9 +165,7 @@ const curl = (key: string) => {
   const request = EXAMPLES[key]?.request;
   const parts = [
     `curl -sS --max-time 40${endpoint.method === 'GET' ? '' : ` -X ${endpoint.method}`} "$CASINO_URL${path}"`,
-    ...(endpoint.auth === 'room'
-      ? ['-H "Authorization: Bearer $CASINO_TOKEN"']
-      : []),
+    ...(endpoint.auth === 'room' ? [`-H "${BEARER}"`] : []),
     ...(request === undefined
       ? []
       : ["-H 'Content-Type: application/json'", `-d ${shellBody(request)}`]),
@@ -171,14 +173,15 @@ const curl = (key: string) => {
   return ['```bash', parts.join(' \\\n  '), '```'].join('\n');
 };
 
-const responses = (key: string) => {
+// `watch_url` in the examples is on the domain the agent asked (T27).
+const responses = (key: string, baseUrl: string) => {
   const examples = EXAMPLES[key]?.responses ?? [];
   if (examples.length === 0)
     throw new Error(`skill.md: no response examples for ${key}`);
   return examples
     .map(
       ({ title, status, body }) =>
-        `${title} (HTTP ${status}):\n\n\`\`\`json\n${JSON.stringify(body, null, 2)}\n\`\`\``,
+        `${title} (HTTP ${status}):\n\n\`\`\`json\n${JSON.stringify(body, null, 2).replaceAll(EXAMPLE_ORIGIN, baseUrl)}\n\`\`\``,
     )
     .join('\n\n');
 };
@@ -190,7 +193,7 @@ export function renderSkill(baseUrl: string): string {
     endpoints: endpointTable,
     errors: errorTable,
     curl,
-    responses,
+    responses: key => responses(key, baseUrl),
   };
   return template.replace(/\{\{(\w+)(?: ([\w.]+))?\}\}/g, (_, name, arg) => {
     const render = fill[name];

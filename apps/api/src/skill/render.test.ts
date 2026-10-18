@@ -1,7 +1,7 @@
 // T05: skill.md is the only manual a participating agent gets, so it is
 // generated from the contract (casino-api skill: skill.md, A12) and every curl
-// in it must run as is with $CASINO_URL, $QUEUE_KEY, $CASINO_TOKEN, $ROOM_ID,
-// $TURN_ID.
+// in it must run as is with $CASINO_URL, $ROOM_ID and $TURN_ID, reading the
+// room token and queue_key from the files the agent saved them in (T27).
 // Endpoints and error codes are found by reflecting the contract, so a new one
 // fails here until skill.md renders it.
 import { Exit, Schema } from 'effect';
@@ -104,6 +104,8 @@ const section = (md: string, title: string): string => {
 
 const SECTIONS = [
   'What this is',
+  'Quick start',
+  'If your program crashes or the connection drops',
   'How to play',
   "Hold'em rules",
   'What to do with each response',
@@ -227,7 +229,7 @@ describe('renderSkill: generated from the contract', () => {
       );
       expect(rest, route).not.toBe('');
       if (endpoint.auth === 'room') {
-        expect(rest, route).toContain('Bearer $CASINO_TOKEN');
+        expect(rest, route).toContain('Bearer $(cat .casino/$ROOM_ID.token)');
       } else if (endpoint.auth === 'none') {
         expect(rest, route).not.toMatch(/bearer/i);
         expect(rest, route).not.toMatch(/admin/i);
@@ -282,14 +284,8 @@ describe('renderSkill: curl examples', () => {
     }
   });
 
-  it('uses only $CASINO_URL, $QUEUE_KEY, $CASINO_TOKEN, $ROOM_ID and $TURN_ID', () => {
-    const allowed = [
-      'CASINO_URL',
-      'QUEUE_KEY',
-      'CASINO_TOKEN',
-      'ROOM_ID',
-      'TURN_ID',
-    ];
+  it('uses only $CASINO_URL, $ROOM_ID and $TURN_ID', () => {
+    const allowed = ['CASINO_URL', 'ROOM_ID', 'TURN_ID'];
     for (const { command } of GAME_CURLS) {
       for (const [, name] of command.matchAll(/\$\{?([A-Za-z_]\w*)\}?/g)) {
         expect(allowed, command).toContain(name);
@@ -305,7 +301,7 @@ describe('renderSkill: curl examples', () => {
   });
 
   it('sends the room token only to room endpoints', () => {
-    const bearer = 'Authorization: Bearer $CASINO_TOKEN';
+    const bearer = 'Authorization: Bearer $(cat .casino/$ROOM_ID.token)';
     const room = /^v1\/rooms\/\$ROOM_ID\/(wait|state|actions|leave)$/;
     const open = /^v1\/(queue|rooms|rooms\/\$ROOM_ID\/join|leaderboard)$/;
     const paths = GAME_CURLS.map(c => c.path);
@@ -420,6 +416,22 @@ describe('renderSkill: base URL', () => {
     const other = renderSkill('https://other.test');
     expect(other).not.toContain('casino.example');
   });
+
+  // T27 (arena proposal 7): no made-up domain in the examples; watch_url
+  // points at the domain the agent reached.
+  it('shows watch_url on the requested domain', () => {
+    const other = renderSkill('https://other.test');
+    const urls = [...other.matchAll(/"watch_url": "([^"]*)"/g)].map(
+      m => m[1] ?? '',
+    );
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) {
+      expect(url).toMatch(
+        /^https:\/\/other\.test\/watch\/r_[a-z0-9]{10}\?token=\S+$/,
+      );
+    }
+    expect(other).not.toContain('example.net');
+  });
 });
 
 describe('renderSkill: what an agent must know', () => {
@@ -428,6 +440,24 @@ describe('renderSkill: what an agent must know', () => {
     expect(rules.toLowerCase()).toContain('how many more chips');
     expect(rules.toLowerCase()).toContain('raise to');
     expect(rules).toContain('legal_actions');
+  });
+
+  // T27 (arena proposal 7): Haiku had 47 chips and was offered max 48.
+  it("says raise max already counts this street's bet", () => {
+    const rules = section(MD, "Hold'em rules");
+    expect(rules).toMatch(/`max`[^\n]*`my_stack` \+ `my_bet_this_street`/);
+  });
+
+  // T27: the real deadline is Date.toISOString(), with milliseconds.
+  it('shows deadline as the server writes it, with milliseconds', () => {
+    const play = section(MD, 'How to play');
+    const deadlines = [...MD.matchAll(/"deadline": "([^"]*)"/g)].map(
+      m => m[1] ?? '',
+    );
+    expect(deadlines.length).toBeGreaterThan(0);
+    for (const deadline of deadlines)
+      expect(new Date(deadline).toISOString()).toBe(deadline);
+    expect(play).toMatch(/milliseconds/);
   });
 
   it('says what to do with each response', () => {
@@ -446,16 +476,47 @@ describe('renderSkill: what an agent must know', () => {
     expect(todo.toLowerCase()).toContain('network');
   });
 
-  // T26 (casino-api A17).
-  it('makes one queue_key before queueing and sends it on every queue call', () => {
+  // T26 (casino-api A17), saved to a file since T27.
+  it('makes one queue_key file before queueing and sends it on every queue call', () => {
     const play = section(MD, 'How to play');
-    const make = play.indexOf('export QUEUE_KEY=$(openssl rand -hex 16)');
-    const queue = play.indexOf('\\"queue_key\\":\\"$QUEUE_KEY\\"');
+    const make = play.search(
+      /openssl rand -hex 16\s*>\s*\.casino\/alice\.queue_key/,
+    );
+    const queue = play.indexOf(
+      '\\"queue_key\\":\\"$(cat .casino/alice.queue_key)\\"',
+    );
     expect(make).toBeGreaterThan(0);
     expect(queue).toBeGreaterThan(make);
     // Saved once, never made again for this match.
     expect(play).toMatch(/same `queue_key`/);
     expect(play).toMatch(/do not run `openssl` again/i);
+  });
+
+  // T27: no long token pasted into every command, one file set per room so
+  // several matches can run at once, deleted after the report.
+  it('saves the token and queue_key per room, and deletes them after reporting', () => {
+    const play = section(MD, 'How to play');
+    const blocks = fenced(play, 'bash');
+    const matched = blocks.findIndex(
+      b =>
+        b.includes('> .casino/$ROOM_ID.token') &&
+        b.includes('mv .casino/alice.queue_key .casino/$ROOM_ID.queue_key'),
+    );
+    const joined = blocks.findIndex(
+      (b, i) => i !== matched && b.includes('> .casino/$ROOM_ID.token'),
+    );
+    const cleanup = blocks.findIndex(b => b.includes('rm .casino/$ROOM_ID.*'));
+    const queue = blocks.findIndex(b => b.includes('"$CASINO_URL/v1/queue"'));
+    const leaderboard = blocks.findIndex(b =>
+      b.includes('"$CASINO_URL/v1/leaderboard"'),
+    );
+    expect(matched).toBeGreaterThan(queue);
+    expect(joined).toBeGreaterThan(matched);
+    expect(cleanup).toBeGreaterThan(leaderboard);
+    for (const b of [matched, joined])
+      expect(blocks[b]).toMatch(/^export ROOM_ID=r_\w+$/m);
+    expect(play).toMatch(/several matches/i);
+    expect(play).toMatch(/same folder/i);
   });
 
   it('says how to get the same matched back after a crash, and what name_in_use means', () => {
@@ -481,6 +542,56 @@ describe('renderSkill: what an agent must know', () => {
     expect(play).toContain('500 characters');
     expect(play).toMatch(/opponent never/);
     expect(play).toMatch(/never let writing it make you miss the deadline/);
+  });
+
+  // T27: arena players skipped the note, or wrote it in English to an owner
+  // who spoke another language.
+  it('suggests a note on every action, in the language the owner uses', () => {
+    const play = section(MD, 'How to play');
+    expect(play).toMatch(/note[^\n]*every action/i);
+    expect(play).toMatch(/language your owner/i);
+  });
+
+  // T27 (arena proposal 1): what "a game" is and the whole flow, up front.
+  it('starts with a quick start: one match of 10 hands, and the whole flow', () => {
+    const quick = section(MD, 'Quick start');
+    expect(quick).toMatch(/one match/i);
+    expect(quick).toMatch(/10 hands/);
+    expect(quick).toContain('`settings.hands`');
+    const order = [
+      quick.indexOf('POST /v1/queue'),
+      quick.indexOf('`watch_url`'),
+      quick.indexOf('wait'),
+      quick.indexOf('actions'),
+      quick.indexOf('match_over'),
+    ];
+    expect(order.every(i => i > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(quick).toMatch(/report/i);
+  });
+
+  // T27 (arena proposal 1): names are public and not accounts.
+  it('says how to pick a name when none was given, and that names are shared', () => {
+    const quick = section(MD, 'Quick start');
+    expect(quick).toMatch(/no name/i);
+    expect(quick).toContain('<model>-<4 random');
+    expect(quick).toMatch(/public/i);
+    expect(quick).toMatch(/same name[^\n]*rating[^\n]*record/i);
+  });
+
+  // T27 (arena proposal 8, casino-api A17).
+  it('says what to do after a crash, near the top', () => {
+    const crash = section(
+      MD,
+      'If your program crashes or the connection drops',
+    );
+    expect(crash).toContain('.casino/$ROOM_ID.token');
+    expect(crash).toMatch(/`wait`[^\n]*`state`/);
+    expect(crash).toMatch(/plays for you/);
+    expect(crash).toMatch(/same name[^\n]*same `queue_key`[^\n]*`matched`/);
+    // After the save block moved the queue_key, the queue example can't
+    // find it any more: a saved token means wait, not queue.
+    expect(crash).toMatch(/token is saved[^\n]*do not queue again/i);
   });
 });
 

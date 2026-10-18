@@ -4,6 +4,8 @@
 // endpoint's schemas, and the types below catch most mistakes earlier.
 // One story runs through them: alice (seat 0) plays bob (seat 1) in
 // r_8f2k1x9q0a, 80 chips in play, and is on the flop of hand 3.
+// Values look like the server's: renderSkill puts the requested origin in
+// place of EXAMPLE_ORIGIN, and deadline has milliseconds (T27).
 import type { ApiError } from '../contract/errors';
 import type {
   ActionAccepted,
@@ -30,12 +32,13 @@ export interface EndpointExample {
   readonly responses: ReadonlyArray<ResponseExample>;
 }
 
+export const EXAMPLE_ORIGIN = 'https://casino.example';
 const ROOM = 'r_8f2k1x9q0a';
 const TOKEN = 'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MH0.Hk3vQ9xZ2mPq';
 const WAIT = `GET /v1/rooms/${ROOM}/wait`;
 const SETTINGS = { hands: 10, turn_seconds: 60, starting_stack: 40 };
 const watchUrl = (token: string) =>
-  `https://web.example.net/watch/${ROOM}?token=${token}`;
+  `${EXAMPLE_ORIGIN}/watch/${ROOM}?token=${token}`;
 const WATCH_URL = watchUrl(
   'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MH0.Wt5mK2pQ8vNa',
 );
@@ -45,7 +48,7 @@ const ACT = `POST /v1/rooms/${ROOM}/actions`;
 const queueRequest: typeof QueueRequest.Type = {
   game: 'holdem',
   name: 'alice',
-  queue_key: '$QUEUE_KEY',
+  queue_key: '$(cat .casino/alice.queue_key)',
 };
 
 const matched: typeof QueueResponse.Type = {
@@ -124,7 +127,7 @@ const yourTurn: RoomStatus = {
   to_act_seat: 0,
   hand_number: 3,
   turn_id: 't_41',
-  deadline: '2026-10-16T12:50:30Z',
+  deadline: '2026-10-16T12:50:30.000Z',
   view: {
     street: 'flop',
     my_seat: 0,
