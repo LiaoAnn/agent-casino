@@ -16,7 +16,8 @@
 # (default 2400).
 #
 # Exits 0 only when the platform has a finished match between the two names
-# in which both made their own last action, and both agents exited normally;
+# in which both made their own last action, both agents got the server's
+# match_over answer (seen in their logs), and both exited normally;
 # the agents' own reports don't count. Everything the agents write and say
 # goes to a fresh folder under /tmp, printed at the start.
 set -euo pipefail
@@ -101,8 +102,7 @@ echo "claude exited $rc_claude, codex exited $rc_codex (124 = timed out)"
 
 # The platform decides: a finished match between the two names in which each
 # player's last action was its own, not the server playing for an agent that
-# had already gone. With both agents exiting normally after that, both were
-# there for match_over.
+# had already gone.
 match=$(curl -fsS --max-time 20 "$URL/v1/matches" | jq -r --arg a "$claude_name" --arg b "$codex_name" \
   '[.matches[] | select((.players | index($a)) and (.players | index($b)))
     | select(.result | test("^(seat0_win|seat1_win|draw)$"))][0].match_id // empty')
@@ -119,8 +119,23 @@ jq -r '
       | "  \($m.players[$s]): \($acts | length) actions, \([$acts[] | select(.timeout)] | length) timeouts, last action \(if ($acts | last | .timeout) then "by the server (timeout)" else "its own" end)")' <<<"$detail"
 present=$(jq '[range(2) as $s | [.hands[].events[] | select(.seat == $s and .type != "post_blind")]
   | length > 0 and (last | .timeout | not)] | all' <<<"$detail")
-if [ "$present" != true ] || [ "$rc_claude" -ne 0 ] || [ "$rc_codex" -ne 0 ]; then
-  echo "not ok - an agent left before match_over (see above and the logs in $OUT)" >&2
+
+# And each agent got the server's own match_over answer: its log holds that
+# response, which names this run's opponent, so it can't come from skill.md or
+# from the agent's own words.
+# got_match_over <log> <opponent>
+got_match_over() {
+  local q='\\*"'
+  grep -qE "${q}status${q}: ?${q}match_over${q}, ?${q}room_status${q}: ?${q}finished${q}, ?${q}opponent_name${q}: ?${q}$2${q}" "$1"
+}
+seen_claude=no seen_codex=no
+got_match_over "$OUT/$claude_name.jsonl" "$codex_name" && seen_claude=yes
+got_match_over "$OUT/$codex_name.jsonl" "$claude_name" && seen_codex=yes
+echo "  match_over in the server's answers: $claude_name $seen_claude, $codex_name $seen_codex"
+
+if [ "$present" != true ] || [ "$seen_claude" != yes ] || [ "$seen_codex" != yes ] ||
+  [ "$rc_claude" -ne 0 ] || [ "$rc_codex" -ne 0 ]; then
+  echo "not ok - an agent did not play match $match to match_over (see above and the logs in $OUT)" >&2
   exit 1
 fi
 echo "ok - both agents played match $match to match_over"
