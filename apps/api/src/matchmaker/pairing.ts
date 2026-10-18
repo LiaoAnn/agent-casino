@@ -2,8 +2,9 @@
 // free of `cloudflare:workers` so it runs in Node tests; the Matchmaker DO
 // holds one MatchQueue and forwards its RPC calls here.
 //
-// State lives in memory only: a DO restart (a deploy) drops the queue, and
-// the agents simply queue again.
+// The queue and recent matches are written to the DO's storage: a DO with
+// no request for a few seconds may be evicted from memory, and a player who
+// got `waiting` or `matched` must still find them when they call again.
 import { Effect } from 'effect';
 import type { ApiError } from '../contract/errors';
 import {
@@ -40,7 +41,16 @@ export type OpenMatch = (
   second: QueueInput,
 ) => Promise<Result<[Seated, Seated], 'unavailable'>>;
 
+// What the queue needs from DurableObjectStorage.
+export interface QueueStorage {
+  get<T>(key: string): Promise<T | undefined>;
+  put<T>(key: string, value: T): Promise<void>;
+}
+
 export interface MatchQueueOptions {
+  // Where the queue and recent matches are kept, so they outlive the DO
+  // being evicted from memory. Defaults to memory only (tests).
+  storage?: QueueStorage;
   // How long a call waits for an opponent before answering `waiting`.
   waitMs?: number;
   // How long a queue entry is kept after `waiting`, and a `matched` answer
@@ -100,14 +110,39 @@ interface Pairing {
   at: number;
   // Both seats' answers, or undefined if the room could not be opened.
   answers: Promise<[Matched, Matched] | undefined>;
-  done: boolean;
+  // Set once the room is open.
+  matched?: [Matched, Matched];
 }
+
+// What STORAGE_KEY holds: entries not in a long poll, and opened pairs.
+interface Saved {
+  waiting: Omit<Entry, 'polls'>[];
+  pairings: {
+    keys: [string, string];
+    at: number;
+    matched: [Matched, Matched];
+  }[];
+}
+
+const STORAGE_KEY = 'queue';
+
+const memoryStorage = (): QueueStorage => {
+  const data = new Map<string, unknown>();
+  return {
+    get: async <T>(key: string) => data.get(key) as T | undefined,
+    put: async (key, value) => {
+      data.set(key, structuredClone(value));
+    },
+  };
+};
 
 export class MatchQueue {
   readonly #openMatch: OpenMatch;
   readonly #waitMs: number;
   readonly #holdMs: number;
   readonly #now: () => number;
+  readonly #storage: QueueStorage;
+  #loaded: Promise<void> | undefined;
   // In arrival order, so the first match found is the one who queued first.
   readonly #waiting = new Map<string, Entry>();
   readonly #pairings = new Map<string, Pairing>();
@@ -119,10 +154,12 @@ export class MatchQueue {
     this.#waitMs = options.waitMs ?? WAIT_MS;
     this.#holdMs = options.holdMs ?? HOLD_MS;
     this.#now = options.now ?? Date.now;
+    this.#storage = options.storage ?? memoryStorage();
   }
 
   async queue(input: QueueInput): Promise<Result<Answer, 'unavailable'>> {
     const key = input.name.toLowerCase();
+    await this.#load();
     this.#prune();
     const pairing = this.#pairings.get(key);
     if (pairing) {
@@ -158,13 +195,44 @@ export class MatchQueue {
   #prune() {
     const now = this.#now();
     for (const [key, pairing] of this.#pairings) {
-      if (pairing.done && now - pairing.at > this.#holdMs) {
+      if (pairing.matched && now - pairing.at > this.#holdMs) {
         this.#pairings.delete(key);
       }
     }
     for (const [key, entry] of this.#waiting) {
       if (entry.polls === 0 && now > entry.expiresAt) this.#waiting.delete(key);
     }
+  }
+
+  #load() {
+    this.#loaded ??= this.#storage.get<Saved>(STORAGE_KEY).then(saved => {
+      for (const entry of saved?.waiting ?? []) {
+        this.#waiting.set(entry.key, { ...entry, polls: 0 });
+      }
+      for (const { keys, at, matched } of saved?.pairings ?? []) {
+        const pairing = {
+          keys,
+          at,
+          answers: Promise.resolve(matched),
+          matched,
+        };
+        for (const key of keys) this.#pairings.set(key, pairing);
+      }
+    });
+    return this.#loaded;
+  }
+
+  #save() {
+    const pairings = new Set(this.#pairings.values());
+    const saved: Saved = {
+      waiting: [...this.#waiting.values()].map(
+        ({ polls: _, ...entry }) => entry,
+      ),
+      pairings: [...pairings].flatMap(({ keys, at, matched }) =>
+        matched ? [{ keys, at, matched }] : [],
+      ),
+    };
+    return this.#storage.put(STORAGE_KEY, saved);
   }
 
   async #answerOf(pairing: Pairing, key: string) {
@@ -185,7 +253,6 @@ export class MatchQueue {
       keys: [first.key, second.key],
       at: this.#now(),
       answers: opened.promise,
-      done: false,
     };
     this.#pairings.set(first.key, pairing);
     this.#pairings.set(second.key, pairing);
@@ -206,24 +273,26 @@ export class MatchQueue {
         }
       }
       opened.resolve(undefined);
+      return this.#save();
     };
     let result: Awaited<ReturnType<OpenMatch>>;
     try {
       result = await this.#openMatch(first.input, second.input);
     } catch (error) {
-      unpair();
+      await unpair();
       throw error;
     }
     if (!result.ok) {
-      unpair();
+      await unpair();
       return result;
     }
     const answers: [Matched, Matched] = [
       matchedAnswer(result.value[0]),
       matchedAnswer(result.value[1]),
     ];
-    pairing.done = true;
+    pairing.matched = answers;
     opened.resolve(answers);
+    await this.#save();
     return { ok: true, value: answers[1] };
   }
 
@@ -254,6 +323,7 @@ export class MatchQueue {
       entry.polls -= 1;
       if (this.#waiting.get(entry.key) === entry) {
         entry.expiresAt = this.#now() + this.#holdMs;
+        await this.#save();
       }
     }
   }

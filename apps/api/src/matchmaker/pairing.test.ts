@@ -42,6 +42,32 @@ const fixture = () => {
   return { clock, openMatch, queue };
 };
 
+class MemoryQueueStorage {
+  readonly #data = new Map<string, unknown>();
+
+  async get<T>(key: string): Promise<T | undefined> {
+    const value = this.#data.get(key);
+    return value === undefined ? undefined : (structuredClone(value) as T);
+  }
+
+  async put<T>(key: string, value: T): Promise<void> {
+    this.#data.set(key, structuredClone(value));
+  }
+}
+
+const persistentFixture = () => {
+  const clock = { ms: 0 };
+  const openMatch = vi.fn<OpenMatch>().mockResolvedValue(opened);
+  const options = {
+    storage: new MemoryQueueStorage(),
+    waitMs: WAIT_MS,
+    holdMs: HOLD_MS,
+    now: () => clock.ms,
+  };
+  const recreate = () => new MatchQueue(openMatch, options);
+  return { clock, openMatch, queue: recreate(), recreate };
+};
+
 // Attach a rejection handler while another request is being arranged. The
 // original promise still rejects when awaited, including against the RED stub.
 const start = (queue: MatchQueue, input: QueueInput) => {
@@ -51,6 +77,63 @@ const start = (queue: MatchQueue, input: QueueInput) => {
 };
 
 describe('MatchQueue (A2)', () => {
+  it('replays both matched results after recreation without opening another match', async () => {
+    const { queue, recreate, clock, openMatch } = persistentFixture();
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    clock.ms = 1_000;
+    const bob = await queue.queue({ name: 'Bob' });
+    const alice = await queue.queue({ name: 'Alice' });
+    expect([alice, bob]).toEqual([matched(0), matched(1)]);
+
+    clock.ms += 30_000;
+    const restored = recreate();
+    clock.ms += HOLD_MS - 30_000 - 1;
+    const replayed = await Promise.all([
+      restored.queue({ name: 'Alice' }),
+      restored.queue({ name: 'Bob' }),
+    ]);
+    expect(replayed).toEqual([alice, bob]);
+    expect(openMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('expires matched results after recreation using the original pairing time', async () => {
+    const { queue, recreate, clock, openMatch } = persistentFixture();
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    clock.ms = 1_000;
+    expect(await queue.queue({ name: 'Bob' })).toEqual(matched(1));
+
+    clock.ms += 30_000;
+    const restored = recreate();
+    clock.ms += HOLD_MS - 30_000 + 1;
+    expect(await restored.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(openMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('pairs a retained waiter after recreation and preserves its first seat', async () => {
+    const { queue, recreate, clock, openMatch } = persistentFixture();
+    const alice = { name: 'Alice' };
+    const bob = { name: 'Bob' };
+    expect(await queue.queue(alice)).toEqual(waiting);
+
+    clock.ms += 30_000;
+    const restored = recreate();
+    clock.ms += HOLD_MS - 30_000 - 1;
+    expect(await restored.queue(bob)).toEqual(matched(1));
+    expect(await restored.queue(alice)).toEqual(matched(0));
+    expect(openMatch).toHaveBeenCalledExactlyOnceWith(alice, bob);
+  });
+
+  it('expires a retained waiter after recreation using the original hold period', async () => {
+    const { queue, recreate, clock, openMatch } = persistentFixture();
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+
+    clock.ms += 30_000;
+    const restored = recreate();
+    clock.ms += HOLD_MS - 30_000 + 1;
+    expect(await restored.queue({ name: 'Bob' })).toEqual(waiting);
+    expect(openMatch).not.toHaveBeenCalled();
+  });
+
   it('holds a lone request until waitMs, then returns the exact waiting hint', async () => {
     const { queue, openMatch } = fixture();
     const started = performance.now();

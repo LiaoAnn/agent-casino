@@ -15,7 +15,9 @@ export class Matchmaker extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // The secrets (TOKEN_SECRET) are there at runtime; Env doesn't type them.
-    this.#queue = new MatchQueue(openMatchIn(env as Bindings));
+    this.#queue = new MatchQueue(openMatchIn(env as Bindings), {
+      storage: ctx.storage,
+    });
     this.#ratings = new RatingWriter(openDb(env.DB));
   }
 
