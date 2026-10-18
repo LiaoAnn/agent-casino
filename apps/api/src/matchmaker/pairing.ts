@@ -149,6 +149,10 @@ interface Saved {
 
 const STORAGE_KEY = 'queue';
 
+// Whether this seat of the pairing was queued with this queue_key (A17).
+const ownedBy = (pairing: Pairing, key: string, queueKey: string) =>
+  pairing.queueKeys[pairing.keys.indexOf(key)] === queueKey;
+
 const memoryStorage = (): QueueStorage => {
   const data = new Map<string, unknown>();
   return {
@@ -190,7 +194,7 @@ export class MatchQueue {
     this.#prune();
     const pairing = this.#pairings.get(key);
     if (pairing) {
-      if (pairing.queueKeys[pairing.keys.indexOf(key)] !== input.queue_key) {
+      if (!ownedBy(pairing, key, input.queue_key)) {
         return { ok: false, error: NAME_IN_USE(input.name) };
       }
       const answer = await this.#answerOf(pairing, key);
@@ -272,10 +276,14 @@ export class MatchQueue {
 
   #load() {
     this.#loaded ??= this.#storage.get<Saved>(STORAGE_KEY).then(saved => {
+      // Saved before queue_key (T26): nobody could claim them, so they are
+      // dropped as if expired.
       for (const entry of saved?.waiting ?? []) {
+        if (entry.input.queue_key === undefined) continue;
         this.#waiting.set(entry.key, { ...entry, polls: 0 });
       }
       for (const { keys, queueKeys, at, matched } of saved?.pairings ?? []) {
+        if (queueKeys === undefined) continue;
         const pairing = {
           keys,
           queueKeys,
@@ -381,8 +389,10 @@ export class MatchQueue {
     });
     try {
       for (;;) {
+        // Someone else with this name, if this entry was dropped meanwhile
+        // (banned) and the name queued anew with another key.
         const pairing = this.#pairings.get(entry.key);
-        if (pairing) {
+        if (pairing && ownedBy(pairing, entry.key, entry.input.queue_key)) {
           const answer = await this.#answerOf(pairing, entry.key);
           if (answer) return { ok: true, value: answer };
           continue;

@@ -3,8 +3,10 @@ import { apiError } from '../contract/errors';
 import { SETTINGS_DEFAULTS } from '../contract/schemas';
 import {
   MatchQueue,
+  type MatchQueueOptions,
   type OpenMatch,
   type QueueInput,
+  type QueueStorage,
   type Seated,
 } from './pairing';
 
@@ -615,6 +617,101 @@ describe('MatchQueue queue_key ownership (A17)', () => {
   const alice = { name: 'Alice', queue_key: ALICE_KEY };
   const impostor = { name: 'ALICE', queue_key: OTHER_KEY };
   const bob = { name: 'Bob', queue_key: 'bob-private-key-01' };
+
+  it('does not give a removed long poll the match of another key with the same name', async () => {
+    vi.useFakeTimers();
+    try {
+      const checks: { name: string; resolve: (banned: boolean) => void }[] = [];
+      const openMatch = vi.fn<OpenMatch>().mockResolvedValue(opened);
+      const queue = new MatchQueue(openMatch, {
+        waitMs: WAIT_MS,
+        isBanned: name =>
+          new Promise<boolean>(resolve => checks.push({ name, resolve })),
+      });
+      const original = start(queue, alice);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const carol = start(queue, {
+        name: 'Carol',
+        queue_key: 'carol-private-key-1',
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(checks.map(check => check.name)).toEqual(['Alice']);
+      checks[0]?.resolve(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(openMatch).not.toHaveBeenCalled();
+
+      // This request passed the handler before the ban; only Carol is retained.
+      const replacement = start(queue, impostor);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(checks.map(check => check.name)).toEqual(['Alice', 'Carol']);
+      checks[1]?.resolve(false);
+      await vi.advanceTimersByTimeAsync(WAIT_MS);
+
+      const replacementMatch = await replacement;
+      expect(replacementMatch).toEqual(matched(1));
+      expect(await carol).toEqual(matched(0));
+      expect(openMatch).toHaveBeenCalledExactlyOnceWith(
+        { name: 'Carol' },
+        { name: 'ALICE' },
+      );
+      const originalAnswer = await original;
+      expect.soft(originalAnswer).not.toEqual(replacementMatch);
+      expect(JSON.stringify(originalAnswer)).not.toContain(ROOM);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('discards legacy storage without queue keys instead of failing or replaying old matches', async () => {
+    const legacyRoom = 'r_legacy0001';
+    const results = await Promise.all(
+      [alice, { ...bob, queue_key: OTHER_KEY }].map(async input => {
+        const storage: QueueStorage = new MemoryQueueStorage();
+        await storage.put('queue', {
+          waiting: [
+            {
+              key: 'alice',
+              input: { name: 'Alice' },
+              pairingKey: JSON.stringify({ settings: SETTINGS_DEFAULTS }),
+              expiresAt: HOLD_MS,
+            },
+          ],
+          pairings: [
+            {
+              keys: ['bob', 'dave'],
+              at: 0,
+              matched: [0, 1].map(seat => ({
+                ...matched(seat as 0 | 1).value,
+                room_id: legacyRoom,
+                token: `legacy-token-${seat}`,
+              })),
+            },
+          ],
+        });
+        const options: MatchQueueOptions = {
+          storage,
+          waitMs: WAIT_MS,
+          holdMs: HOLD_MS,
+          now: () => 1_000,
+        };
+        const queue = new MatchQueue(
+          vi.fn<OpenMatch>().mockResolvedValue(opened),
+          options,
+        );
+        return queue.queue(input);
+      }),
+    );
+    for (const result of results) {
+      expect(result).toMatchObject({ ok: true });
+      expect(
+        result.ok && ['waiting', 'matched'].includes(result.value.status),
+      ).toBe(true);
+      expect(JSON.stringify(result)).not.toContain(legacyRoom);
+      expect(JSON.stringify(result)).not.toContain('legacy-token-');
+    }
+  });
+
   const expectConflict = (answer: unknown) => {
     expect(answer).toMatchObject({
       ok: false,
