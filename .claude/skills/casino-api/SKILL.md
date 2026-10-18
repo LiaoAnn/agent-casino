@@ -161,7 +161,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 ## 測試房與狀況演練
 
 - 只有環境變數 `ALLOW_TEST_ROOMS=true`（本機與測試環境）時，`POST /v1/rooms` 才接受額外的 `test` 設定：
-  - `seed`：指定洗牌種子。
+  - `seed`：指定洗牌種子，64 個小寫十六進位字元（格式見 holdem-rules skill「種子與洗牌」）；整數或大寫回 400 `invalid_request`。
   - `chaos`：故意製造狀況，例如第一次交動作一律回 `invalid_action`、某次 `wait` 故意回 `waiting`、某次請求故意斷線。
 - 正式環境一律忽略 `test` 設定。
 - 平台內建一個簡單機器人（亂打但合法），給端到端測試和單人試玩用。
@@ -218,7 +218,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 ### A11 chaos 設定（只在 `ALLOW_TEST_ROOMS=true` 時生效）
 ```json
 "test": {
-  "seed": 12345,
+  "seed": "0000000000000000000000000000000000000000000000000000000000000000",
   "chaos": {
     "reject_first_action": true,
     "extra_waiting": 2,

@@ -92,9 +92,9 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 
 呼叫方式：
 - 用 t3 的 `delegate_task`，不要用 Claude 內建的 subagent。先呼叫 `orchestrator_capabilities` 找 Codex 的 `providerInstanceId`（目前是 `codex`），`target` 填 `{"providerInstanceId":"codex","model":"gpt-6.1-sol","options":{"reasoningEffort":"medium","serviceTier":"priority"}}`（`priority` 就是 Fast），`role` 填 `test`、`review` 或 `general`。
-- **Codex 不能用時改用 Sonnet**：`orchestrator_capabilities` 裡 Codex 有 constraints 或沒有 `gpt-6.1-sol`，或同一個任務實際跑了兩次都失敗，就用同一份任務說明再呼叫一次 `delegate_task`，`target` 換成 `{"providerInstanceId":"claudeAgent","model":"claude-sonnet-5-5","options":{"effort":"high"}}`，`clientRequestId` 換新的（例如加 `-sonnet`）。PR 裡寫明哪些任務改用 Sonnet、為什麼。
+- **Codex 不能用時改用 Sonnet**：`orchestrator_capabilities` 裡 Codex 有 constraints 或沒有 `gpt-6.1-sol`，或同一個任務實際跑了兩次都失敗（第二次要換新的 `clientRequestId`），就用同一份任務說明再呼叫一次 `delegate_task`，`target` 換成 `{"providerInstanceId":"claudeAgent","model":"claude-sonnet-5-5","options":{"effort":"high"}}`，`clientRequestId` 換新的（例如加 `-sonnet`）。PR 裡寫明哪些任務改用 Sonnet、為什麼。
 - `isolation` 用預設的 `shared`：子任務直接在你的 worktree 裡跑，看得到還沒 commit 的改動。不要用 `worktree`，那會從上一個 commit 開新的 checkout，看不到你正在改的東西。子任務在跑的時候，你不要改檔案。
-- 每個任務一個 `clientRequestId`（例如 `t09-s2-test-author-1`）。同一個任務重送時用同一個 id，不然會開出重複的子任務；新的一輪才換新 id。記下每個回傳的 `taskId`。
+- 每個任務一個 `clientRequestId`（例如 `t09-s2-test-author-1`）。同一個 id 再送一次只會拿回原本的結果，不會重跑：呼叫沒有回應、不確定有沒有開成時才用同一個 id 重送；任務失敗要重跑或開新的一輪，就換新 id（例如 `-2`）。記下每個回傳的 `taskId`。
 - 要等結果才能往下走時用 `mode:"wait"`、`timeoutMs: 1800000`。幾個 lens 可以各用 `mode:"async"` 同時開，等它們做完的通知。回傳 `waitTimedOut` 或收到通知後，用 `task_status` 拿最後的報告再往下走。
 - PR 的「驗證」和「Review」段寫明每個角色用了哪個 provider 和模型。
 
