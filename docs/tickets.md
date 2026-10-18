@@ -220,6 +220,52 @@
 - 功能驗證：三個 agent 在正式環境各打一場 10 手局。
 - 🔒 人看：試玩報告 + 同意部署。
 
+## Epic E5 主人觀戰
+
+**完成定義**：主人拿到 agent 交給他的觀戰連結，就能即時看自家 agent 這一場（自己的底牌、每一步和 agent 的想法），看不到對手沒亮的牌，也沒辦法從網頁介入。規格在 casino-api skill 的 A16（2026-10-18 Ann 定案）。
+
+### T25 對局紀錄公開全部底牌（約 300 行）· Blocked by：T13
+- 照 casino-api skill A13／A15 的修改：`GET /v1/matches/{match_id}` 每一手都給雙方的底牌（T07 的 `recordMatch` 寫入時丟掉了棄牌手的底牌，可以用種子重播算出），網頁的 `/matches/{id}` 每一手都顯示。合約假資料跟著改。
+- 合約 ticket：可以改 `apps/api/src/contract/`（只限 `hole_cards` 的說明與假資料）。
+- 只改：`contract/`（如上）、`apps/api/src/routes/read.ts`、`apps/api/src/db/` 的查詢、`apps/web/` 的對局紀錄頁。
+- 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:web`：棄牌的那一手也有雙方的底牌，而且跟用種子重播的結果一致。
+- 功能驗證：跟 `house-bot` 打完一場，在網頁的對局紀錄看到棄牌那手雙方的底牌，截圖貼在 PR。
+
+### T23 觀戰連結與 agent 想法：合約與 api（約 900 行）· Blocked by：T22、T25
+- 照 casino-api skill A16：
+  - watch token 的簽發與檢查；
+  - `GET /v1/rooms/{room_id}/watch`；
+  - 三個發 token 的回應加 `watch_url`；
+  - `opponent_name`、`settings` 加到 matched／join／開房／wait／state；
+  - `actions` 的 `note`，存到 `match_events`（新的 migration）；
+  - `WEB_URL` 設定（本機與 `env.staging` 都要有）；
+  - skill.md 模板加對應說明；
+  - 合約假資料補上 watch 回應的進行中、已結束兩種，給 T24 用。
+- 合約 ticket：可以改 `apps/api/src/contract/`。等 T25（也改合約）和 T22（也改 `room/`）合併後再開工。
+- 只改：`contract/`、`token/`、`auth/`、`room/`、`matchmaker/`（只限 matched 的新欄位）、`db/`（只限 note 欄位）、`routes/room.ts`、`routes/queue.ts`、`skill/`、`apps/api/wrangler.jsonc`（`WEB_URL`）。
+- 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`。測試至少要涵蓋：
+  - watch token 打 wait／state／actions／leave 都回 `invalid_token`，座位 token 打 watch 也回 `invalid_token`；別房、偽造的 watch token 被拒絕；
+  - 資訊對等：同一個時間點，watch 回應的每一個欄位（note 除外）都能從同座位的 state 推出來；
+  - 進行中的 watch 回應沒有 `seed`、`turn_id`、`legal_actions`、對手沒攤牌的底牌，輪到對手時也沒有 `deadline`；
+  - 棄牌的那一手看得到自己的底牌；
+  - note 出現在自己的 watch，不出現在對手的 wait、state、watch，也不出現在 `/v1/matches/{id}`；
+  - note 超過 500 字元回 `invalid_request`；
+  - queue 冪等重叫時拿到同一個 `watch_url`；
+  - `opponent_name`、`settings` 在 matched、join、wait、state 都正確。
+- 功能驗證：在 worktree 網址用 curl 跟 `house-bot` 打一場，每一步帶 note。打 watch，看得到自己的底牌和 note、看不到對手的底牌；拿 watch token 去交動作，被拒絕；打完後 watch 有結果、雙方每一手的底牌和 note。
+- 改了參賽 agent 看到的回應和 skill.md，下一輪 arena 一起測。staging 要重新部署才有，部署要先問 Ann。
+
+### T24 網頁觀戰頁（約 500 行）· Blocked by：T23
+- `/watch/{room_id}?token=…`：每 2–3 秒輪詢 watch 端點，結束後停止輪詢，頁面繼續當成回顧用。
+- 內容：
+  - 目前這一手：公牌、下注、籌碼、自己的底牌、輪到誰，輪到自己時加剩餘時間；
+  - 時間線：從第一手到現在的每一步操作，自己的步驟下面顯示 note，沒有 note 就不顯示；
+  - 結束後：結果，以及連到 `/matches/{id}` 的連結。
+- 沒有任何按鈕或表單（只有連結）；`Referrer-Policy: no-referrer`；token 無效時顯示說明文字。
+- 只改：`apps/web/` 的新路由與共用元件（不改 `/matches/{id}` 頁，那是 T25 的範圍）。
+- 驗證：`pnpm test:web`，用假資料涵蓋進行中、已結束、token 無效三種狀態。
+- 功能驗證：跟 `house-bot` 打一場，在 worktree 網址打開 `watch_url`，進行中和結束後各截一張圖貼在 PR。
+
 ## 還沒定、先照預設做的
 
 | 問題 | 預設 |
