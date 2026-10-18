@@ -669,7 +669,9 @@ describe('T34 freezeout match records', () => {
   it('decodes an old D1 record with hands settings as fixed 1/2 blinds', async () => {
     // Persist the same tables/hand rows as production, then replace the match
     // row directly through D1 so the writer cannot normalize the old JSON.
-    const match = await record();
+    const match = await record({
+      hands: [hand(1), hand(2), hand(3), hand(4), hand(5), hand(6)],
+    });
     const stored = await testD1.d1
       .prepare('SELECT * FROM matches')
       .first<Record<string, unknown>>();
@@ -677,7 +679,7 @@ describe('T34 freezeout match records', () => {
     const legacy = {
       ...stored,
       settings: JSON.stringify({
-        hands: 2,
+        hands: 6,
         turn_seconds: 30,
         starting_stack: 200,
       }),
@@ -696,10 +698,10 @@ describe('T34 freezeout match records', () => {
     expect(detail.settings).toEqual({
       starting_stack: 200,
       blind_every: null,
-      max_hands: 2,
+      max_hands: 6,
       turn_seconds: 30,
     });
-    expect(detail.hands).toHaveLength(2);
+    expect(detail.hands).toHaveLength(6);
     for (const hand of detail.hands) expect(hand.blinds).toEqual([1, 2]);
   });
 });

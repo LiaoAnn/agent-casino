@@ -476,6 +476,10 @@ describe('MatchQueue (A2)', () => {
 
   it.each([
     [
+      { settings: { ...SETTINGS_DEFAULTS, blind_every: 1 } },
+      { settings: { ...SETTINGS_DEFAULTS, blind_every: 5 } },
+    ],
+    [
       { settings: { ...SETTINGS_DEFAULTS, max_hands: 2 } },
       { settings: { ...SETTINGS_DEFAULTS, max_hands: 3 } },
     ],
