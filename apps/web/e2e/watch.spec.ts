@@ -22,7 +22,7 @@ const streets = {
   river: '河牌',
 } as const;
 const pair = (w: WatchResponse, values: readonly [unknown, unknown]) =>
-  `${w.players[0]} ${values[0]} · ${w.players[1]} ${values[1]}`;
+  `${w.display_names[0]} ${values[0]} · ${w.display_names[1]} ${values[1]}`;
 const signed = (n: number) => (n >= 0 ? `+${n}` : String(n));
 // A player's Elo from the leaderboard, when they are on it.
 const elo = (name: string) =>
@@ -45,7 +45,7 @@ const action = (e: Event) => {
   }
 };
 const eventText = (w: WatchResponse, e: Event) =>
-  `${streets[e.street]} ${w.players[e.seat]} ${action(e)}${e.timeout ? ' 超時代打' : ''}`;
+  `${streets[e.street]} ${w.display_names[e.seat]} ${action(e)}${e.timeout ? ' 超時代打' : ''}`;
 const expectPairs = async (dl: Locator, pairs: [string, string][]) => {
   await expect(dl.locator('dt')).toHaveText(pairs.map(p => p[0]));
   await expect(dl.locator('dd')).toHaveText(pairs.map(p => p[1]));
@@ -94,9 +94,9 @@ const expectTimeline = async (page: Page, w: WatchResponse) => {
     const result =
       h.winner_seat === null
         ? `平分底池 ${h.pot}`
-        : `${w.players[h.winner_seat]} 贏得 ${h.pot}（${h.ended_by === 'showdown' ? '攤牌' : '對手棄牌'}）`;
+        : `${w.display_names[h.winner_seat]} 贏得 ${h.pot}（${h.ended_by === 'showdown' ? '攤牌' : '對手棄牌'}）`;
     await expectPairs(section.locator('dl'), [
-      ['莊家', w.players[h.button_seat] as string],
+      ['莊家', w.display_names[h.button_seat] as string],
       ['盲注', `${h.blinds[0]}/${h.blinds[1]}`],
       ...(h.board.length > 0
         ? ([['公共牌', cards(h.board)]] as [string, string][])
@@ -138,10 +138,10 @@ const expectWatchInfo = async (
   updatedAt = clockTime,
 ) => {
   await expect(page.getByRole('heading', { level: 2 })).toHaveText(
-    `${w.players[0]} vs ${w.players[1] ?? '（等待對手）'}`,
+    `${w.display_names[0]} vs ${w.display_names[1] ?? '（等待對手）'}`,
   );
   await expectPairs(page.locator('dl[aria-label="觀戰資訊"]'), [
-    ['觀看', w.players[w.seat] as string],
+    ['觀看', `${w.display_names[w.seat]}@${w.players[w.seat]}`],
     ['狀態', status],
     [
       '設定',
@@ -181,7 +181,7 @@ test('playing shows the current hand, countdown, timeline and private notes', as
     ['公共牌', v.board.length === 0 ? '尚未發出' : cards(v.board)],
     ['底池', String(v.pot)],
     ['街', streets[v.street]],
-    ['莊家', w.players[v.button_seat] as string],
+    ['莊家', w.display_names[v.button_seat] as string],
     ['盲注', `${v.blinds[0]}/${v.blinds[1]}`],
     ...(v.next_blinds_at_hand === null
       ? []
@@ -195,7 +195,7 @@ test('playing shows the current hand, countdown, timeline and private notes', as
   // The watched seat sits at the bottom edge, after the opponent's.
   const order = w.seat === 0 ? ([1, 0] as const) : ([0, 1] as const);
   for (const [i, seat] of order.entries()) {
-    const name = w.players[seat] as string;
+    const name = w.display_names[seat] as string;
     const panel = current.getByRole('region', {
       name: `座位：${name}`,
       exact: true,
@@ -206,7 +206,8 @@ test('playing shows the current hand, countdown, timeline and private notes', as
       seat === v.button_seat ? 1 : 0,
     );
     const mine = seat === w.seat;
-    const rating = elo(name);
+    // The leaderboard knows the player by name, not display name.
+    const rating = elo(w.players[seat] as string);
     await expectPairs(panel.locator('dl'), [
       ['底牌', mine ? cards(v.my_cards) : '未亮牌'],
       ['籌碼', String(mine ? v.my_stack : v.opponent_stack)],
@@ -246,7 +247,10 @@ test('playing shows the current hand, countdown, timeline and private notes', as
     page.getByRole('region', { name: '結果', exact: true }),
   ).toHaveCount(0);
   const remaining = current
-    .getByRole('region', { name: `座位：${w.players[w.seat]}`, exact: true })
+    .getByRole('region', {
+      name: `座位：${w.display_names[w.seat]}`,
+      exact: true,
+    })
     .locator('dt')
     .filter({ hasText: /^剩餘時間$/ })
     .locator('xpath=following-sibling::dd[1]');
@@ -380,13 +384,17 @@ test('finished shows results, all hole cards and notes, stops polling and links 
   const result = page.getByRole('region', { name: '結果', exact: true });
   await expect(result.getByRole('heading', { level: 3 })).toHaveText('結果');
   const resultLabel = {
-    seat0_win: `${w.players[0]} 勝`,
-    seat1_win: `${w.players[1]} 勝`,
+    seat0_win: `${w.display_names[0]} 勝`,
+    seat1_win: `${w.display_names[1]} 勝`,
     draw: '平手',
     void: '作廢',
     cancelled: '取消',
   }[w.result];
   await expectPairs(result.locator('dl'), [
+    [
+      '玩家',
+      `${w.display_names[0]}@${w.players[0]}vs${w.display_names[1]}@${w.players[1]}`,
+    ],
     ['結果', resultLabel],
     ['最終籌碼', pair(w, w.final_stacks)],
     ...(w.ratings === null
@@ -395,7 +403,10 @@ test('finished shows results, all hole cards and notes, stops polling and links 
           [
             'Elo',
             w.ratings
-              .map(r => `${r.name} ${r.rating} (${signed(r.change)})`)
+              .map(
+                (r, seat) =>
+                  `${w.display_names[seat]} ${r.rating} (${signed(r.change)})`,
+              )
               .join(' · '),
           ],
         ] as [string, string][])),
@@ -415,13 +426,13 @@ test('finished shows results, all hole cards and notes, stops polling and links 
     `最後一手：第 ${last.hand_number} 手`,
   );
   await expect(lastTable.getByRole('region', { name: /^座位：/ })).toHaveText([
-    new RegExp(`^${w.players[w.seat === 0 ? 1 : 0]}`),
-    new RegExp(`^${w.players[w.seat]}`),
+    new RegExp(`^${w.display_names[w.seat === 0 ? 1 : 0]}`),
+    new RegExp(`^${w.display_names[w.seat]}`),
   ]);
   await expect(lastTable.locator('dl[aria-label="牌桌"] dd').last()).toHaveText(
     last.winner_seat === null
       ? `平分底池 ${last.pot}`
-      : `${w.players[last.winner_seat]} 贏得 ${last.pot}（${last.ended_by === 'showdown' ? '攤牌' : '對手棄牌'}）`,
+      : `${w.display_names[last.winner_seat]} 贏得 ${last.pot}（${last.ended_by === 'showdown' ? '攤牌' : '對手棄牌'}）`,
   );
   await expectNoPolling(page);
   await expectWatchInfo(page, w, '已結束');
@@ -433,7 +444,7 @@ test('finished shows results, all hole cards and notes, stops polling and links 
   await link.click();
   await expect(page).toHaveURL(`/matches/${w.match_id}`);
   await expect(page.getByRole('heading', { level: 2 })).toHaveText(
-    `${match.players[0]} vs ${match.players[1]}`,
+    `${match.display_names[0]} vs ${match.display_names[1]}`,
   );
   await expect(page.locator('dl[aria-label="對局資訊"]')).toBeVisible();
 });

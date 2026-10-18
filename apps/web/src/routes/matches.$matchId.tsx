@@ -18,7 +18,8 @@ export const Route = createFileRoute('/matches/$matchId')({
 
 function MatchPage() {
   const match = Route.useLoaderData();
-  const { players, rating_changes } = match;
+  // The table and the timeline show the display names (A20).
+  const { display_names: shown, rating_changes } = match;
   const ratings = [
     rating_changes?.[0].before,
     rating_changes?.[1].before,
@@ -26,7 +27,7 @@ function MatchPage() {
   return (
     <div className="space-y-6">
       <PageTitle>
-        {players[0]} vs {players[1]}
+        {shown[0]} vs {shown[1]}
       </PageTitle>
       <Panel>
         <MatchInfo match={match} />
@@ -38,7 +39,7 @@ function MatchPage() {
           <MatchHand
             key={hand.hand_number}
             hand={hand}
-            players={players}
+            players={shown}
             ratings={ratings}
           />
         ))

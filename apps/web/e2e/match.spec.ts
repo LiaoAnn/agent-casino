@@ -29,9 +29,9 @@ type Event = MatchHand['events'][number];
 const resultText = (m: MatchDetail): string => {
   switch (m.result) {
     case 'seat0_win':
-      return `${m.players[0]} 勝`;
+      return `${m.display_names[0]} 勝`;
     case 'seat1_win':
-      return `${m.players[1]} 勝`;
+      return `${m.display_names[1]} 勝`;
     case 'draw':
       return '平手';
     case 'void':
@@ -51,14 +51,15 @@ const card = (c: string) =>
   `${c[0] === 'T' ? '10' : c[0]}${SUITS[c[1] as string]}`;
 
 const pairText = (m: MatchDetail, values: readonly [unknown, unknown]) =>
-  `${m.players[0]} ${values[0]} · ${m.players[1]} ${values[1]}`;
+  `${m.display_names[0]} ${values[0]} · ${m.display_names[1]} ${values[1]}`;
 
 const signed = (n: number) => (n >= 0 ? `+${n}` : `-${-n}`);
 
 const eloText = (m: MatchDetail) =>
   (m.rating_changes ?? [])
     .map(
-      c => `${c.name} ${c.before} → ${c.after} (${signed(c.after - c.before)})`,
+      (c, seat) =>
+        `${m.display_names[seat]} ${c.before} → ${c.after} (${signed(c.after - c.before)})`,
     )
     .join(' · ');
 
@@ -68,7 +69,12 @@ const settingsText = ({ settings: s }: MatchDetail) =>
     ? `起始籌碼 ${s.starting_stack} · 固定盲注 1/2 · ${s.max_hands} 手 · 每步 ${s.turn_seconds} 秒`
     : `起始籌碼 ${s.starting_stack} · 盲注每 ${s.blind_every} 手翻倍 · 最多 ${s.max_hands} 手 · 每步 ${s.turn_seconds} 秒`;
 
+// A20: each display name over its grey @name.
+const playersText = (m: MatchDetail) =>
+  `${m.display_names[0]}@${m.players[0]}vs${m.display_names[1]}@${m.players[1]}`;
+
 const infoPairs = (m: MatchDetail): [string, string][] => [
+  ['玩家', playersText(m)],
   ['結果', resultText(m)],
   ['結束時間', endedText(m.ended_at)],
   ['計分', m.rated ? '計分' : '不計分'],
@@ -83,14 +89,14 @@ const infoPairs = (m: MatchDetail): [string, string][] => [
 const handResult = (m: MatchDetail, h: MatchHand) => {
   if (h.winner_seat === null) return `平分底池 ${h.pot}`;
   const how = h.ended_by === 'showdown' ? '攤牌' : '對手棄牌';
-  return `${m.players[h.winner_seat]} 贏得 ${h.pot}（${how}）`;
+  return `${m.display_names[h.winner_seat]} 贏得 ${h.pot}（${how}）`;
 };
 
 // The middle of the table as the hand ended.
 const centerPairs = (m: MatchDetail, h: MatchHand): [string, string][] => [
   ['公共牌', h.board.length > 0 ? h.board.map(card).join(' ') : '沒有發公共牌'],
   ['底池', String(h.pot)],
-  ['莊家', m.players[h.button_seat]],
+  ['莊家', m.display_names[h.button_seat]],
   ['盲注', `${h.blinds[0]}/${h.blinds[1]}`],
   ['結果', handResult(m, h)],
 ];
@@ -134,7 +140,7 @@ const actionText = (e: Event) => {
 };
 
 const eventText = (m: MatchDetail, e: Event) =>
-  `${STREETS[e.street]} ${m.players[e.seat]} ${actionText(e)}${e.timeout ? ' 超時代打' : ''}`;
+  `${STREETS[e.street]} ${m.display_names[e.seat]} ${actionText(e)}${e.timeout ? ' 超時代打' : ''}`;
 
 // --- Locators ---
 
@@ -171,11 +177,16 @@ const expectHand = async (page: Page, m: MatchDetail, h: MatchHand) => {
   );
   // Seat 1 at the top edge, seat 0 at the bottom.
   await expect(section.getByRole('region', { name: /^座位：/ })).toHaveText([
-    new RegExp(`^${m.players[1]}`),
-    new RegExp(`^${m.players[0]}`),
+    new RegExp(`^${m.display_names[1]}`),
+    new RegExp(`^${m.display_names[0]}`),
   ]);
   for (const seat of [0, 1] as const) {
-    const panel = seatPanel(section, m.players[seat]);
+    const panel = seatPanel(section, m.display_names[seat]);
+    // A seat at the table shows the display name only, no @name (A20).
+    await expect(panel.getByRole('heading', { level: 4 })).toHaveText(
+      m.display_names[seat],
+    );
+    await expect(panel).not.toContainText(`@${m.players[seat]}`);
     await expectPairs(panel.locator('dl'), seatPairs(m, h, seat));
     await expect(panel.getByText('莊家', { exact: true })).toHaveCount(
       h.button_seat === seat ? 1 : 0,
@@ -258,7 +269,7 @@ test('shows a showdown hand step by step', async ({ page }) => {
   await open(page, m);
   const section = handSection(page, h.hand_number);
   await expectHand(page, m, h);
-  await expect(seatPanel(section, m.players[0])).toContainText(
+  await expect(seatPanel(section, m.display_names[0])).toContainText(
     h.hole_cards[0].map(card).join(' '),
   );
   await expect(section.locator('dl[aria-label="牌桌"]')).toContainText(
@@ -282,7 +293,7 @@ test('shows a fold hand step by step with both hole cards', async ({
   const section = handSection(page, h.hand_number);
   await expectHand(page, m, h);
   for (const seat of [0, 1] as const)
-    await expect(seatPanel(section, m.players[seat])).toContainText(
+    await expect(seatPanel(section, m.display_names[seat])).toContainText(
       h.hole_cards[seat].map(card).join(' '),
     );
   await expect(section).toContainText('（對手棄牌）');
@@ -329,7 +340,7 @@ test('shows the Elo row only for rated matches', async ({ page }) => {
   await expect(info(page).locator('dt', { hasText: 'Elo' })).toHaveCount(1);
   await expect(info(page)).toContainText(eloText(rated));
   await open(page, unrated);
-  await expect(info(page).locator('dt').first()).toHaveText('結果');
+  await expect(info(page).locator('dt').first()).toHaveText('玩家');
   await expect(info(page).locator('dt', { hasText: 'Elo' })).toHaveCount(0);
 });
 
@@ -357,12 +368,14 @@ test('a match link on the home page opens that match', async ({ page }) => {
   await page.goto('/');
   await page
     .getByRole('table', { name: '最近對局', exact: true })
-    .getByRole('link', { name: `${first.players[0]} vs ${first.players[1]}` })
+    .getByRole('link', {
+      name: `${first.display_names[0]} vs ${first.display_names[1]}`,
+    })
     .first()
     .click();
   await expect(page).toHaveURL(`/matches/${first.match_id}`);
   await expect(page.getByRole('heading', { level: 2 })).toHaveText(
-    `${first.players[0]} vs ${first.players[1]}`,
+    `${first.display_names[0]} vs ${first.display_names[1]}`,
   );
   await expect(info(page)).toBeVisible();
 });
@@ -388,7 +401,7 @@ for (const m of matches) {
     const response = await open(page, m);
     expect(response?.status()).toBe(200);
     await expect(page.getByRole('heading', { level: 2 })).toHaveText(
-      `${m.players[0]} vs ${m.players[1]}`,
+      `${m.display_names[0]} vs ${m.display_names[1]}`,
     );
     await expectPairs(info(page), infoPairs(m));
     await expect(handSections(page)).toHaveCount(m.hands.length);

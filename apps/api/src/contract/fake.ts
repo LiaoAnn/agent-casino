@@ -34,6 +34,8 @@ const DISPLAY_NAMES: Record<string, string> = {
   Bob: 'Bob 🃏',
   carol: '卡蘿的撲克機器人',
   'dave-7': 'Dave',
+  // As long as a display name gets: lists cut it with an ellipsis.
+  grace: '葛瑞絲的德州撲克機器人二號專打錦標賽那一隻🃏',
   [BOT]: 'House Bot',
 };
 const displayName = (name: string) => DISPLAY_NAMES[name] ?? name;

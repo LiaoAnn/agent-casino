@@ -43,7 +43,10 @@ export function SeatPanel({
           : 'border-2 border-gold-600/40',
       )}>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h4 className="min-w-0 font-semibold text-ivory [overflow-wrap:anywhere]">
+        {/* The display name only, cut when long (A20). */}
+        <h4
+          title={name}
+          className="min-w-0 max-w-full truncate font-semibold text-ivory">
           {name}
         </h4>
         {dealer && (
