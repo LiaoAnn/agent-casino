@@ -15,14 +15,13 @@ web 用 Cloudflare 的 Vite plugin build：環境在 build 時用 `CLOUDFLARE_EN
 
 以 staging 為例。全部在 repo 根目錄、Dev Container 裡跑，wrangler 要先登入（scope 含 `d1:write`）。每一步都會呼叫 Cloudflare。
 
-1. 建 D1：`pnpm --filter @agent-casino/api exec wrangler d1 create agent-casino-staging`，把印出的 `database_id` 填進 `apps/api/wrangler.jsonc` 的 `env.staging`，commit。
+1. 建 D1：`pnpm --filter @agent-casino/api exec wrangler d1 create agent-casino-staging --update-config=false`（不讓 wrangler 自己改設定：它會寫到最上層，不是 `env.staging`），把印出的 `database_id` 填進 `apps/api/wrangler.jsonc` 的 `env.staging`，commit。
 2. 套 migration：`pnpm db:migrate:staging`。
 3. 部署 api：`pnpm --filter @agent-casino/api run deploy:staging`。
 4. 設秘密，值用亂數產生、直接交給 wrangler，不印出、不存檔：
    ```bash
-   cd apps/api
-   openssl rand -hex 32 | pnpm exec wrangler secret put TOKEN_SECRET --env staging
-   openssl rand -hex 32 | pnpm exec wrangler secret put ADMIN_KEY --env staging
+   openssl rand -hex 32 | pnpm --filter @agent-casino/api exec wrangler secret put TOKEN_SECRET --env staging
+   openssl rand -hex 32 | pnpm --filter @agent-casino/api exec wrangler secret put ADMIN_KEY --env staging
    ```
    之後需要 `ADMIN_KEY` 的人在 Cloudflare dashboard 重設一個自己知道的值。
 5. 部署 web：`pnpm --filter @agent-casino/web run deploy:staging`（api 要先存在，service binding 才綁得到）。
