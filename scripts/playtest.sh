@@ -70,7 +70,7 @@ player() {
   mkdir -p "$skilldir"
   git -C "$dir" init -q
   curl -fsS --max-time 20 "$URL/skill.md" -o "$skilldir/SKILL.md"
-  prompt="$invoke 請用名字 $name 去排一局德州撲克。對手是另一個 agent，會同時來排隊，等到配對成功為止，然後打完。"
+  prompt="$invoke 請用名字 $name、顯示名稱「$name 試玩」去排一局德州撲克。對手是另一個 agent，會同時來排隊，等到配對成功為止，然後打完。"
   cd "$dir"
   case $harness in
     claude)

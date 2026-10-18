@@ -85,16 +85,19 @@ play() {
 # A fresh queue_key (A17): 32 hex characters, as skill.md makes it.
 queue_key() { od -An -N16 -tx1 /dev/urandom | tr -d ' \n'; }
 
-# queue_body <name> <queue_key>
+# queue_body <name> <queue_key> [display_name]
 queue_body() {
-  echo "{\"game\":\"holdem\",\"name\":\"$1\",\"queue_key\":\"$2\",\"settings\":$SETTINGS}"
+  jq -nc --arg name "$1" --arg key "$2" --arg shown "${3-}" \
+    --argjson settings "$SETTINGS" \
+    '{game: "holdem", name: $name, queue_key: $key, settings: $settings}
+     + if $shown == "" then {} else {display_name: $shown} end'
 }
 
-# queue <name> <queue_key> <out file>: queues until matched.
+# queue <name> <queue_key> <out file> [display_name]: queues until matched.
 queue() {
   local r
   for _ in $(seq 1 10); do
-    r=$(post /v1/queue "$(queue_body "$1" "$2")")
+    r=$(post /v1/queue "$(queue_body "$1" "$2" "${4-}")")
     case $(jq -r .status <<<"$r") in
       matched) echo "$r" >"$3"; return 0 ;;
       waiting) ;;
@@ -120,12 +123,21 @@ r=$(post /v1/rooms \
 check "POST /v1/rooms with the old settings.hands: 400 pointing to max_hands" \
   '.[0].code == "invalid_request" and .[1] == 400
    and (.[0].hint | contains("max_hands"))' "$(jq -s . <<<"$r")"
+# A display name is any text but a line break (A20).
+r=$(post /v1/rooms \
+  "{\"game\":\"holdem\",\"name\":\"$human\",\"display_name\":\"two\\nlines\",\"opponent\":\"bot\"}" \
+  -w '\n%{http_code}')
+check "POST /v1/rooms with a line break in display_name: 400 invalid_request" \
+  '.[0].code == "invalid_request" and .[1] == 400' "$(jq -s . <<<"$r")"
 room=$(post /v1/rooms \
-  "{\"game\":\"holdem\",\"name\":\"$human\",\"opponent\":\"bot\"}")
+  "{\"game\":\"holdem\",\"name\":\"$human\",\"display_name\":\"  人類   玩家 🃏 \",\"opponent\":\"bot\"}")
 # No settings: the defaults (holdem-rules 設定表).
 check "POST /v1/rooms with house-bot and the default settings" \
   '.seat == 0 and (.token | length > 0)
    and .settings == {starting_stack: 40, blind_every: 5, max_hands: 50, turn_seconds: 30}' "$room"
+check "POST /v1/rooms trims and squeezes the display name; house-bot is House Bot" \
+  '.display_name == "人類 玩家 🃏" and .opponent_display_name == "House Bot"' \
+  "$room"
 bot_room=$(jq -r .room_id <<<"$room")
 play "$bot_room" "$(jq -r .token <<<"$room")" "$TMP/bot" ||
   fail "play house-bot to match_over"
@@ -133,11 +145,14 @@ check "house-bot match: over, not rated" \
   '.status == "match_over" and (.result | IN("win", "loss", "draw"))
    and .ratings == null and (.final_stacks | add) == 80
    and .view.next_blinds_at_hand == null
-   and .view.blinds == .last_hand.blinds' "$(cat "$TMP/bot")"
+   and .view.blinds == .last_hand.blinds
+   and .display_name == "人類 玩家 🃏" and .opponent_display_name == "House Bot"' \
+  "$(cat "$TMP/bot")"
 # A freezeout (A19): it ends on a bust or after max_hands, and the blinds
 # double every blind_every hands.
 check "GET /v1/matches/{id} of the house-bot match" \
   ".players == [\"$human\", \"house-bot\"] and .rated == false
+   and .display_names == [\"人類 玩家 🃏\", \"House Bot\"]
    and .settings == {starting_stack: 40, blind_every: 5, max_hands: 50, turn_seconds: 30}
    and (.hands | length) >= 1 and (.hands | length) <= 50
    and ((.final_stacks | index(0)) != null or (.hands | length) == 50)
@@ -154,7 +169,8 @@ r=$(post /v1/queue "$(queue_body "$a" short)" -w '\n%{http_code}')
 check "POST /v1/queue with a bad queue_key: 400 invalid_request" \
   '.[0].code == "invalid_request" and .[1] == 400' \
   "$(jq -s . <<<"$r")"
-queue "$a" "$key_a" "$TMP/qa" &
+# $a shows a display name; $b gives none, so theirs is the name (A20).
+queue "$a" "$key_a" "$TMP/qa" "  選手   A 🃏 " &
 qa=$!
 sleep 2
 queue "$b" "$key_b" "$TMP/qb" || fail "POST /v1/queue pairs $b"
@@ -162,15 +178,19 @@ wait $qa || fail "POST /v1/queue pairs $a"
 check "both queued players got the same room" \
   '.[0].room_id == .[1].room_id and .[0].seat == 0 and .[1].seat == 1' \
   "$(jq -s . "$TMP/qa" "$TMP/qb")"
+check "matched shows both display names to both" \
+  ".[0].display_name == \"選手 A 🃏\" and .[0].opponent_display_name == \"$b\"
+   and .[1].display_name == \"$b\" and .[1].opponent_display_name == \"選手 A 🃏\"" \
+  "$(jq -s . "$TMP/qa" "$TMP/qb")"
 # Someone who knows $a's name, but not the queue_key, gets nothing (A17).
 r=$(post /v1/queue "$(queue_body "$a" "$(queue_key)")" -w '\n%{http_code}')
 check "POST /v1/queue with $a's name and another queue_key: 409 name_in_use" \
   '.[0].code == "name_in_use" and .[1] == 409
    and (.[0] | has("room_id") or has("token") or has("watch_url") | not)' \
   "$(jq -s . <<<"$r")"
-check "POST /v1/queue again with $a's queue_key: the same matched" \
+check "POST /v1/queue again with $a's queue_key and another display name: the same matched" \
   '.[0] == .[1]' \
-  "$(jq -s . "$TMP/qa" <(post /v1/queue "$(queue_body "$a" "$key_a")"))"
+  "$(jq -s . "$TMP/qa" <(post /v1/queue "$(queue_body "$a" "$key_a" "改名")"))"
 pair_room=$(jq -r .room_id "$TMP/qa")
 play "$pair_room" "$(jq -r .token "$TMP/qa")" "$TMP/a" &
 pa=$!
@@ -189,20 +209,23 @@ check "GET /v1/matches lists both matches" \
   "$(get /v1/matches)"
 check "GET /v1/matches/{id} of the queued match is rated" \
   ".players == [\"$a\", \"$b\"] and .rated == true
+   and .display_names == [\"選手 A 🃏\", \"$b\"]
    and (.rating_changes | length) == 2" "$(get "/v1/matches/$pair_room")"
 check "GET /v1/leaderboard counts the queued match, not house-bot" \
   "([.entries[] | select(.name == \"$a\" or .name == \"$b\") | .games] == [1, 1]
     or (.entries | length) == 100)
-   and all(.entries[]; .name != \"house-bot\" and .name != \"$human\")" \
+   and all(.entries[]; .name != \"house-bot\" and .name != \"$human\")
+   and all(.entries[] | select(.name == \"$a\"); .display_name == \"選手 A 🃏\")
+   and all(.entries[] | select(.name == \"$b\"); .display_name == \"$b\")" \
   "$(get /v1/leaderboard)"
 
 if [[ -n ${WEB_URL:-} ]]; then
   WEB_URL=${WEB_URL%/}
   home=$(curl -sS --max-time 40 "$WEB_URL/")
-  [[ $home == *"$a"* && $home == *"$human"* ]] &&
+  [[ $home == *"選手 A 🃏"* && $home == *"@$a"* && $home == *"$human"* ]] &&
     ok "the web lists both matches" || fail "the web lists both matches"
   page=$(curl -sS --max-time 40 "$WEB_URL/matches/$pair_room")
-  [[ $page == *"$a"* && $page == *"$b"* ]] &&
+  [[ $page == *"選手 A 🃏"* && $page == *"@$a"* && $page == *"$b"* ]] &&
     ok "the web shows the queued match" || fail "the web shows the queued match"
 else
   echo "# skipped the web checks: no WEB_URL"
