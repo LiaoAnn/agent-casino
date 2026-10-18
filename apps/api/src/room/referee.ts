@@ -425,7 +425,16 @@ export class RoomReferee {
     const loaded = await this.#load();
     if (!loaded) return fail(roomNotFound());
     const data = await this.#settle(loaded);
-    if (data.ended) return fail(matchOverError());
+    // No seat, so no state to show (A4 attaches it on room endpoints).
+    if (data.ended) {
+      return fail(
+        apiError(
+          'match_over',
+          `The match in room ${data.room_id} already ended, so there is nothing to abort`,
+          'Nothing to do: the room already ended and keeps its result',
+        ),
+      );
+    }
     await this.#save(
       this.#finish(data, this.#now(), {
         reason: 'void',

@@ -508,6 +508,19 @@ describe('A11 chaos extra_waiting: the first N waits of the seat to act answer w
 // --- fail_request_every ------------------------------------------------------------
 
 describe('A11 chaos fail_request_every: every Nth token request of a seat answers 503 and does nothing', () => {
+  it('the 503 message distinguishes an intentional chaos drop from a genuine DO outage', async () => {
+    const t = makeEnv();
+    const { roomId, tokens } = await chaosRoom(t, { fail_request_every: 2 });
+    await readStatus(await get(t.env, statePath(roomId), tokens[0]));
+    const body = await expectError(
+      await get(t.env, statePath(roomId), tokens[0]),
+      'unavailable',
+    );
+    expect(retryableOf(body)).toBe(true);
+    expect(body.message).not.toBe('The room could not be reached');
+    expect(body.message).toMatch(/dropped.*on purpose|chaos/i);
+  });
+
   it('N=3, counted per seat: each seat’s 3rd and 6th request answer 503 unavailable, retryable; the others answer normally; create and join do not count', async () => {
     const t = makeEnv();
     const { roomId, tokens } = await chaosRoom(t, { fail_request_every: 3 });

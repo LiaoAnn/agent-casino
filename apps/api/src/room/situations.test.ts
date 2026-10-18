@@ -635,6 +635,15 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
     },
   );
 
+  it('aborting an already-ended room gives the seatless admin an ended-room hint without referring to state', async () => {
+    const t = makeEnv();
+    const roomId = await endings[0].end(t);
+    const body = await expectError(await abortPost(t, roomId), 'match_over');
+    expect(body).not.toHaveProperty('state');
+    expect(body.hint).not.toMatch(/state/i);
+    expect(body.hint).toMatch(/already.*ended/i);
+  });
+
   it.each(['r_zzzzz99999', 'nope', 'r_ABC'])(
     'an unknown or malformed room id (%s) answers 404 room_not_found',
     async roomId => {
