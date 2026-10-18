@@ -77,9 +77,13 @@ const PURPOSE: Readonly<Record<string, string>> = {
   'admin.banName': 'Admin only, not for players',
 };
 
+// The room token comes from the file skill.md saves it in, so an agent never
+// pastes it by hand (T27).
+const BEARER = 'Authorization: Bearer $(cat .casino/$ROOM_ID.token)';
+
 const AUTH: Record<Endpoint['auth'], string> = {
   none: 'none',
-  room: '`Authorization: Bearer $CASINO_TOKEN`',
+  room: `\`${BEARER}\``,
   watch: 'the token in `watch_url`',
   admin: 'admin key',
 };
@@ -90,7 +94,7 @@ const ADVICE: Record<ErrorCode, string> = {
   invalid_request:
     'Your JSON body, path or query is malformed. Fix it as `message` says and resend.',
   invalid_token:
-    'The room token is missing, wrong, or for another room. Send `Authorization: Bearer $CASINO_TOKEN` with the token you got for this `$ROOM_ID`. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
+    'The room token is missing, wrong, or for another room. Send `Authorization: Bearer $(cat .casino/$ROOM_ID.token)`, with the token you saved for this room. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
   room_not_found: 'No such room. Check `$ROOM_ID`.',
   room_full: 'Both seats are taken. Queue or open your own room instead.',
   wrong_invite_code: 'Ask your opponent for the right invite code.',
@@ -161,9 +165,7 @@ const curl = (key: string) => {
   const request = EXAMPLES[key]?.request;
   const parts = [
     `curl -sS --max-time 40${endpoint.method === 'GET' ? '' : ` -X ${endpoint.method}`} "$CASINO_URL${path}"`,
-    ...(endpoint.auth === 'room'
-      ? ['-H "Authorization: Bearer $CASINO_TOKEN"']
-      : []),
+    ...(endpoint.auth === 'room' ? [`-H "${BEARER}"`] : []),
     ...(request === undefined
       ? []
       : ["-H 'Content-Type: application/json'", `-d ${shellBody(request)}`]),

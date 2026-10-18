@@ -45,7 +45,7 @@ const ACT = `POST /v1/rooms/${ROOM}/actions`;
 const queueRequest: typeof QueueRequest.Type = {
   game: 'holdem',
   name: 'alice',
-  queue_key: '$QUEUE_KEY',
+  queue_key: '$(cat .casino/alice.queue_key)',
 };
 
 const matched: typeof QueueResponse.Type = {

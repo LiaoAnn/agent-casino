@@ -1,7 +1,7 @@
 // T05: skill.md is the only manual a participating agent gets, so it is
 // generated from the contract (casino-api skill: skill.md, A12) and every curl
-// in it must run as is with $CASINO_URL, $QUEUE_KEY, $CASINO_TOKEN, $ROOM_ID,
-// $TURN_ID.
+// in it must run as is with $CASINO_URL, $ROOM_ID and $TURN_ID, reading the
+// room token and queue_key from the files the agent saved them in (T27).
 // Endpoints and error codes are found by reflecting the contract, so a new one
 // fails here until skill.md renders it.
 import { Exit, Schema } from 'effect';
@@ -227,7 +227,7 @@ describe('renderSkill: generated from the contract', () => {
       );
       expect(rest, route).not.toBe('');
       if (endpoint.auth === 'room') {
-        expect(rest, route).toContain('Bearer $CASINO_TOKEN');
+        expect(rest, route).toContain('Bearer $(cat .casino/$ROOM_ID.token)');
       } else if (endpoint.auth === 'none') {
         expect(rest, route).not.toMatch(/bearer/i);
         expect(rest, route).not.toMatch(/admin/i);
@@ -282,14 +282,8 @@ describe('renderSkill: curl examples', () => {
     }
   });
 
-  it('uses only $CASINO_URL, $QUEUE_KEY, $CASINO_TOKEN, $ROOM_ID and $TURN_ID', () => {
-    const allowed = [
-      'CASINO_URL',
-      'QUEUE_KEY',
-      'CASINO_TOKEN',
-      'ROOM_ID',
-      'TURN_ID',
-    ];
+  it('uses only $CASINO_URL, $ROOM_ID and $TURN_ID', () => {
+    const allowed = ['CASINO_URL', 'ROOM_ID', 'TURN_ID'];
     for (const { command } of GAME_CURLS) {
       for (const [, name] of command.matchAll(/\$\{?([A-Za-z_]\w*)\}?/g)) {
         expect(allowed, command).toContain(name);
@@ -305,7 +299,7 @@ describe('renderSkill: curl examples', () => {
   });
 
   it('sends the room token only to room endpoints', () => {
-    const bearer = 'Authorization: Bearer $CASINO_TOKEN';
+    const bearer = 'Authorization: Bearer $(cat .casino/$ROOM_ID.token)';
     const room = /^v1\/rooms\/\$ROOM_ID\/(wait|state|actions|leave)$/;
     const open = /^v1\/(queue|rooms|rooms\/\$ROOM_ID\/join|leaderboard)$/;
     const paths = GAME_CURLS.map(c => c.path);
@@ -446,16 +440,47 @@ describe('renderSkill: what an agent must know', () => {
     expect(todo.toLowerCase()).toContain('network');
   });
 
-  // T26 (casino-api A17).
-  it('makes one queue_key before queueing and sends it on every queue call', () => {
+  // T26 (casino-api A17), saved to a file since T27.
+  it('makes one queue_key file before queueing and sends it on every queue call', () => {
     const play = section(MD, 'How to play');
-    const make = play.indexOf('export QUEUE_KEY=$(openssl rand -hex 16)');
-    const queue = play.indexOf('\\"queue_key\\":\\"$QUEUE_KEY\\"');
+    const make = play.indexOf(
+      'mkdir -p .casino && openssl rand -hex 16 > .casino/alice.queue_key',
+    );
+    const queue = play.indexOf(
+      '\\"queue_key\\":\\"$(cat .casino/alice.queue_key)\\"',
+    );
     expect(make).toBeGreaterThan(0);
     expect(queue).toBeGreaterThan(make);
     // Saved once, never made again for this match.
     expect(play).toMatch(/same `queue_key`/);
     expect(play).toMatch(/do not run `openssl` again/i);
+  });
+
+  // T27: no long token pasted into every command, one file set per room so
+  // several matches can run at once, deleted after the report.
+  it('saves the token and queue_key per room, and deletes them after reporting', () => {
+    const play = section(MD, 'How to play');
+    const blocks = fenced(play, 'bash');
+    const matched = blocks.findIndex(
+      b =>
+        b.includes('> .casino/$ROOM_ID.token') &&
+        b.includes('mv .casino/alice.queue_key .casino/$ROOM_ID.queue_key'),
+    );
+    const joined = blocks.findIndex(
+      (b, i) => i !== matched && b.includes('> .casino/$ROOM_ID.token'),
+    );
+    const cleanup = blocks.findIndex(b => b.includes('rm .casino/$ROOM_ID.*'));
+    const queue = blocks.findIndex(b => b.includes('"$CASINO_URL/v1/queue"'));
+    const leaderboard = blocks.findIndex(b =>
+      b.includes('"$CASINO_URL/v1/leaderboard"'),
+    );
+    expect(matched).toBeGreaterThan(queue);
+    expect(joined).toBeGreaterThan(matched);
+    expect(cleanup).toBeGreaterThan(leaderboard);
+    for (const b of [matched, joined])
+      expect(blocks[b]).toMatch(/^export ROOM_ID=r_\w+$/m);
+    expect(play).toMatch(/several matches/i);
+    expect(play).toMatch(/same folder/i);
   });
 
   it('says how to get the same matched back after a crash, and what name_in_use means', () => {

@@ -3,10 +3,14 @@
 // they would for an agent; `curl` is a shell function that hands its argv
 // back here, where it becomes a Request to the Worker's handle() with real
 // referees, the real queue and a real local D1. Each response must decode
-// with its endpoint's schemas, and $ROOM_ID, $CASINO_TOKEN and $TURN_ID come
-// from the responses before, as A12 says. $QUEUE_KEY comes from running the
-// block that makes it (A17).
+// with its endpoint's schemas, and $ROOM_ID and $TURN_ID come from the
+// responses before, as A12 says. Blocks without curl run for real in a fresh
+// folder: they make the queue_key file (A17) and save and delete the room's
+// token file (T27), so the curls read the token the way an agent's would.
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Exit, Schema } from 'effect';
 import { HttpApi } from 'effect/http-api';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -21,17 +25,25 @@ import type { Bindings } from '../routes/env';
 import { renderSkill } from './render';
 
 const BASE = 'https://casino.example';
-// The invite code the join example shows; the test sends the real one.
+// The values the examples show; the test sends the real ones, as an agent
+// copies them from the responses.
 const EXAMPLE_INVITE = 'K7Q2MX';
+const EXAMPLE_ROOM = 'r_8f2k1x9q0a';
+const EXAMPLE_TOKEN =
+  'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MH0.Hk3vQ9xZ2mPq';
 
 let testD1: TestD1;
+// The agent's working folder, where skill.md keeps .casino/.
+let cwd: string;
 
 beforeAll(async () => {
   testD1 = await startTestD1();
+  cwd = mkdtempSync(join(tmpdir(), 'skill-run-'));
 }, 30_000);
 
 afterAll(async () => {
   await testD1?.dispose();
+  if (cwd) rmSync(cwd, { recursive: true, force: true });
 });
 
 class MemoryStorage implements RoomStorage {
@@ -121,7 +133,10 @@ const curlsOf = (block: string, vars: Record<string, string>): string[][] => {
       '-c',
       `curl() { printf '%s\\0' "$@"; printf '\\n\\0'; }\nmkdir() { :; }\n${block}`,
     ],
-    { env: { PATH: process.env.PATH ?? '', HOME: '/nonexistent', ...vars } },
+    {
+      cwd,
+      env: { PATH: process.env.PATH ?? '', HOME: '/nonexistent', ...vars },
+    },
   ).toString();
   return out
     .split('\n\0')
@@ -129,14 +144,14 @@ const curlsOf = (block: string, vars: Record<string, string>): string[][] => {
     .map(chunk => chunk.split('\0').filter(arg => arg !== ''));
 };
 
-// The value a block without curl exports as $QUEUE_KEY, if it does.
-const queueKeyOf = (block: string) =>
-  execFileSync('bash', ['-c', `${block}\nprintf '\\0%s' "$QUEUE_KEY"`], {
-    env: { PATH: process.env.PATH ?? '', HOME: '/nonexistent' },
-  })
-    .toString()
-    .split('\0')
-    .at(-1);
+// A block without curl, run with `set -e` so a failing line fails the test.
+const runBlock = (block: string, vars: Record<string, string>) =>
+  execFileSync('bash', ['-ec', block], {
+    cwd,
+    env: { PATH: process.env.PATH ?? '', HOME: '/nonexistent', ...vars },
+  });
+
+const casinoFiles = () => readdirSync(join(cwd, '.casino')).sort();
 
 // curl's argv (only the options skill.md uses) as a Request.
 const requestOf = (argv: string[]) => {
@@ -172,14 +187,26 @@ describe('skill.md examples, run against the API', () => {
     const ran: Ran[] = [];
     const tokens: string[] = [];
     let invite = '';
+    // alice's seat, once she has one: what she copies into her blocks.
+    let seat: { room: string; token: string } | undefined;
+    let queueKey = '';
 
     for (const block of bashBlocks(md)) {
-      // The export lines show example values; the real ones come from the
-      // responses, as an agent would copy them.
       if (!block.includes('curl')) {
-        if (block.includes('QUEUE_KEY=')) {
-          vars.QUEUE_KEY = queueKeyOf(block) ?? '';
-          expect(vars.QUEUE_KEY).toMatch(QUEUE_KEY_PATTERN);
+        // Before alice has a seat, the save block runs with the example
+        // values, as written; after, with hers.
+        const script = seat
+          ? block
+              .replaceAll(EXAMPLE_ROOM, seat.room)
+              .replaceAll(EXAMPLE_TOKEN, seat.token)
+          : block;
+        runBlock(script, vars);
+        if (block.includes('openssl rand')) {
+          queueKey = readFileSync(
+            join(cwd, '.casino/alice.queue_key'),
+            'utf8',
+          ).trim();
+          expect(queueKey).toMatch(QUEUE_KEY_PATTERN);
         }
         continue;
       }
@@ -213,8 +240,8 @@ describe('skill.md examples, run against the API', () => {
 
         const value = body as Record<string, unknown>;
         if (endpoint.key === 'lobby.createRoom') {
-          vars.ROOM_ID = String(value.room_id);
-          vars.CASINO_TOKEN = String(value.token);
+          seat = { room: String(value.room_id), token: String(value.token) };
+          vars.ROOM_ID = seat.room;
           invite = String(value.invite_code);
         }
         if (typeof value.token === 'string') tokens.push(value.token);
@@ -223,26 +250,32 @@ describe('skill.md examples, run against the API', () => {
     }
 
     // In skill.md's order, each answered as the story goes: alice opens a
-    // room, bob joins, alice (the button) raises, checks the leaderboard and
-    // her state, then leaves and loses.
+    // room, bob joins, alice (the button) raises, checks her state, leaves
+    // and loses, then checks the leaderboard.
     expect(ran.map(r => [r.endpoint, r.status])).toEqual([
       ['lobby.queue', 200],
       ['lobby.createRoom', 200],
       ['lobby.joinRoom', 200],
       ['room.wait', 200],
       ['room.act', 200],
-      ['read.leaderboard', 200],
       ['room.state', 200],
       ['room.leave', 200],
+      ['read.leaderboard', 200],
       ['skill.skill', 200],
       ['skill.skill', 200],
     ]);
-    expect(vars.QUEUE_KEY).toBeDefined();
+    expect(queueKey).not.toBe('');
     expect(tokens).toHaveLength(2);
+    // Her room's files are gone after the report; only the example room's,
+    // which the matched block wrote as written, are left.
+    expect(casinoFiles()).toEqual([
+      `${EXAMPLE_ROOM}.queue_key`,
+      `${EXAMPLE_ROOM}.token`,
+    ]);
     expect(ran[0]?.body).toMatchObject({ status: 'waiting' });
     expect(ran[3]?.body).toMatchObject({ status: 'your_turn' });
     expect(ran[4]?.body).toMatchObject({ status: 'accepted' });
-    expect(ran[7]?.body).toMatchObject({
+    expect(ran[6]?.body).toMatchObject({
       status: 'match_over',
       result: 'loss',
       ratings: [
