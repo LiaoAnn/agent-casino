@@ -1,5 +1,5 @@
 // T11 slice 2: rooms that end without a finished match (casino-api skill:
-// 狀況處理 (等人超過 5 分鐘, 主動離開), A6, A8, A9 (管理員中止), A15;
+// 狀況處理 (等人超過 5 分鐘, 主動離開, 平台出錯), A6, A8, A9 (管理員中止), A15;
 // holdem-rules: 等人解散). Same harness as timeouts.test.ts: HTTP through
 // handle(), one RoomReferee per room id over a memory storage that records
 // its one alarm, an injected clock and a seeded deck.
@@ -69,6 +69,7 @@ interface TestEnv {
   // The referee and storage behind a room id.
   referee: (roomId: string) => RoomReferee;
   storage: (roomId: string) => MemoryStorage;
+  restart: (roomId: string) => void;
 }
 
 // Whole seconds, so a deadline without milliseconds still compares equal.
@@ -110,6 +111,13 @@ const makeEnv = (options: { waitMs?: number } = {}): TestEnv => {
     clock,
     referee: id => room(id).referee,
     storage: id => room(id).storage,
+    restart: id => {
+      const entry = room(id);
+      entry.referee = new RoomReferee(entry.storage, {
+        waitMs: options.waitMs ?? 300,
+        now: () => clock.ms,
+      });
+    },
   };
 };
 
@@ -458,6 +466,73 @@ describe('狀況處理 等人超過 5 分鐘: a room nobody joined is dissolved 
       'invalid_token',
     );
   });
+});
+
+describe('狀況處理 平台出錯', () => {
+  it.each(['alarm()', 'state catch-up without alarm()'] as const)(
+    '%s: a rejected timeout action ends the room as void for both seats and clears the alarm',
+    async trigger => {
+      const t = makeEnv();
+      const { roomId, tokens } = await seededRoom(t, {
+        hands: 2,
+        turn_seconds: 10,
+        starting_stack: STACK,
+      });
+      const turn = await yourTurn(t, roomId, tokens[0]);
+      const storage = t.storage(roomId);
+      const stored = await storage.get<{
+        turn: { seat: Seat };
+        match: { toAct: Seat };
+      }>('room');
+      if (stored === undefined) throw new Error('expected stored room');
+      expect(stored.turn.seat).toBe(stored.match.toAct);
+      // Model a platform fault: the scheduled actor disagrees with the engine.
+      stored.turn.seat = stored.match.toAct === 0 ? 1 : 0;
+      await storage.put('room', stored);
+      // Eviction and wake-up reload the persisted fault into a fresh referee.
+      t.restart(roomId);
+      t.clock.ms = Date.parse(turn.deadline) + 1;
+      expect(storage.alarm).not.toBeNull();
+
+      const expectVoid = (status: Status) => {
+        const over = asMatchOver(status);
+        expect(over).toMatchObject({
+          result: 'void',
+          room_status: 'void',
+          ratings: null,
+        });
+        expect(over.final_stacks).toHaveLength(2);
+        for (const stack of over.final_stacks) {
+          expect(Number.isInteger(stack)).toBe(true);
+          expect(stack).toBeGreaterThanOrEqual(0);
+        }
+        expect(over.final_stacks[0] + over.final_stacks[1]).toBe(2 * STACK);
+      };
+
+      if (trigger === 'alarm()') await t.referee(roomId).alarm();
+      else expectVoid(await state(t, roomId, tokens[0]));
+      expect(storage.alarm).toBeNull();
+
+      // Repeated reads must keep succeeding rather than retrying the fault.
+      for (let read = 0; read < 2; read++) {
+        for (const token of tokens) {
+          expectVoid(await state(t, roomId, token));
+          expectVoid((await wait(t, roomId, token)).status);
+        }
+      }
+      for (const token of tokens) {
+        const rejected = await expectError(
+          await actPost(t, roomId, token, {
+            turn_id: turn.turn_id,
+            type: 'check',
+          }),
+          'match_over',
+        );
+        expectVoid(errorState(rejected));
+      }
+      expect(storage.alarm).toBeNull();
+    },
+  );
 });
 
 // --- 管理員中止 (A9) -----------------------------------------------------------
