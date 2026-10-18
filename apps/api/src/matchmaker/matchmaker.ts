@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { openDb } from '../db/client';
 import type { MatchRecordInput } from '../db/records';
 import type { Bindings } from '../routes/env';
-import { MatchQueue, openMatchIn, type QueueInput } from './pairing';
+import { type MatchQueue, matchQueueIn, type QueueInput } from './pairing';
 import { RatingWriter } from './ratings';
 
 // The single queue and Elo writer of the platform (casino-api A2, A10),
@@ -15,9 +15,7 @@ export class Matchmaker extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // The secrets (TOKEN_SECRET) are there at runtime; Env doesn't type them.
-    this.#queue = new MatchQueue(openMatchIn(env as Bindings), {
-      storage: ctx.storage,
-    });
+    this.#queue = matchQueueIn(env as Bindings, { storage: ctx.storage });
     this.#ratings = new RatingWriter(openDb(env.DB));
   }
 

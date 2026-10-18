@@ -6,13 +6,15 @@
 // no request for a few seconds may be evicted from memory, and a player who
 // got `waiting` or `matched` must still find them when they call again.
 import { Effect } from 'effect';
-import type { ApiError } from '../contract/errors';
+import { type ApiError, apiError } from '../contract/errors';
 import {
   type QueueResponse,
   SETTINGS_DEFAULTS,
   type Settings,
   type TestSettings,
 } from '../contract/schemas';
+import { isBanned } from '../db/bans';
+import { openDb } from '../db/client';
 import * as Rooms from '../room/client';
 import type { Bindings } from '../routes/env';
 
@@ -57,6 +59,9 @@ export interface MatchQueueOptions {
   // after the match.
   holdMs?: number;
   now?: () => number;
+  // Whether a name is banned now; checked for the waiting partner before a
+  // room is opened (A9). Defaults to never.
+  isBanned?: (name: string) => Promise<boolean>;
 }
 
 type Answer = typeof QueueResponse.Type;
@@ -142,6 +147,7 @@ export class MatchQueue {
   readonly #holdMs: number;
   readonly #now: () => number;
   readonly #storage: QueueStorage;
+  readonly #isBanned: (name: string) => Promise<boolean>;
   #loaded: Promise<void> | undefined;
   // In arrival order, so the first match found is the one who queued first.
   readonly #waiting = new Map<string, Entry>();
@@ -155,6 +161,7 @@ export class MatchQueue {
     this.#holdMs = options.holdMs ?? HOLD_MS;
     this.#now = options.now ?? Date.now;
     this.#storage = options.storage ?? memoryStorage();
+    this.#isBanned = options.isBanned ?? (async () => false);
   }
 
   async queue(input: QueueInput): Promise<Result<Answer, 'unavailable'>> {
@@ -165,7 +172,8 @@ export class MatchQueue {
     if (pairing) {
       const answer = await this.#answerOf(pairing, key);
       if (answer) return { ok: true, value: answer };
-      this.#prune();
+      // The room couldn't be opened: start over from what is there now.
+      return this.queue(input);
     }
 
     let entry = this.#waiting.get(key);
@@ -183,12 +191,39 @@ export class MatchQueue {
       };
       this.#waiting.set(key, entry);
     }
-    for (const other of this.#waiting.values()) {
-      if (other !== entry && other.pairingKey === entry.pairingKey) {
-        return this.#pair(other, entry);
-      }
+    const partner = [...this.#waiting.values()].find(
+      other => other !== entry && other.pairingKey === entry.pairingKey,
+    );
+    if (!partner) return this.#poll(entry);
+
+    // The partner passed the ban check when they queued; they may have been
+    // banned since (A9). The caller was checked by the handler just now.
+    let banned: boolean;
+    try {
+      banned = await this.#isBanned(partner.input.name);
+    } catch {
+      return {
+        ok: false,
+        error: apiError(
+          'unavailable',
+          'The ban list could not be read',
+          'Resend POST /v1/queue in a few seconds',
+        ),
+      };
     }
-    return this.#poll(entry);
+    if (banned && this.#waiting.get(partner.key) === partner) {
+      this.#waiting.delete(partner.key);
+      await this.#save();
+    }
+    // Others may have paired either of them while the ban list was read.
+    if (
+      banned ||
+      this.#waiting.get(partner.key) !== partner ||
+      this.#waiting.get(key) !== entry
+    ) {
+      return this.queue(input);
+    }
+    return this.#pair(partner, entry);
   }
 
   // Drops expired entries and answers; pairings still opening stay.
@@ -334,9 +369,19 @@ export class MatchQueue {
   }
 }
 
+// The queue of a deployment: real rooms, and the ban list in D1.
+export const matchQueueIn = (
+  env: Bindings,
+  options: Omit<MatchQueueOptions, 'isBanned'> = {},
+) =>
+  new MatchQueue(openMatchIn(env), {
+    ...options,
+    isBanned: name => isBanned(openDb(env.DB), name),
+  });
+
 // Opens real rooms through the Room DOs (room/client.ts): `first` opens the
 // room, `second` joins it with the invite code.
-export const openMatchIn =
+const openMatchIn =
   (env: Bindings): OpenMatch =>
   (first, second) =>
     Effect.runPromise(

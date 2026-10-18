@@ -39,21 +39,17 @@ export const queue = HttpApiBuilder.handler(
   ({ payload }) =>
     Effect.gen(function* () {
       const env = yield* WorkerEnv;
-      const { name, settings, test } = payload;
+      const { name } = payload;
       const badName = Rooms.nameError(name, 'POST /v1/queue');
       if (badName) return yield* Effect.fail(badName);
       yield* refuseBanned(env, name, 'POST /v1/queue');
-      // `test` settings only count where ALLOW_TEST_ROOMS=true (casino-api
-      // 測試房); dropped here so they don't keep two players apart.
-      const allowTest =
-        (env as Bindings & { ALLOW_TEST_ROOMS?: string }).ALLOW_TEST_ROOMS ===
-        'true';
+      // What the room would be played with: people are paired only when
+      // these are the same, defaults included (A2).
+      const { settings, test } = yield* Effect.sync(() =>
+        Rooms.roomDefaults(env, payload),
+      );
       return yield* Rooms.callRoom(() =>
-        matchmaker(env).queue({
-          name,
-          ...(settings && { settings }),
-          ...(allowTest && test && { test }),
-        }),
+        matchmaker(env).queue({ name, settings, ...(test && { test }) }),
       );
     }),
 );

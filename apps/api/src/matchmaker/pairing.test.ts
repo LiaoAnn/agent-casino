@@ -77,6 +77,109 @@ const start = (queue: MatchQueue, input: QueueInput) => {
 };
 
 describe('MatchQueue (A2)', () => {
+  it('defaults to a 30 second long poll', async () => {
+    vi.useFakeTimers();
+    try {
+      const openMatch = vi.fn<OpenMatch>().mockResolvedValue(opened);
+      const queue = new MatchQueue(openMatch);
+      const settled = vi.fn();
+      const alice = start(queue, { name: 'Alice' });
+      void alice.then(settled);
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(settled).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await alice).toEqual(waiting);
+      expect(settled).toHaveBeenCalledTimes(1);
+      expect(openMatch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not pair with a retained waiter banned after receiving waiting', async () => {
+    const banned = new Set<string>();
+    const openMatch = vi.fn<OpenMatch>().mockResolvedValue(opened);
+    const queue = new MatchQueue(openMatch, {
+      waitMs: WAIT_MS,
+      isBanned: async name => banned.has(name.toLowerCase()),
+    });
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    banned.add('alice');
+    expect(await queue.queue({ name: 'Bob' })).toEqual(waiting);
+    expect(openMatch).not.toHaveBeenCalled();
+  });
+
+  it('skips a banned waiter and pairs the next compatible earlier waiter', async () => {
+    const banned = new Set<string>();
+    const openMatch = vi.fn<OpenMatch>().mockResolvedValue(opened);
+    const queue = new MatchQueue(openMatch, {
+      waitMs: WAIT_MS,
+      isBanned: async name => banned.has(name.toLowerCase()),
+    });
+    let release!: (value: Awaited<ReturnType<OpenMatch>>) => void;
+    let notifyOpening!: () => void;
+    let releaseCarol!: (value: Awaited<ReturnType<OpenMatch>>) => void;
+    let notifyCarolOpening!: () => void;
+    const opening = new Promise<void>(resolve => {
+      notifyOpening = resolve;
+    });
+    const carolOpening = new Promise<void>(resolve => {
+      notifyCarolOpening = resolve;
+    });
+    openMatch.mockImplementationOnce(() => {
+      notifyOpening();
+      return new Promise(resolve => {
+        release = resolve;
+      });
+    });
+    openMatch.mockImplementationOnce(() => {
+      notifyCarolOpening();
+      return new Promise(resolve => {
+        releaseCarol = resolve;
+      });
+    });
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    const dave = start(queue, { name: 'Dave' });
+    await opening;
+    const carol = { name: 'Carol' };
+    expect(await queue.queue(carol)).toEqual(waiting);
+    const eve = start(queue, { name: 'Eve' });
+    await carolOpening;
+    const failed = {
+      ok: false as const,
+      error: apiError('unavailable', 'Try again', 'Call POST /v1/queue again'),
+    };
+    release(failed);
+    expect(await dave).toEqual(failed);
+    releaseCarol(failed);
+    expect(await eve).toEqual(failed);
+    // Restore Alice first, then Carol, so the banned waiter is encountered first.
+    banned.add('alice');
+    const bob = { name: 'Bob' };
+    expect(await queue.queue(bob)).toEqual(matched(1));
+    expect(await queue.queue(carol)).toEqual(matched(0));
+    expect(openMatch.mock.calls).toEqual([
+      [{ name: 'Alice' }, { name: 'Dave' }],
+      [carol, { name: 'Eve' }],
+      [carol, bob],
+    ]);
+  });
+
+  it('returns unavailable when checking a retained waiter ban fails', async () => {
+    const isBanned = vi
+      .fn<(name: string) => Promise<boolean>>()
+      .mockResolvedValue(false);
+    const openMatch = vi.fn<OpenMatch>().mockResolvedValue(opened);
+    const queue = new MatchQueue(openMatch, { waitMs: WAIT_MS, isBanned });
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    isBanned.mockRejectedValueOnce(new Error('D1 unavailable'));
+    expect(await queue.queue({ name: 'Bob' })).toMatchObject({
+      ok: false,
+      error: { code: 'unavailable' },
+    });
+    expect(openMatch).not.toHaveBeenCalled();
+  });
+
   it('replays both matched results after recreation without opening another match', async () => {
     const { queue, recreate, clock, openMatch } = persistentFixture();
     expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
@@ -163,12 +266,12 @@ describe('MatchQueue (A2)', () => {
   });
 
   it('wakes an outstanding long poll as soon as an opponent arrives', async () => {
-    const { queue } = fixture();
+    const queue = new MatchQueue(vi.fn<OpenMatch>().mockResolvedValue(opened), {
+      waitMs: 60_000,
+    });
     const alice = start(queue, { name: 'Alice' });
-    const started = performance.now();
     expect(await queue.queue({ name: 'Bob' })).toEqual(matched(1));
     expect(await alice).toEqual(matched(0));
-    expect(performance.now() - started).toBeLessThan(WAIT_MS);
   });
 
   it('expires queue eligibility 45 seconds after waiting is returned', async () => {
@@ -316,5 +419,48 @@ describe('MatchQueue (A2)', () => {
       matched(0),
     ]);
     expect(await queue.queue({ name: 'Alice' })).toEqual(matched(0));
+  });
+
+  it('deduplicates retries after opening fails so Alice joins only one successful room', async () => {
+    const { queue, openMatch } = fixture();
+    let release!: (value: Awaited<ReturnType<OpenMatch>>) => void;
+    let notifyOpening!: () => void;
+    const opening = new Promise<void>(resolve => {
+      notifyOpening = resolve;
+    });
+    openMatch.mockImplementationOnce(() => {
+      notifyOpening();
+      return new Promise(resolve => {
+        release = resolve;
+      });
+    });
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    const bob = start(queue, { name: 'Bob' });
+    await opening;
+    const firstRetry = start(queue, { name: 'ALICE' });
+    const secondRetry = start(queue, { name: 'ALICE' });
+    expect(await queue.queue({ name: 'Carol' })).toEqual(waiting);
+    expect(openMatch).toHaveBeenCalledTimes(1);
+    const failed = {
+      ok: false as const,
+      error: apiError('unavailable', 'Try again', 'Call POST /v1/queue again'),
+    };
+    release(failed);
+    expect(await bob).toEqual(failed);
+    const [first, second] = await Promise.all([firstRetry, secondRetry]);
+    expect(first).toMatchObject({
+      ok: true,
+      value: { status: 'matched', room_id: ROOM },
+    });
+    expect(second).toEqual(first);
+    expect(await queue.queue({ name: 'Dave' })).toEqual(waiting);
+    const aliceOpenings = openMatch.mock.calls.filter(players =>
+      players.some(player => player.name.toLowerCase() === 'alice'),
+    );
+    expect(aliceOpenings).toHaveLength(2);
+    expect(openMatch).toHaveBeenCalledTimes(2);
+    expect(
+      openMatch.mock.calls[1]?.map(player => player.name.toLowerCase()).sort(),
+    ).toEqual(['alice', 'carol']);
   });
 });

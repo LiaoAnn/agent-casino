@@ -17,7 +17,11 @@ import {
 import { QueueResponse, RoomStatus } from '../contract/schemas';
 import { banName } from '../db/bans';
 import { startTestD1, type TestD1 } from '../db/test-d1';
-import { MatchQueue, openMatchIn } from '../matchmaker/pairing';
+import {
+  type MatchQueue,
+  matchQueueIn,
+  type QueueInput,
+} from '../matchmaker/pairing';
 import { RoomReferee, type RoomStorage } from '../room/referee';
 import { verifyRoomToken } from '../token/token';
 import type { Bindings } from './env';
@@ -46,9 +50,16 @@ class MemoryStorage implements RoomStorage {
   async put<T>(key: string, value: T): Promise<void> {
     this.data.set(key, structuredClone(value));
   }
+
+  async setAlarm(_scheduledTime: number): Promise<void> {}
+
+  async deleteAlarm(): Promise<void> {}
 }
 
-const makeEnv = (allowTestRooms?: string) => {
+const makeEnv = (
+  allowTestRooms?: string,
+  defaults: { DEFAULT_SETTINGS_JSON?: string; DEFAULT_TEST_JSON?: string } = {},
+) => {
   const referees = new Map<string, RoomReferee>();
   const ROOM = {
     idFromName: (name: string) => name,
@@ -62,6 +73,7 @@ const makeEnv = (allowTestRooms?: string) => {
     },
   };
   const env = {
+    ...defaults,
     TOKEN_SECRET,
     ADMIN_KEY: 'queue-test-admin-key',
     DB: testD1.d1,
@@ -71,12 +83,21 @@ const makeEnv = (allowTestRooms?: string) => {
       ? {}
       : { ALLOW_TEST_ROOMS: allowTestRooms }),
   } as unknown as Bindings;
-  const queue = new MatchQueue(openMatchIn(env), { waitMs: WAIT_MS });
-  const queueCall = vi.fn(queue.queue.bind(queue));
+  const queues = new Map<string, MatchQueue>();
+  const queueCall = vi.fn((id: string, input: QueueInput) => {
+    let queue = queues.get(id);
+    if (queue === undefined) {
+      queue = matchQueueIn(env, { waitMs: WAIT_MS });
+      queues.set(id, queue);
+    }
+    return queue.queue(input);
+  });
   Object.assign(env, {
     MATCHMAKER: {
       idFromName: (name: string) => name,
-      get: () => ({ queue: queueCall }),
+      get: (id: string) => ({
+        queue: (input: QueueInput) => queueCall(id, input),
+      }),
     },
   });
   return { env, queueCall };
@@ -188,6 +209,64 @@ describe('POST /v1/queue (S1)', () => {
     });
   });
 
+  it('removes a retained waiter banned before pairing and pairs the remaining callers', async () => {
+    const { env } = makeEnv();
+    expect((await decodeQueue(await queue(env, 'Alice'))).status).toBe(
+      'waiting',
+    );
+    await banName(testD1.db, 'Alice');
+    expect((await decodeQueue(await queue(env, 'Bob'))).status).toBe('waiting');
+    await expectError(await queue(env, 'ALICE'), 'name_banned');
+    const carol = await decodeQueue(await queue(env, 'Carol'));
+    const bob = await decodeQueue(await queue(env, 'Bob'));
+    expect(carol.status).toBe('matched');
+    expect(bob.status).toBe('matched');
+    if (carol.status !== 'matched' || bob.status !== 'matched')
+      throw new Error('Expected Bob and Carol to match');
+    expect(carol.room_id).toBe(bob.room_id);
+    expect([bob.seat, carol.seat]).toEqual([0, 1]);
+  });
+
+  it.each([3, 10])(
+    'compares effective environment settings with requested hands=%s',
+    async hands => {
+      const { env } = makeEnv(undefined, {
+        DEFAULT_SETTINGS_JSON: '{"hands":3}',
+      });
+      const responses = await Promise.all([
+        queue(env, 'Alice'),
+        queue(env, 'Bob', { settings: { hands } }),
+      ]);
+      const [alice, bob] = await Promise.all(responses.map(decodeQueue));
+      if (hands === 3) {
+        expect(alice.status).toBe('matched');
+        expect(bob.status).toBe('matched');
+        if (alice.status !== 'matched' || bob.status !== 'matched')
+          throw new Error('Expected matching environment defaults');
+        expect(alice.room_id).toBe(bob.room_id);
+      } else {
+        expect([alice.status, bob.status]).toEqual(['waiting', 'waiting']);
+      }
+    },
+  );
+
+  it('pairs omitted test options with the same environment seed', async () => {
+    const seed = '00'.repeat(32);
+    const { env } = makeEnv('true', {
+      DEFAULT_TEST_JSON: JSON.stringify({ seed }),
+    });
+    const responses = await Promise.all([
+      queue(env, 'Alice'),
+      queue(env, 'Bob', { test: { seed } }),
+    ]);
+    const [alice, bob] = await Promise.all(responses.map(decodeQueue));
+    expect(alice.status).toBe('matched');
+    expect(bob.status).toBe('matched');
+    if (alice.status !== 'matched' || bob.status !== 'matched')
+      throw new Error('Expected matching environment test defaults');
+    expect(alice.room_id).toBe(bob.room_id);
+  });
+
   it.each(['Alice', 'alice', 'ALICE'])(
     'rejects banned %s before passing it to Matchmaker',
     async name => {
@@ -290,7 +369,7 @@ describe('POST /v1/queue (S1)', () => {
       for (const response of responses)
         expect((await decodeQueue(response)).status).toBe('matched');
       expect(queueCall).toHaveBeenCalledTimes(2);
-      for (const [input] of queueCall.mock.calls)
+      for (const [, input] of queueCall.mock.calls)
         expect(input.test).toBeUndefined();
     },
   );
@@ -300,7 +379,7 @@ describe('POST /v1/queue (S1)', () => {
     const test = { seed: '00'.repeat(32), chaos: { extra_waiting: 1 } };
     await pair(env, { test });
     expect(queueCall).toHaveBeenCalledTimes(2);
-    for (const [input] of queueCall.mock.calls)
+    for (const [, input] of queueCall.mock.calls)
       expect(input.test).toEqual(test);
   });
 });

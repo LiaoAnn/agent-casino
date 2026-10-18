@@ -71,7 +71,8 @@ const defaultTest = fromJson(
 
 // Built-in defaults < DEFAULT_SETTINGS_JSON < the request, key by key; the
 // test settings likewise, but production never reads DEFAULT_TEST_JSON.
-const roomDefaults = (
+// The queue pairs people by these (A2).
+export const roomDefaults = (
   env: Bindings,
   input: { settings?: typeof Settings.Type; test?: typeof TestSettings.Type },
 ) => {
