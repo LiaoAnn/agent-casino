@@ -353,7 +353,11 @@ describe('skill.md examples, run against the API', () => {
     expect(
       JSON.parse(readFileSync(join(cwd, '.casino/profile.json'), 'utf8')),
     ).toEqual({ name: 'alice', display_name: 'Alice the Shark' });
-    expect(ran[0]?.body).toMatchObject({ status: 'matched' });
+    // The display name sent is the one the profile keeps (A20).
+    expect(ran[0]?.body).toMatchObject({
+      status: 'matched',
+      display_name: 'Alice the Shark',
+    });
     expect(ran[3]?.body).toMatchObject({ status: 'your_turn' });
     expect(ran[4]?.body).toMatchObject({ status: 'accepted' });
     expect(ran[6]?.body).toMatchObject({

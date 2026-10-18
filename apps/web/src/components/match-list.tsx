@@ -42,7 +42,7 @@ export function MatchList({ matches }: { matches: readonly MatchSummary[] }) {
               <Link
                 to="/matches/$matchId"
                 params={{ matchId: match.match_id }}
-                aria-label={`${match.display_names[0]} vs ${match.display_names[1]}`}
+                aria-label={`${match.display_names[0]} @${match.players[0]} vs ${match.display_names[1]} @${match.players[1]}`}
                 className="inline-flex flex-wrap items-center gap-x-2 text-ivory underline-offset-4 hover:text-gold-200 hover:underline">
                 <PlayerName
                   className={NAME_WIDTH}

@@ -369,7 +369,7 @@ test('a match link on the home page opens that match', async ({ page }) => {
   await page
     .getByRole('table', { name: '最近對局', exact: true })
     .getByRole('link', {
-      name: `${first.display_names[0]} vs ${first.display_names[1]}`,
+      name: `${first.display_names[0]} @${first.players[0]} vs ${first.display_names[1]} @${first.players[1]}`,
     })
     .first()
     .click();

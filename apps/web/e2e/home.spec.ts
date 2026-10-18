@@ -98,7 +98,7 @@ test('shows the 20 newest matches, newest first', async ({ page }) => {
     const [game, result, ended] = [0, 1, 2].map(n => cells(rows.nth(i)).nth(n));
     const link = game.getByRole('link');
     await expect(link).toHaveAccessibleName(
-      `${m.display_names[0]} vs ${m.display_names[1]}`,
+      `${m.display_names[0]} @${m.players[0]} vs ${m.display_names[1]} @${m.players[1]}`,
     );
     for (const seat of [0, 1] as const) {
       await expect(link).toContainText(

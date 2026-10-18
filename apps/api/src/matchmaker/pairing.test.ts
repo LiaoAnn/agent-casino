@@ -93,7 +93,13 @@ const persistentFixture = () => {
     now: () => clock.ms,
   };
   const recreate = () => new MatchQueue(openMatch, options);
-  return { clock, openMatch, queue: recreate(), recreate };
+  return {
+    clock,
+    openMatch,
+    storage: options.storage,
+    queue: recreate(),
+    recreate,
+  };
 };
 
 const withKey = (
@@ -1072,6 +1078,41 @@ describe('MatchQueue queue_key ownership (A17)', () => {
 });
 
 describe('T35 persisted queue display names', () => {
+  it.each([0, 1] as const)(
+    'restores a pre-T35 matched answer for seat %s with default display names',
+    async seat => {
+      const { queue, storage, recreate, clock, openMatch } =
+        persistentFixture();
+      const players: [QueueInput, QueueInput] = [
+        withKey({ name: 'alice' }),
+        withKey({ name: 'bob' }),
+      ];
+      await queue.queue(players[0]);
+      await queue.queue(players[1]);
+      const saved = await storage.get<{
+        pairings: { matched: Seated[] }[];
+      }>('queue');
+      expect(saved?.pairings).toHaveLength(1);
+      await storage.put('queue', {
+        ...saved,
+        pairings: saved?.pairings.map(pairing => ({
+          ...pairing,
+          matched: pairing.matched.map(
+            ({
+              display_name: _displayName,
+              opponent_display_name: _opponentDisplayName,
+              ...legacy
+            }) => legacy,
+          ),
+        })),
+      });
+      clock.ms = HOLD_MS - 1;
+
+      expect(await recreate().queue(players[seat])).toEqual(matched(seat));
+      expect(openMatch).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('keeps the first display name through waiting retries and queue recreation, then returns the same matched answer', async () => {
     const { queue, openMatch, recreate } = persistentFixture();
     openMatch.mockResolvedValue({

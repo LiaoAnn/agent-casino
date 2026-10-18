@@ -714,6 +714,43 @@ describe('T34 freezeout match records', () => {
 });
 
 describe('T35 recorded display names', () => {
+  it('updates an existing leaderboard display name after an unrated bot match without changing scores or counts', async () => {
+    await record({
+      display_names: ['小愛 A', '小包 A'],
+      ended_at: minutes(1),
+    });
+    const before = (await leaderboard()).entries;
+    expect(before).toHaveLength(2);
+    expect(before.find(entry => entry.name === 'Alice')).toMatchObject({
+      display_name: '小愛 A',
+      rating: 1516,
+      games: 1,
+      wins: 1,
+      losses: 0,
+      draws: 0,
+    });
+
+    await record({
+      players: ['ALICE', 'house-bot'],
+      display_names: ['小愛 B 🃏', 'House Bot'],
+      result: 'seat1_win',
+      final_stacks: [100, 300],
+      ended_at: minutes(2),
+    });
+
+    const after = (await leaderboard()).entries;
+    expect(after).toEqual(
+      before.map(entry =>
+        entry.name === 'Alice'
+          ? { ...entry, display_name: '小愛 B 🃏' }
+          : entry,
+      ),
+    );
+    expect(after.some(entry => entry.name.toLowerCase() === 'house-bot')).toBe(
+      false,
+    );
+  });
+
   it('keeps per-match names and updates the existing identity to its latest rated display name', async () => {
     const first = await record({
       players: ['Alice', 'Bob'],

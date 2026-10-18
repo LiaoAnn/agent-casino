@@ -8,6 +8,7 @@
 import { Effect } from 'effect';
 import { type ApiError, apiError } from '../contract/errors';
 import {
+  defaultDisplayName,
   type QueueResponse,
   SETTINGS_DEFAULTS,
   type Settings,
@@ -162,6 +163,19 @@ interface Saved {
 
 const STORAGE_KEY = 'queue';
 
+// Answers saved before display names (T35) lack them: each seat shows its
+// name, which the other seat's answer holds as opponent_name (A20).
+const withDisplayNames = (matched: [Matched, Matched]): [Matched, Matched] => {
+  const [a, b] = matched;
+  const fill = (seat: Matched, other: Matched): Matched => ({
+    ...seat,
+    display_name: seat.display_name ?? defaultDisplayName(other.opponent_name),
+    opponent_display_name:
+      seat.opponent_display_name ?? defaultDisplayName(seat.opponent_name),
+  });
+  return [fill(a, b), fill(b, a)];
+};
+
 // Whether this seat of the pairing was queued with this queue_key (A17).
 const ownedBy = (pairing: Pairing, key: string, queueKey: string) =>
   pairing.queueKeys[pairing.keys.indexOf(key)] === queueKey;
@@ -302,15 +316,12 @@ export class MatchQueue {
       }
       for (const { keys, queueKeys, at, matched } of saved?.pairings ?? []) {
         if (queueKeys === undefined) continue;
-        // Matched before display names (T35): the answer no longer fits the
-        // contract, so it is dropped as if expired.
-        if (matched.some(seat => seat.display_name === undefined)) continue;
         const pairing = {
           keys,
           queueKeys,
           at,
-          answers: Promise.resolve(matched),
-          matched,
+          answers: Promise.resolve(withDisplayNames(matched)),
+          matched: withDisplayNames(matched),
         };
         for (const key of keys) this.#pairings.set(key, pairing);
       }
