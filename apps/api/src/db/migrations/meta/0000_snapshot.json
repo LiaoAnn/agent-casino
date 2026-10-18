@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f0c03806-11e1-4818-a598-b504410168d6",
+  "id": "ab537364-9328-4cf2-95cb-0887dac102cc",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "bans": {
@@ -11,20 +11,6 @@
           "name": "name_key",
           "type": "text",
           "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "banned_at": {
-          "name": "banned_at",
-          "type": "integer",
-          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         }

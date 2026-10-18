@@ -177,6 +177,26 @@ describe('POST /v1/admin/names/{name}/ban', () => {
     expect((await leaderboard()).map(e => e.name)).toEqual(['Alice', 'Bob']);
   });
 
+  it('a D1 network error answers 503 unavailable', async () => {
+    const reject = async () => {
+      throw new Error('D1_ERROR: Network connection lost');
+    };
+    const statement = {
+      bind: () => statement,
+      all: reject,
+      raw: reject,
+      run: reject,
+      first: reject,
+    };
+    const db = { prepare: () => statement, batch: reject };
+    const body = await expectError(
+      await ban('alice', { env: makeEnv(db) }),
+      503,
+      'unavailable',
+    );
+    expect(body.retryable).toBe(true);
+  });
+
   it('a broken D1 answers 503 unavailable', async () => {
     const body = await expectError(
       await ban('alice', { env: makeEnv({}) }),

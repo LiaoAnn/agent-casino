@@ -4,11 +4,11 @@ import { eq } from 'drizzle-orm';
 import type { Db } from './client';
 import { bans } from './schema';
 
-/** Idempotent; the first spelling banned is kept. */
+/** Idempotent; case-insensitive. */
 export async function banName(db: Db, name: string): Promise<void> {
   await db
     .insert(bans)
-    .values({ nameKey: name.toLowerCase(), name })
+    .values({ nameKey: name.toLowerCase() })
     .onConflictDoNothing();
 }
 

@@ -125,8 +125,8 @@ export async function getMatch(
       hand_number: hand.handNumber,
       button_seat: hand.buttonSeat,
       board: hand.board,
-      // Never a folded hand's cards, whatever was stored (A13).
-      hole_cards: hand.endedBy === 'showdown' ? hand.holeCards : null,
+      // recordMatch stores none for folded hands (A13).
+      hole_cards: hand.holeCards,
       events: eventsByHand.get(hand.handNumber) ?? [],
       winner_seat: hand.winnerSeat,
       pot: hand.pot,

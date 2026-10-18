@@ -9,6 +9,7 @@ import {
   startMatch,
 } from '../holdem/match';
 import { mulberry32 } from '../holdem/shuffle';
+import { getMatch } from './queries';
 import { type MatchRecordInput, recordMatch } from './records';
 import { startTestD1, type TestD1 } from './test-d1';
 
@@ -311,6 +312,43 @@ describe('recordMatch: retries', () => {
 });
 
 describe('recordMatch: long matches', () => {
+  it('preserves every hand and event of a 200-hand match after a retry', async () => {
+    const hands = Array.from({ length: 200 }, (_, i) => {
+      const current = hand(i + 1, 8 + (i % 5));
+      current.events[2] = {
+        seat: i % 2 === 0 ? 0 : 1,
+        street: 'preflop',
+        type: 'raise',
+        amount: 4 + i,
+        timeout: true,
+      };
+      if (i % 3 === 0) {
+        current.ended_by = 'fold';
+        current.winner_seat = 1;
+        current.events.push({ seat: 0, street: 'flop', type: 'fold' });
+      }
+      return current;
+    });
+    const match = input({
+      seed: '42',
+      settings: { hands: 200, turn_seconds: 30, starting_stack: 200 },
+      hands,
+    });
+    const expected = hands.map(h => ({
+      ...h,
+      hole_cards: h.ended_by === 'fold' ? null : h.hole_cards,
+    }));
+
+    const result = await recordMatch(testD1.db, match);
+    const stored = await getMatch(testD1.db, match.match_id);
+    expect(stored?.hands).toStrictEqual(expected);
+
+    expect(await recordMatch(testD1.db, match)).toEqual(result);
+    const retried = await getMatch(testD1.db, match.match_id);
+    expect(retried?.hands).toStrictEqual(expected);
+    expect(retried).toStrictEqual(stored);
+  }, 30_000);
+
   it('stores 200 hands with 8 events each', async () => {
     const hands = Array.from({ length: 200 }, (_, i) => hand(i + 1, 8));
     const match = input({

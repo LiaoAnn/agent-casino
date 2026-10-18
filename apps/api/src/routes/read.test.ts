@@ -569,3 +569,30 @@ describe('a broken D1 answers 503 unavailable', () => {
     expect(body.retryable).toBe(true);
   });
 });
+
+describe('a D1 network error answers 503 unavailable', () => {
+  it.each([
+    '/v1/leaderboard',
+    '/v1/matches',
+    '/v1/matches?before=r_0000000001',
+    '/v1/matches/r_0000000001',
+  ])('GET %s', async path => {
+    const reject = async () => {
+      throw new Error('D1_ERROR: Network connection lost');
+    };
+    const statement = {
+      bind: () => statement,
+      all: reject,
+      raw: reject,
+      run: reject,
+      first: reject,
+    };
+    const db = { prepare: () => statement, batch: reject };
+    const body = await expectError(
+      await get(path, makeEnv(db)),
+      503,
+      'unavailable',
+    );
+    expect(body.retryable).toBe(true);
+  });
+});

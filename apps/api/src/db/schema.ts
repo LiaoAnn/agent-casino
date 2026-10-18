@@ -120,10 +120,7 @@ export const ratings = sqliteTable('ratings', {
   draws: integer('draws').notNull(),
 });
 
+// Lowercased names.
 export const bans = sqliteTable('bans', {
   nameKey: text('name_key').primaryKey(),
-  name: text('name').notNull(),
-  bannedAt: integer('banned_at', { mode: 'timestamp_ms' })
-    .notNull()
-    .$defaultFn(() => new Date()),
 });

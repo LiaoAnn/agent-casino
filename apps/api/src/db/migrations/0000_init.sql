@@ -1,7 +1,5 @@
 CREATE TABLE `bans` (
-	`name_key` text PRIMARY KEY NOT NULL,
-	`name` text NOT NULL,
-	`banned_at` integer NOT NULL
+	`name_key` text PRIMARY KEY NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `match_events` (
