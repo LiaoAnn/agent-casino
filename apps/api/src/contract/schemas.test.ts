@@ -323,6 +323,8 @@ describe('responses', () => {
     expect(
       decodes(QueueResponse, {
         status: 'waiting',
+        waited_seconds: 0,
+        queue_size: 1,
         hint: 'No opponent yet. Call POST /v1/queue again',
       }),
     ).toBe(true);
@@ -828,6 +830,53 @@ describe('T28 S2 last_hand.stack_changes contract', () => {
       }),
     ).toBe(false);
   });
+});
+
+describe('T30 waiting information contract (A18)', () => {
+  const waiting = {
+    status: 'waiting',
+    waited_seconds: 0,
+    queue_size: 1,
+    hint: 'No opponent yet. Call POST /v1/queue again',
+  };
+
+  it.each(['waited_seconds', 'queue_size'] as const)(
+    'requires %s in waiting responses',
+    key => {
+      const { [key]: _removed, ...without } = waiting;
+      expect(decodes(QueueResponse, without)).toBe(false);
+    },
+  );
+
+  it.each([
+    ['waited_seconds', -1],
+    ['waited_seconds', 1.5],
+    ['waited_seconds', '30'],
+    ['waited_seconds', null],
+    ['queue_size', 0],
+    ['queue_size', -1],
+    ['queue_size', 1.5],
+    ['queue_size', '1'],
+    ['queue_size', null],
+  ])('rejects %s = %j', (key, value) => {
+    expect(decodes(QueueResponse, { ...waiting, [key]: value })).toBe(false);
+  });
+
+  it.each([
+    [0, 1],
+    [179, 2],
+    [180, 3],
+    [600, 1],
+  ])(
+    'preserves valid waited_seconds %s and queue_size %s when decoding',
+    (waited_seconds, queue_size) => {
+      const response = { ...waiting, waited_seconds, queue_size };
+      expect(decodes(QueueResponse, response)).toBe(true);
+      expect(Schema.decodeUnknownSync(QueueResponse)(response)).toEqual(
+        response,
+      );
+    },
+  );
 });
 
 describe('T28 S3 seconds_remaining contract', () => {

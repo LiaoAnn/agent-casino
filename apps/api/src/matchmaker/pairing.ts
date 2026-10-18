@@ -74,10 +74,19 @@ export interface MatchQueueOptions {
 const WAIT_MS = 30_000;
 const HOLD_MS = 45_000;
 
-const WAITING: Answer = {
+// After this long without an opponent the agent asks its owner what to do
+// (A18).
+const REPORT_AFTER_SECONDS = 180;
+
+const waitingAnswer = (waitedSeconds: number, queueSize: number): Answer => ({
   status: 'waiting',
-  hint: 'No opponent yet. Call POST /v1/queue again',
-};
+  waited_seconds: waitedSeconds,
+  queue_size: queueSize,
+  hint:
+    waitedSeconds < REPORT_AFTER_SECONDS
+      ? 'No opponent yet. Call POST /v1/queue again'
+      : 'No opponent for 3 minutes. Tell your owner how long you have waited and ask whether to keep waiting (and for how long), play the house-bot instead (unrated), or stop.',
+});
 
 // Someone else has this name in the queue or a fresh match (A17). Says
 // nothing about the room.
@@ -119,6 +128,8 @@ interface Entry {
   // Calls of this name now in their long poll; the entry never expires
   // while one is.
   polls: number;
+  // Epoch ms when this name and key started queueing, for waited_seconds.
+  since: number;
   // Epoch ms; renewed each time a call answers `waiting`.
   expiresAt: number;
 }
@@ -190,6 +201,8 @@ export class MatchQueue {
     input: QueueInput,
   ): Promise<Result<Answer, 'unavailable' | 'name_in_use'>> {
     const key = input.name.toLowerCase();
+    // A new entry has queued since the call arrived, not since storage loaded.
+    const arrivedAt = this.#now();
     await this.#load();
     this.#prune();
     const pairing = this.#pairings.get(key);
@@ -217,6 +230,7 @@ export class MatchQueue {
         input,
         pairingKey: pairingKey(input),
         polls: 0,
+        since: arrivedAt,
         expiresAt: this.#now() + this.#holdMs,
       };
       this.#waiting.set(key, entry);
@@ -276,10 +290,11 @@ export class MatchQueue {
 
   #load() {
     this.#loaded ??= this.#storage.get<Saved>(STORAGE_KEY).then(saved => {
-      // Saved before queue_key (T26): nobody could claim them, so they are
-      // dropped as if expired.
+      // Saved before queue_key (T26) or before since (T30): dropped as if
+      // expired.
       for (const entry of saved?.waiting ?? []) {
         if (entry.input.queue_key === undefined) continue;
+        if (entry.since === undefined) continue;
         this.#waiting.set(entry.key, { ...entry, polls: 0 });
       }
       for (const { keys, queueKeys, at, matched } of saved?.pairings ?? []) {
@@ -397,7 +412,11 @@ export class MatchQueue {
           if (answer) return { ok: true, value: answer };
           continue;
         }
-        if (timedOut) return { ok: true, value: WAITING };
+        if (timedOut) {
+          this.#prune();
+          const waited = Math.floor((this.#now() - entry.since) / 1000);
+          return { ok: true, value: waitingAnswer(waited, this.#waiting.size) };
+        }
         await Promise.race([this.#change.promise, windowEnd]);
       }
     } finally {
