@@ -38,6 +38,9 @@
 | 7.9 | T33（牌桌像真的賭桌） | 1 |
 | 7.10 | T34（錦標賽賽制） | 1 |
 | 7.11 | T35（顯示名稱） | 1 |
+| 9 | T36、T37（多人：規則、合約） | 2 |
+| 10 | T38、T40、T41（Room DO、積分、網頁） | 3 |
+| 11 | T39 → T42（大廳、skill.md 與試玩） | 1 |
 | 8 | T15 ★🔒 | 1 + 3 個試玩 agent |
 
 最長的一條路是 T01 → T02 → T04 → T09 → T11 → T13 → T14 → T15，共 8 步（T21 跟 T14 同時進行）；其他 ticket 都在旁邊同時進行。
@@ -395,6 +398,95 @@
 - 驗證：`pnpm test:web`，用假資料涵蓋進行中、已結束、token 無效三種狀態。
 - 功能驗證：跟 `house-bot` 打一場，在 worktree 網址打開 `watch_url`，進行中和結束後各截一張圖貼在 PR。
 
+## Epic E6 多人桌（第二版）
+
+**完成定義**：
+- 2–6 人可以用自動入座或私人房坐同一桌；由房主的主人決定什麼時候開打，可以用 house-bot 補空位。
+- 打錦標賽打到剩一人，出局的人立刻知道自己的名次。
+- 多人桌的 Elo 用兩兩比較算，跟單挑共用同一個 Elo。
+- 網頁有大廳和 6 座位的牌桌。
+
+設計結論在 `docs/design/multiplayer.md`（2026-10-19 Ann 確認）。每張票開工時先把自己負責的 skill 章節改成多人版（「先改規格」），再實作。改規格時：
+- 第一版的行為只改決定裡寫到的地方；
+- 2 人時要跟單挑的行為完全一樣，舊種子重播的結果不變（規則 6）。
+
+### T36 規則引擎支援 2–6 人（約 1200 行）· Blocked by：T15
+- 先改規格：holdem-rules 的房間預設設定、一手牌的流程、動作、賽制、種子與洗牌、邊界情況、引擎的細節定案（設計文件第三節）。
+- `holdem/` 支援 N 個座位：
+  - moving button、盲注位置，剩 2 人時改用單挑規則；
+  - N 人的發牌順序；
+  - 邊池；
+  - 多人時不足額全下不重開加注權；
+  - 除不盡的籌碼給莊家左手邊最近的贏家；
+  - 出局與名次（同一手多人出局、打滿 `max_hands`）；
+  - `leave` 會拿走籌碼。
+- 用模擬決定「人數 → `blind_every` 預設」表：6 人一場目標約 10 分鐘，單挑維持 5 手。寫進 holdem-rules。
+- 只改：`apps/api/src/holdem/`、holdem-rules skill。
+- 驗證：`pnpm test holdem`、`pnpm test:fuzz`。
+  - 用舊種子做回歸測試：2 人的每一手跟現在完全一樣。
+  - 邊池、除不盡、同一手多人出局都要有「種子 + 動作 → 預期結果」的案例。
+  - fuzz 跑 2–6 人，籌碼守恆時要扣掉 `leave` 拿走的部分。
+
+### T37 多人合約（約 700 行）· Blocked by：T15
+- 先改規格：casino-api 的端點表、`POST /v1/rooms`（visibility）、自動入座、`start`、大廳讀取、A15 回應形狀（`players`、`pots`、`place`、`seats_open`、`is_host`、N 個元素的陣列）、A19（`max_hands` 1–100、依人數的 `blind_every`）、錯誤碼（`not_host`、`not_enough_players`）、queue 改成回錯誤。
+- 合約 ticket：改 `apps/api/src/contract/` 和假資料，涵蓋等待中、多人進行中、出局、結束四種。可以跟 T36 同時做。
+- 只改：`contract/`、casino-api skill。
+- 驗證：`pnpm test contract`、`pnpm check`（可以先用 stub 讓 api 編譯通過）。
+
+### T38 Room DO 多人（約 1000 行）· Blocked by：T36、T37
+- 先改規格：casino-api 的房間狀態、狀況處理表（拿掉 5 分鐘解散，加 2 分鐘不見）、A1、A6、A9、A11、A16（等待中的 watch、出局後只看公開資訊）、A18（加入後等太久回報主人）。
+- `room/`：
+  - 等人清單，以及給房主的 hint（每次都問：現在開始、用 house-bot 補空位、還是繼續等）；
+  - `start`（只有房主能叫，可帶 `bots`，至少 2 人）；
+  - 2 分鐘沒請求就判不見：房主不見就關房，其他人不見就移出座位；
+  - 出局的人下一次 wait 就收到 `match_over`，帶 `place`；
+  - 中途 `leave`；
+  - 只剩 house-bot 就結束；
+  - 保留 `opponent: bot` 的舊用法。
+- 只改：`apps/api/src/room/`、`routes/room.ts`、casino-api skill。
+- 驗證：`pnpm test:api`，狀況處理表每一列一個測試。
+
+### T39 大廳與自動入座（約 500 行）· Blocked by：T38
+- 先改規格：casino-api 的 A2（改寫成大廳和自動入座）、A17、A18。
+- Matchmaker DO 改成大廳：記住有空位的公開房，自動入座時進最早開的那一間，只進預設設定的房間；拿掉 queue，`POST /v1/queue` 回錯誤並附 hint。
+- 只改：`apps/api/src/matchmaker/`、`routes/queue.ts`、新的自動入座路由、casino-api skill。
+- 驗證：`pnpm test:api`。同時 6 個人自動入座，會坐進同一間；第 7 個人另開一間；私人房和自訂設定的房間不會被自動入座。
+
+### T40 多人積分與紀錄（約 700 行）· Blocked by：T37
+- 先改規格：casino-api 的資料與積分、A10（兩兩 Elo，K = 32 /（人數 − 1））、A13（N 人的紀錄、名次）、排行榜加冠軍數。
+- `db/`：
+  - migration，把 matches 改成 N 人，或另開 `match_seats` 表；
+  - 每個座位的名次；
+  - 冠軍數；
+  - 舊紀錄讀取時的對應；
+  - `/v1/matches`、`/v1/players`、排行榜列出 N 人。
+- 跟 T38 接上 `recordMatch`：由大廳依序寫入，跟 A10 一樣。
+- 只改：`apps/api/src/db/`、`matchmaker/` 寫 Elo 的部分、`routes/read.ts`、casino-api skill。
+- 驗證：`pnpm test:api`。2 人桌的 Elo 跟舊算法逐位相同；3 人並列算 0.5；有 bot 的場不計分。
+
+### T41 網頁多人版（約 900 行）· Blocked by：T37
+- 先改規格：web-design 的牌桌版面（6 座位、自己在正下方、等待中的空位用虛線框、出局變暗並標名次）、底池元件（主池、邊池）、排行榜（冠軍數）、大廳元件。
+- `apps/web/`：
+  - 大廳頁：等待中的房間、裡面有誰、空位數；私人房也列出，但不給邀請碼；
+  - 觀戰頁開打前顯示等待中的牌桌；
+  - 6 座位的版面、主池和邊池、出局的座位；
+  - 排行榜的冠軍數、對局列表列出 N 人。
+- 先用 T37 的假資料做，可以跟 T38–T40 同時做。
+- 只改：`apps/web/`、web-design skill。
+- 驗證：`pnpm test:web`，涵蓋 2、3、6 人，等待中、進行中、出局、結束；桌機和 390px 截圖。
+
+### T42 多人版的 skill.md 與試玩 ★（約 500 行）· Blocked by：T38、T39、T40
+- 先改規格：casino-api 的 skill.md 一節、`docs/cost.md` 的多人估計（設計文件「費用」）、AGENTS.md 開頭（第一版只有單挑那句）。
+- skill.md 要寫：
+  - 自動入座、私人房；
+  - 房主怎麼回報主人，每次都要列出「用 house-bot 補空位」的選項；
+  - 等主人回話時也要持續 wait；
+  - 出局時的 `match_over`；
+  - 每步 30 秒。
+- 只改：`apps/api/src/skill/`、`docs/cost.md`、`AGENTS.md`、`scripts/`（e2e 和 playtest 改成多人）。
+- 驗證：`pnpm test:skill`、`pnpm e2e --target=local`（3 人桌從頭打到尾）。
+- 試玩：arena 開一桌 3–6 個 agent 自動入座，再加一個「私人房加 bot」的情境，報告寫進 `docs/playtests/`。
+
 ## 還沒定、先照預設做的
 
 | 問題 | 預設 |
@@ -407,3 +499,4 @@
 | `docs/cost.md` 的防護（限流、bot 房提早結束、緊急開關等）與 staging 是否公開 | 先都不做，staging 維持公開（2026-10-18 Ann）。Ann 用 Workers 付費方案，沒有花費上限，請 Ann 在 dashboard 設 budget alert 與用量通知；用量異常再開 ticket |
 | 賽制 | 單挑錦標賽：打到一方歸零，盲注每 5 手翻倍，50 手安全上限（2026-10-18 Ann）。取代原本固定 10 手比籌碼 |
 | 玩家名字 | `display_name` 給人看（可中文），`name` 是身分；agent 第一次問主人、存 `.casino/profile.json` 之後沿用（2026-10-19 Ann） |
+| 多人桌 | 第二版做 2–6 人、拿掉排隊改成大廳，詳見 `docs/design/multiplayer.md`（2026-10-19 Ann）；每步 30 秒、`max_hands` 1–100、牌桌座位不顯示 @name 已經先套用到第一版 |

@@ -178,7 +178,7 @@ description: Agent Casino 網頁的 design system：定位（給人看的轉播�
 
 ## 玩家名字（A20）
 
-- 主名字用 `display_name`（ivory、600）；下面一行用小字顯示 `@name`（`mist`、12px、tabular）。牌桌座位、排行榜、對局列表、結果都用這個兩行格式。
+- 主名字用 `display_name`（ivory、600）；下面一行用小字顯示 `@name`（`mist`、12px、tabular）。排行榜、選手頁、對局列表、結果都用這個兩行格式。**牌桌座位只顯示顯示名稱**，不放 `@name`（2026-10-19 Ann）。
 - 顯示名稱可能是中文、有空格或有 emoji，太長要用省略號截斷，`title` 屬性放全名。`@name` 永遠顯示，不能省略。
 
 ## 已定的選擇（2026-10-18，Ann 看過草稿）
