@@ -11,7 +11,7 @@
 // plays everything already due. An absent seat (3 consecutive timeouts) is
 // played for the instant its turn starts.
 import { Schema } from 'effect';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { handle } from '../app';
 import { ERROR_STATUS, type ErrorCode } from '../contract/errors';
 import {
@@ -20,6 +20,7 @@ import {
   JoinResponse,
   RoomStatus,
 } from '../contract/schemas';
+import { startTestD1, type TestD1 } from '../db/test-d1';
 import {
   type Action,
   applyAction,
@@ -32,6 +33,20 @@ import {
 import { viewFor } from '../holdem/view';
 import type { Bindings } from '../routes/env';
 import { RoomReferee, type RoomStorage } from './referee';
+
+let testD1: TestD1;
+
+beforeAll(async () => {
+  testD1 = await startTestD1();
+}, 30_000);
+
+beforeEach(async () => {
+  await testD1.reset();
+});
+
+afterAll(async () => {
+  await testD1?.dispose();
+});
 
 const BASE = 'http://api.test';
 const SEED = '0'.repeat(64);
@@ -102,7 +117,7 @@ const makeEnv = (options: { waitMs?: number } = {}): TestEnv => {
   const env = {
     TOKEN_SECRET: 'test-token-secret',
     ADMIN_KEY: 'test-admin-key',
-    DB: {},
+    DB: testD1.d1,
     ROOM,
     MATCHMAKER: {},
     ALLOW_TEST_ROOMS: 'true',

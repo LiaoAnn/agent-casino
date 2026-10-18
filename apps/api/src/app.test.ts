@@ -282,9 +282,11 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
 
   // Real handlers now; routes/room.test.ts covers the room ones (T09),
   // skill/route.test.ts GET /skill.md (T05), routes/read.test.ts and
-  // routes/admin.test.ts the read endpoints and the ban (T07).
+  // routes/admin.test.ts the read endpoints and the ban (T07),
+  // routes/queue.test.ts the queue (T12).
   const IMPLEMENTED = new Set([
     'skill.skill',
+    'lobby.queue',
     'lobby.createRoom',
     'lobby.joinRoom',
     'room.wait',

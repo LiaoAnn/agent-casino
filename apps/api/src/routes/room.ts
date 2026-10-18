@@ -8,6 +8,7 @@ import { apiError } from '../contract/errors';
 import * as Rooms from '../room/client';
 import type { RoomApi } from '../room/referee';
 import { WorkerEnv } from './env';
+import { refuseBanned } from './queue';
 
 export const createRoom = HttpApiBuilder.handler(
   CasinoApi,
@@ -18,6 +19,7 @@ export const createRoom = HttpApiBuilder.handler(
       const env = yield* WorkerEnv;
       const badName = Rooms.nameError(payload.name, 'POST /v1/rooms');
       if (badName) return yield* Effect.fail(badName);
+      yield* refuseBanned(env, payload.name, 'POST /v1/rooms');
       if (payload.opponent === 'bot') {
         return yield* Effect.fail(
           apiError(
@@ -48,6 +50,7 @@ export const joinRoom = HttpApiBuilder.handler(
         `POST /v1/rooms/${roomId}/join`,
       );
       if (badName) return yield* Effect.fail(badName);
+      yield* refuseBanned(env, payload.name, `POST /v1/rooms/${roomId}/join`);
       const seated = yield* Rooms.joinRoom(env, roomId, payload);
       return {
         ...seated,

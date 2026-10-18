@@ -13,7 +13,7 @@
 // - fail_request_every N: per seat, every Nth token request (wait, state,
 //   actions, leave) answers 503 unavailable and does nothing.
 import { Schema } from 'effect';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { handle } from '../app';
 import { ERROR_STATUS, type ErrorCode } from '../contract/errors';
 import {
@@ -22,10 +22,25 @@ import {
   JoinResponse,
   RoomStatus,
 } from '../contract/schemas';
+import { startTestD1, type TestD1 } from '../db/test-d1';
 import { legalActions, type Seat, startMatch } from '../holdem/match';
 import { dealHand } from '../holdem/shuffle';
 import type { Bindings } from '../routes/env';
 import { RoomReferee, type RoomStorage } from './referee';
+
+let testD1: TestD1;
+
+beforeAll(async () => {
+  testD1 = await startTestD1();
+}, 30_000);
+
+beforeEach(async () => {
+  await testD1.reset();
+});
+
+afterAll(async () => {
+  await testD1?.dispose();
+});
 
 const BASE = 'http://api.test';
 const SEED = '0'.repeat(64);
@@ -100,7 +115,7 @@ const makeEnv = (
   const env = {
     TOKEN_SECRET: 'test-token-secret',
     ADMIN_KEY: 'test-admin-key',
-    DB: {},
+    DB: testD1.d1,
     ROOM,
     MATCHMAKER: {},
   } as Record<string, unknown>;
