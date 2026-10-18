@@ -10,7 +10,7 @@ import {
   ERROR_STATUS,
   type ErrorCode,
 } from '../contract/errors';
-import { EXAMPLES } from './examples';
+import { EXAMPLE_ORIGIN, EXAMPLES } from './examples';
 import template from './template.md?raw' with { type: 'text' };
 
 interface Endpoint {
@@ -173,14 +173,15 @@ const curl = (key: string) => {
   return ['```bash', parts.join(' \\\n  '), '```'].join('\n');
 };
 
-const responses = (key: string) => {
+// `watch_url` in the examples is on the domain the agent asked (T27).
+const responses = (key: string, baseUrl: string) => {
   const examples = EXAMPLES[key]?.responses ?? [];
   if (examples.length === 0)
     throw new Error(`skill.md: no response examples for ${key}`);
   return examples
     .map(
       ({ title, status, body }) =>
-        `${title} (HTTP ${status}):\n\n\`\`\`json\n${JSON.stringify(body, null, 2)}\n\`\`\``,
+        `${title} (HTTP ${status}):\n\n\`\`\`json\n${JSON.stringify(body, null, 2).replaceAll(EXAMPLE_ORIGIN, baseUrl)}\n\`\`\``,
     )
     .join('\n\n');
 };
@@ -192,7 +193,7 @@ export function renderSkill(baseUrl: string): string {
     endpoints: endpointTable,
     errors: errorTable,
     curl,
-    responses,
+    responses: key => responses(key, baseUrl),
   };
   return template.replace(/\{\{(\w+)(?: ([\w.]+))?\}\}/g, (_, name, arg) => {
     const render = fill[name];

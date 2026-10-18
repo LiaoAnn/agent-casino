@@ -416,6 +416,22 @@ describe('renderSkill: base URL', () => {
     const other = renderSkill('https://other.test');
     expect(other).not.toContain('casino.example');
   });
+
+  // T27 (arena proposal 7): no made-up domain in the examples; watch_url
+  // points at the domain the agent reached.
+  it('shows watch_url on the requested domain', () => {
+    const other = renderSkill('https://other.test');
+    const urls = [...other.matchAll(/"watch_url": "([^"]*)"/g)].map(
+      m => m[1] ?? '',
+    );
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) {
+      expect(url).toMatch(
+        /^https:\/\/other\.test\/watch\/r_[a-z0-9]{10}\?token=\S+$/,
+      );
+    }
+    expect(other).not.toContain('example.net');
+  });
 });
 
 describe('renderSkill: what an agent must know', () => {
@@ -424,6 +440,24 @@ describe('renderSkill: what an agent must know', () => {
     expect(rules.toLowerCase()).toContain('how many more chips');
     expect(rules.toLowerCase()).toContain('raise to');
     expect(rules).toContain('legal_actions');
+  });
+
+  // T27 (arena proposal 7): Haiku had 47 chips and was offered max 48.
+  it("says raise max already counts this street's bet", () => {
+    const rules = section(MD, "Hold'em rules");
+    expect(rules).toMatch(/`max`[^\n]*`my_stack` \+ `my_bet_this_street`/);
+  });
+
+  // T27: the real deadline is Date.toISOString(), with milliseconds.
+  it('shows deadline as the server writes it, with milliseconds', () => {
+    const play = section(MD, 'How to play');
+    const deadlines = [...MD.matchAll(/"deadline": "([^"]*)"/g)].map(
+      m => m[1] ?? '',
+    );
+    expect(deadlines.length).toBeGreaterThan(0);
+    for (const deadline of deadlines)
+      expect(new Date(deadline).toISOString()).toBe(deadline);
+    expect(play).toMatch(/milliseconds/);
   });
 
   it('says what to do with each response', () => {
