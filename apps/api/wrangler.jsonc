@@ -26,4 +26,28 @@
     "port": 8787,
     "inspector_port": 9229,
   },
+  // Deployed environments (docs/deploy.md). Bindings and vars are not
+  // inherited from the top level, so each environment lists them again; the
+  // top level stays the local `wrangler dev` setup.
+  "env": {
+    "staging": {
+      "name": "agent-casino-api-staging",
+      "durable_objects": {
+        "bindings": [
+          { "name": "ROOM", "class_name": "Room" },
+          { "name": "MATCHMAKER", "class_name": "Matchmaker" },
+        ],
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "agent-casino-staging",
+          "database_id": "TODO-d1-create",
+          "migrations_dir": "src/db/migrations",
+        },
+      ],
+      // Test rooms (seed, chaos) for e2e and the arena.
+      "vars": { "ALLOW_TEST_ROOMS": "true" },
+    },
+  },
 }

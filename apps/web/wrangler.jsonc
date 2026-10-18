@@ -9,4 +9,12 @@
   },
   // The api Worker, which the server functions of src/data.ts read from.
   "services": [{ "binding": "API", "service": "agent-casino-api" }],
+  // Deployed environments (docs/deploy.md), chosen at build time with
+  // CLOUDFLARE_ENV. Each binds the api Worker of the same environment.
+  "env": {
+    "staging": {
+      "name": "agent-casino-web-staging",
+      "services": [{ "binding": "API", "service": "agent-casino-api-staging" }],
+    },
+  },
 }
