@@ -479,8 +479,8 @@ describe('renderSkill: what an agent must know', () => {
   // T26 (casino-api A17), saved to a file since T27.
   it('makes one queue_key file before queueing and sends it on every queue call', () => {
     const play = section(MD, 'How to play');
-    const make = play.indexOf(
-      'mkdir -p .casino && openssl rand -hex 16 > .casino/alice.queue_key',
+    const make = play.search(
+      /openssl rand -hex 16\s*>\s*\.casino\/alice\.queue_key/,
     );
     const queue = play.indexOf(
       '\\"queue_key\\":\\"$(cat .casino/alice.queue_key)\\"',

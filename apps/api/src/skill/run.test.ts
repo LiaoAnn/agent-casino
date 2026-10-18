@@ -190,11 +190,28 @@ describe('skill.md examples, run against the API', () => {
     // alice's seat, once she has one: what she copies into her blocks.
     let seat: { room: string; token: string } | undefined;
     let queueKey = '';
+    // The room alice is matched into from the queue, once she saved it.
+    let matchedRoom = '';
+
+    // bob is already in the queue, so alice's queue call is matched, the
+    // main way into a game.
+    const bobQueues = await handle(
+      new Request(`${BASE}/v1/queue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          game: 'holdem',
+          name: 'bob',
+          queue_key: 'bob-queue-key-0123456789',
+        }),
+      }),
+      env,
+    );
+    expect(await bobQueues.json()).toMatchObject({ status: 'waiting' });
 
     for (const block of bashBlocks(md)) {
       if (!block.includes('curl')) {
-        // Before alice has a seat, the save block runs with the example
-        // values, as written; after, with hers.
+        // alice copies her own room_id and token into the save blocks.
         const script = seat
           ? block
               .replaceAll(EXAMPLE_ROOM, seat.room)
@@ -207,6 +224,28 @@ describe('skill.md examples, run against the API', () => {
             'utf8',
           ).trim();
           expect(queueKey).toMatch(QUEUE_KEY_PATTERN);
+        }
+        // The matched save block: the token file opens the room, and the
+        // queue_key moved next to it.
+        if (block.includes('mv .casino/alice.queue_key') && seat) {
+          matchedRoom = seat.room;
+          const saved = readFileSync(
+            join(cwd, `.casino/${matchedRoom}.token`),
+            'utf8',
+          ).trim();
+          const state = await handle(
+            new Request(`${BASE}/v1/rooms/${matchedRoom}/state`, {
+              headers: { Authorization: `Bearer ${saved}` },
+            }),
+            env,
+          );
+          expect(state.status).toBe(200);
+          expect(
+            readFileSync(
+              join(cwd, `.casino/${matchedRoom}.queue_key`),
+              'utf8',
+            ).trim(),
+          ).toBe(queueKey);
         }
         continue;
       }
@@ -239,11 +278,15 @@ describe('skill.md examples, run against the API', () => {
         ran.push({ endpoint: endpoint.key, status: response.status, body });
 
         const value = body as Record<string, unknown>;
-        if (endpoint.key === 'lobby.createRoom') {
+        if (
+          endpoint.key === 'lobby.queue' ||
+          endpoint.key === 'lobby.createRoom'
+        ) {
           seat = { room: String(value.room_id), token: String(value.token) };
           vars.ROOM_ID = seat.room;
-          invite = String(value.invite_code);
         }
+        if (endpoint.key === 'lobby.createRoom')
+          invite = String(value.invite_code);
         if (typeof value.token === 'string') tokens.push(value.token);
         if (typeof value.turn_id === 'string') vars.TURN_ID = value.turn_id;
       }
@@ -265,14 +308,15 @@ describe('skill.md examples, run against the API', () => {
       ['skill.skill', 200],
     ]);
     expect(queueKey).not.toBe('');
-    expect(tokens).toHaveLength(2);
-    // Her room's files are gone after the report; only the example room's,
-    // which the matched block wrote as written, are left.
+    expect(matchedRoom).not.toBe('');
+    expect(tokens).toHaveLength(3);
+    // The room she played to the end and reported has no files left; the
+    // queue match she never played still has its own.
     expect(casinoFiles()).toEqual([
-      `${EXAMPLE_ROOM}.queue_key`,
-      `${EXAMPLE_ROOM}.token`,
+      `${matchedRoom}.queue_key`,
+      `${matchedRoom}.token`,
     ]);
-    expect(ran[0]?.body).toMatchObject({ status: 'waiting' });
+    expect(ran[0]?.body).toMatchObject({ status: 'matched' });
     expect(ran[3]?.body).toMatchObject({ status: 'your_turn' });
     expect(ran[4]?.body).toMatchObject({ status: 'accepted' });
     expect(ran[6]?.body).toMatchObject({
