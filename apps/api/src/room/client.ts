@@ -8,8 +8,8 @@ import {
   RESERVED_NAMES,
   RoomId,
   SETTINGS_DEFAULTS,
-  type Settings,
-  type TestSettings,
+  Settings,
+  TestSettings,
 } from '../contract/schemas';
 import type { Bindings } from '../routes/env';
 import { signRoomToken } from '../token/token';
@@ -36,9 +36,56 @@ function randomString(alphabet: string, length: number): string {
   return out;
 }
 
-// `test` settings only count where ALLOW_TEST_ROOMS=true (casino-api 測試房).
-const allowTestRooms = (env: Bindings) =>
-  (env as Bindings & { ALLOW_TEST_ROOMS?: string }).ALLOW_TEST_ROOMS === 'true';
+// Plain vars of this deployment that routes/env.ts doesn't type.
+type RoomVars = {
+  ALLOW_TEST_ROOMS?: string;
+  DEFAULT_SETTINGS_JSON?: string;
+  DEFAULT_TEST_JSON?: string;
+};
+const vars = (env: Bindings) => env as Bindings & RoomVars;
+
+// `test` settings only count where ALLOW_TEST_ROOMS=true (casino-api 測試房);
+// anywhere else is production.
+const allowTestRooms = (env: Bindings) => vars(env).ALLOW_TEST_ROOMS === 'true';
+
+// A11: a deployment's defaults for every room, as JSON. A bad value throws,
+// so every POST /v1/rooms answers 500 until it is fixed.
+const fromJson =
+  <T>(decode: (input: unknown) => T, name: string) =>
+  (json: string | undefined): T | undefined => {
+    if (json === undefined) return undefined;
+    try {
+      return decode(JSON.parse(json));
+    } catch (error) {
+      throw new Error(`${name} is not valid: ${String(error)}`);
+    }
+  };
+const defaultSettings = fromJson(
+  Schema.decodeUnknownSync(Settings),
+  'DEFAULT_SETTINGS_JSON',
+);
+const defaultTest = fromJson(
+  Schema.decodeUnknownSync(TestSettings),
+  'DEFAULT_TEST_JSON',
+);
+
+// Built-in defaults < DEFAULT_SETTINGS_JSON < the request, key by key; the
+// test settings likewise, but production never reads DEFAULT_TEST_JSON.
+const roomDefaults = (
+  env: Bindings,
+  input: { settings?: typeof Settings.Type; test?: typeof TestSettings.Type },
+) => {
+  const { DEFAULT_SETTINGS_JSON, DEFAULT_TEST_JSON } = vars(env);
+  const settings = {
+    ...SETTINGS_DEFAULTS,
+    ...defaultSettings(DEFAULT_SETTINGS_JSON),
+    ...input.settings,
+  };
+  if (!allowTestRooms(env)) return { settings, test: null };
+  const defaults = defaultTest(DEFAULT_TEST_JSON);
+  const test = defaults || input.test ? { ...defaults, ...input.test } : null;
+  return { settings, test };
+};
 
 // `retry` names the request to resend with another name.
 export const nameError = (name: string, retry: string) => {
@@ -133,7 +180,9 @@ export const openRoom = (
   },
 ) =>
   Effect.gen(function* () {
-    const test = allowTestRooms(env) ? (input.test ?? null) : null;
+    const { settings, test } = yield* Effect.sync(() =>
+      roomDefaults(env, input),
+    );
     const room_id = `r_${randomString(ROOM_ID_CHARS, 10)}`;
     const invite_code = randomString(INVITE_CHARS, 6);
     // Fails only if the room id is taken, which 36^10 ids make unlikely
@@ -143,7 +192,7 @@ export const openRoom = (
         room_id,
         invite_code,
         name: input.name,
-        settings: { ...SETTINGS_DEFAULTS, ...input.settings },
+        settings,
         seed: newSeed(test),
         test,
       }),

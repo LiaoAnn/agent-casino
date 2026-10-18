@@ -88,6 +88,17 @@ interface RoomData {
   // A9: three timeouts in a row; the server plays every later turn of the
   // seat at once, for the rest of the match.
   absent: [boolean, boolean];
+  // What test.chaos (A11) has done so far.
+  chaos_done: ChaosDone;
+}
+
+interface ChaosDone {
+  // reject_first_action: the seats whose first action was refused.
+  rejected: [boolean, boolean];
+  // extra_waiting: `waiting` answered instead of the turn `turn_id`.
+  fake_waits: { turn_id: string; count: number } | null;
+  // fail_request_every: each seat's requests to the room so far.
+  requests: [number, number];
 }
 
 // `complete`: all hands played or someone ran out of chips. `left`: `loser`
@@ -178,6 +189,11 @@ export class RoomReferee {
       created_at: this.#now(),
       timeouts: [0, 0],
       absent: [false, false],
+      chaos_done: {
+        rejected: [false, false],
+        fake_waits: null,
+        requests: [0, 0],
+      },
     });
     return ok(null);
   }
@@ -245,7 +261,11 @@ export class RoomReferee {
   async status(
     seat: Seat,
     options: { wait: boolean },
-  ): Promise<Result<RoomStatus, 'room_not_found' | 'invalid_token'>> {
+  ): Promise<
+    Result<RoomStatus, 'room_not_found' | 'invalid_token' | 'unavailable'>
+  > {
+    const dropped = await this.#dropRequest(seat);
+    if (dropped) return fail(dropped);
     let timedOut = !options.wait;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const windowEnd = new Promise<void>(resolve => {
@@ -260,6 +280,10 @@ export class RoomReferee {
         const opened = await this.#open();
         if (!opened.ok) return opened;
         const status = statusFor(opened.value, seat);
+        if (options.wait && status.status === 'your_turn') {
+          const fake = await this.#fakeWaiting(opened.value, status);
+          if (fake) return ok(fake);
+        }
         if (status.status !== 'waiting' || timedOut) return ok(status);
         const change = this.#nextChange();
         await Promise.race([change.promise, windowEnd]);
@@ -284,8 +308,11 @@ export class RoomReferee {
       | 'invalid_action'
       | 'match_over'
       | 'invalid_token'
+      | 'unavailable'
     >
   > {
+    const dropped = await this.#dropRequest(seat);
+    if (dropped) return fail(dropped);
     const opened = await this.#open();
     if (!opened.ok) return opened;
     const data = opened.value;
@@ -324,6 +351,25 @@ export class RoomReferee {
         ),
       );
     }
+    if (
+      data.test?.chaos?.reject_first_action &&
+      !data.chaos_done.rejected[seat]
+    ) {
+      const rejected: [boolean, boolean] = [...data.chaos_done.rejected];
+      rejected[seat] = true;
+      await this.#save({
+        ...data,
+        chaos_done: { ...data.chaos_done, rejected },
+      });
+      return fail(
+        apiError(
+          'invalid_action',
+          'This test room refuses the first action of each player on purpose (chaos reject_first_action)',
+          `Pick a legal action from legal_actions and resubmit it with the same turn_id before the deadline`,
+          { state },
+        ),
+      );
+    }
     // A raise without an amount is passed on for the engine to refuse.
     const action = (
       input.type === 'raise'
@@ -350,8 +396,13 @@ export class RoomReferee {
   async leave(
     seat: Seat,
   ): Promise<
-    Result<MatchOverBody, 'room_not_found' | 'match_over' | 'invalid_token'>
+    Result<
+      MatchOverBody,
+      'room_not_found' | 'match_over' | 'invalid_token' | 'unavailable'
+    >
   > {
+    const dropped = await this.#dropRequest(seat);
+    if (dropped) return fail(dropped);
     const opened = await this.#open();
     if (!opened.ok) return opened;
     const data = opened.value;
@@ -382,6 +433,51 @@ export class RoomReferee {
       }),
     );
     return ok(null);
+  }
+
+  // A11 fail_request_every: counts the seat's requests and refuses every
+  // Nth one before anything else. This 503 is made on purpose, unlike the one
+  // client.ts answers when the DO can't be reached.
+  async #dropRequest(seat: Seat): Promise<ApiError<'unavailable'> | undefined> {
+    const data = await this.#load();
+    const every = data?.test?.chaos?.fail_request_every;
+    if (!data || every === undefined) return undefined;
+    const requests: [number, number] = [...data.chaos_done.requests];
+    requests[seat] += 1;
+    await this.#save({ ...data, chaos_done: { ...data.chaos_done, requests } });
+    if (requests[seat] % every !== 0) return undefined;
+    return apiError(
+      'unavailable',
+      'This test room dropped the request on purpose (chaos fail_request_every)',
+      'Resend the same request',
+    );
+  }
+
+  // A11 extra_waiting: the first N waits of each turn answer `waiting` at
+  // once instead of `your_turn`; the deadline does not move.
+  async #fakeWaiting(
+    data: RoomData,
+    turn: RoomStatus & { status: 'your_turn' },
+  ): Promise<RoomStatus | undefined> {
+    const extra = data.test?.chaos?.extra_waiting ?? 0;
+    const done = data.chaos_done.fake_waits;
+    const count = done?.turn_id === turn.turn_id ? done.count : 0;
+    if (count >= extra) return undefined;
+    await this.#save({
+      ...data,
+      chaos_done: {
+        ...data.chaos_done,
+        fake_waits: { turn_id: turn.turn_id, count: count + 1 },
+      },
+    });
+    return {
+      status: 'waiting',
+      room_status: turn.room_status,
+      to_act_seat: turn.to_act_seat,
+      hand_number: turn.hand_number,
+      view: turn.view,
+      hint: `Not your turn yet. Call ${waitPath(data)} again`,
+    };
   }
 
   // Loads the room, refusing a missing one or one that ended over an hour
