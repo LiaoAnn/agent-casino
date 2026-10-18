@@ -96,6 +96,8 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 - `isolation` 用預設的 `shared`：子任務直接在你的 worktree 裡跑，看得到還沒 commit 的改動。不要用 `worktree`，那會從上一個 commit 開新的 checkout，看不到你正在改的東西。子任務在跑的時候，你不要改檔案。
 - 每個任務一個 `clientRequestId`（例如 `t09-s2-test-author-1`）。同一個 id 再送一次只會拿回原本的結果，不會重跑：呼叫沒有回應、不確定有沒有開成時才用同一個 id 重送；任務失敗要重跑或開新的一輪，就換新 id（例如 `-2`）。記下每個回傳的 `taskId`。
 - 要等結果才能往下走時用 `mode:"wait"`、`timeoutMs: 1800000`。幾個 lens 可以各用 `mode:"async"` 同時開，等它們做完的通知。回傳 `waitTimedOut` 或收到通知後，用 `task_status` 拿最後的報告再往下走。
+- 每個 subagent 結束後（包括失敗、被中斷），先 `git -C <path> status` 和 `git -C <path> diff` 確認它只動了允許的檔案；被中斷的 test-author 或 reviewer 可能留下沒還原的 mutant。動到不該動的就還原再往下走。
+- 任務說明裡「允許的範圍」要寫完整，包括你這張 ticket 自己負責的測試檔（例如 `routes/*.test.ts`），不然 verifier 會把它們判成超出範圍。
 - PR 的「驗證」和「Review」段寫明每個角色用了哪個 provider 和模型。
 
 ## 4. 獨立驗證
