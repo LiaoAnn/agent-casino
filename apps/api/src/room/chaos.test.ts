@@ -28,7 +28,7 @@ import type { Bindings } from '../routes/env';
 import { RoomReferee, type RoomStorage } from './referee';
 
 const BASE = 'http://api.test';
-const SEED = 12345;
+const SEED = '0'.repeat(64);
 const STACK = 40;
 
 // --- Fakes ------------------------------------------------------------------
@@ -694,7 +694,7 @@ describe('A11 DEFAULT_SETTINGS_JSON: the default settings of every room on the d
 
 describe('A11 DEFAULT_TEST_JSON: default test settings, only where ALLOW_TEST_ROOMS=true', () => {
   it('{"seed"} deals dealHand(seed, 1) to a room without test', async () => {
-    const t = makeEnv({ vars: { DEFAULT_TEST_JSON: `{"seed":${SEED}}` } });
+    const t = makeEnv({ vars: { DEFAULT_TEST_JSON: `{"seed":"${SEED}"}` } });
     const { roomId, tokens } = await startRoom(t);
     const deal = dealHand(SEED, 1);
     const alice = await state(t, roomId, tokens[0]);
@@ -713,7 +713,7 @@ describe('A11 DEFAULT_TEST_JSON: default test settings, only where ALLOW_TEST_RO
   });
 
   it('merged shallowly with the request test: request {seed} + default {chaos} gives both', async () => {
-    const OTHER_SEED = 777;
+    const OTHER_SEED = 'a'.repeat(64);
     const t = makeEnv({
       vars: { DEFAULT_TEST_JSON: '{"chaos":{"reject_first_action":true}}' },
     });
@@ -731,9 +731,9 @@ describe('A11 DEFAULT_TEST_JSON: default test settings, only where ALLOW_TEST_RO
     );
   });
 
-  it('request test keys win: request {seed: 777} over default {seed: 12345}', async () => {
-    const OTHER_SEED = 777;
-    const t = makeEnv({ vars: { DEFAULT_TEST_JSON: `{"seed":${SEED}}` } });
+  it('request test keys win: request hex seed overrides the default hex seed', async () => {
+    const OTHER_SEED = 'a'.repeat(64);
+    const t = makeEnv({ vars: { DEFAULT_TEST_JSON: `{"seed":"${SEED}"}` } });
     const { roomId, tokens } = await startRoom(t, {
       test: { seed: OTHER_SEED },
     });
@@ -747,7 +747,7 @@ describe('A11 DEFAULT_TEST_JSON: default test settings, only where ALLOW_TEST_RO
       const t = makeEnv({
         vars: {
           ALLOW_TEST_ROOMS: allow,
-          DEFAULT_TEST_JSON: `{"seed":${SEED},"chaos":{"reject_first_action":true}}`,
+          DEFAULT_TEST_JSON: `{"seed":"${SEED}","chaos":{"reject_first_action":true}}`,
         },
       });
       const { roomId, tokens } = await startRoom(t);
@@ -782,7 +782,11 @@ describe('A11 misconfigured defaults are loud: POST /v1/rooms answers 500 intern
     { var: 'DEFAULT_SETTINGS_JSON', value: '{"hands":"many"}', allow: 'true' },
     { var: 'DEFAULT_SETTINGS_JSON', value: '[]', allow: 'true' },
     { var: 'DEFAULT_TEST_JSON', value: '{not json', allow: 'true' },
-    { var: 'DEFAULT_TEST_JSON', value: '{"seed":-1}', allow: 'true' },
+    {
+      var: 'DEFAULT_TEST_JSON',
+      value: `{"seed":"${'A'.repeat(64)}"}`,
+      allow: 'true',
+    },
     {
       var: 'DEFAULT_TEST_JSON',
       value: '{"chaos":{"fail_request_every":1}}',

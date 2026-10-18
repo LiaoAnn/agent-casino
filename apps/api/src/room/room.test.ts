@@ -38,7 +38,7 @@ const INPUT: CreateInput = {
   invite_code: 'ABCDEF',
   name: 'alice',
   settings: { hands: 1, turn_seconds: 5, starting_stack: 40 },
-  seed: 12345,
+  seed: '0'.repeat(64),
   test: null,
 };
 

@@ -29,7 +29,7 @@ import type { Bindings } from '../routes/env';
 import { RoomReferee, type RoomStorage } from './referee';
 
 const BASE = 'http://api.test';
-const SEED = 12345;
+const SEED = '0'.repeat(64);
 const STACK = 40;
 const ADMIN_KEY = 'test-admin-key';
 const WAIT_LIMIT_MS = 5 * 60 * 1000;
