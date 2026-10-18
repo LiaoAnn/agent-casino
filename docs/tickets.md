@@ -146,6 +146,23 @@
 - 驗證：`pnpm e2e --target=staging` 全過。
 - 功能驗證：在測試環境用 curl 跟 `house-bot` 打完一場 10 手，網頁上看得到這場。
 
+### T22 檢查會造成非預期花費的地方（約 400 行）· Blocked by：T13、T21
+- Cloudflare Workers、Durable Objects、D1 都按用量計費（2026-10-18 Ann 提出）。逐一找出可能讓花費失控的地方，寫成報告，便宜的防護直接做掉，大的另開 ticket。
+- 至少檢查：
+  - **會自己一直跑的東西**：DO alarm（超時代打、D1 寫入失敗時每 10 秒重試）有沒有上限、會不會無限重排；房間、Matchmaker 有沒有永遠不結束的狀態；house-bot 有沒有可能自己跟自己一直打。
+  - **長時間占著 DO**：`wait` 30 秒長輪詢、排隊 30 秒長輪詢對 DO 計費時間（duration）的影響，同時大量連線時的最壞情況。
+  - **無限重試**：api、web、Matchmaker RPC、e2e 腳本裡的重試有沒有上限和退避。
+  - **資料只增不減**：Room DO 的 storage（每手 `hand:<n>`）、D1 的 `matches`、`match_events` 有沒有清理；查詢有沒有全表掃描（排行榜、對局列表）。
+  - **被濫用**：公開的 api（特別是開了 `ALLOW_TEST_ROOMS` 的測試環境）被人大量開房、排隊、打請求時的花費；要不要限流、限制每個名字或 IP 同時開的房間數。
+  - **其他**：observability（logs）的量、web 每次 SSR 呼叫 api 的次數。
+- 報告寫到 `docs/cost.md`：每一項寫觸發情境、最壞情況大約多少請求或多少錢（用 Cloudflare 公開價目估）、現在有沒有防護、建議怎麼改。
+- 便宜、範圍小的防護直接做（例如 alarm 重試上限、房間最長存活時間、重試加上限），每項都要有測試；牽涉合約、行為改變大或要動 Cloudflare 設定的，列成建議等 Ann 決定。
+- Cloudflare 帳號層面的保護（帳單上限、用量通知、Workers 方案）只能在 dashboard 設定：寫進報告的建議，由 Ann 自己設，不要用 API 改。
+- 不呼叫 Cloudflare；需要看 staging 的實際用量時先問 Ann。
+- 只改：`docs/cost.md`，以及防護需要的 `apps/api/src/`（不含 `contract/`）、`scripts/`。
+- 驗證：`pnpm check`；每個做掉的防護都有測試證明上限生效（例如 alarm 重試到上限就停）。
+- 功能驗證：在 worktree 的 dev server 用 curl 重現至少一個原本會一直跑的情境（例如讓 D1 寫入失敗），確認現在會停下來。
+
 ## Epic E3 Skill 與接入
 
 **完成定義**：全新的 Claude Code、Codex 只收到一句話就能自己打完一場，不問人。
@@ -197,7 +214,7 @@
 
 **完成定義**：正式環境可用，三個 agent 試玩通過。
 
-### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21
+### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22
 - 正式環境部署（人同意後）、管理員金鑰、試玩發現的小修正。
 - 驗證：`pnpm e2e --target=prod`。
 - 功能驗證：三個 agent 在正式環境各打一場 10 手局。
