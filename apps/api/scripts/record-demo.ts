@@ -7,6 +7,7 @@
  * Then GET /v1/leaderboard and /v1/matches show them. Never touches a remote
  * database: getPlatformProxy here only opens apps/api/.wrangler/state.
  */
+import { createHash } from 'node:crypto';
 import { registerHooks } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -45,7 +46,7 @@ const random = mulberry32(firstSeed);
 const roomId = () =>
   `r_${Array.from({ length: 10 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(random() * 36)]).join('')}`;
 
-function play(seed: number) {
+function play(seed: string) {
   let state: MatchState = startMatch({
     seed,
     hands: settings.hands,
@@ -78,13 +79,14 @@ try {
     [p0, p1],
     [p1, p0],
   ].entries()) {
-    const seed = (firstSeed + i) >>> 0;
+    // Match seeds are 64 hex characters (holdem-rules 種子與洗牌).
+    const seed = createHash('sha256').update(`${firstSeed}:${i}`).digest('hex');
     const { hands, stacks } = play(seed);
     const input = {
       match_id: roomId(),
       players: [players[0] ?? p0, players[1] ?? p1] as [string, string],
       settings,
-      seed: String(seed),
+      seed,
       result:
         stacks[0] > stacks[1]
           ? ('seat0_win' as const)

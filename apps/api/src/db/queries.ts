@@ -114,8 +114,7 @@ export async function getMatch(
     match_id: row.matchId,
     players: [row.player0, row.player1],
     settings: row.settings,
-    // The contract still types the seed as a uint32 until T20.
-    seed: Number(row.seed),
+    seed: row.seed,
     result: row.result,
     rated: row.rated,
     ended_at: row.endedAt.toISOString(),

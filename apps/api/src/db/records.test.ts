@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomAction } from '../holdem/bot';
 import {
@@ -81,7 +82,12 @@ function input(overrides: Partial<MatchRecordInput> = {}): MatchRecordInput {
 /** A whole match played by the engine with random legal actions. */
 function playedHands(seed: number, hands: number): MatchRecordInput {
   const random = mulberry32(seed + 1);
-  let state: MatchState = startMatch({ seed, hands, startingStack: 200 });
+  const hexed = createHash('sha256').update(`played-${seed}`).digest('hex');
+  let state: MatchState = startMatch({
+    seed: hexed,
+    hands,
+    startingStack: 200,
+  });
   const finished: HandRecord[] = [];
   while (!state.over) {
     const seat = state.toAct;
@@ -97,7 +103,7 @@ function playedHands(seed: number, hands: number): MatchRecordInput {
   }
   const [s0, s1] = state.stacks;
   return input({
-    seed: String(seed),
+    seed: hexed,
     settings: { hands, turn_seconds: 30, starting_stack: 200 },
     result: s0 > s1 ? 'seat0_win' : s1 > s0 ? 'seat1_win' : 'draw',
     final_stacks: [s0, s1],
@@ -330,7 +336,7 @@ describe('recordMatch: long matches', () => {
       return current;
     });
     const match = input({
-      seed: '42',
+      seed: '2a'.repeat(32),
       settings: { hands: 200, turn_seconds: 30, starting_stack: 200 },
       hands,
     });

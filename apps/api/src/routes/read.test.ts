@@ -1,4 +1,5 @@
 // T07: the read endpoints answer from D1 (casino-api skill: 資料與積分, A13).
+import { createHash } from 'node:crypto';
 import { Schema } from 'effect';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { handle } from '../app';
@@ -113,12 +114,18 @@ function hand(
   };
 }
 
+/** A fixed 64-hex match seed derived from a label. */
+const hexSeed = (label: string) =>
+  createHash('sha256').update(label).digest('hex');
+
+const RECORDED_SEED = hexSeed('recorded');
+
 function input(overrides: Partial<MatchRecordInput> = {}): MatchRecordInput {
   return {
     match_id: nextMatchId(),
     players: ['Alice', 'Bob'],
     settings: { hands: 2, turn_seconds: 30, starting_stack: 200 },
-    seed: '42',
+    seed: RECORDED_SEED,
     result: 'seat0_win',
     ended_at: '2026-10-18T10:00:00.000Z',
     final_stacks: [300, 100],
@@ -136,7 +143,12 @@ const record = async (overrides: Partial<MatchRecordInput> = {}) => {
 /** A whole match played by the engine with random legal actions. */
 function playedMatch(seed: number, hands: number): MatchRecordInput {
   const random = mulberry32(seed + 1);
-  let state: MatchState = startMatch({ seed, hands, startingStack: 200 });
+  const hexed = hexSeed(`played-${seed}`);
+  let state: MatchState = startMatch({
+    seed: hexed,
+    hands,
+    startingStack: 200,
+  });
   const finished: HandRecord[] = [];
   while (!state.over) {
     const seat = state.toAct;
@@ -152,7 +164,7 @@ function playedMatch(seed: number, hands: number): MatchRecordInput {
   }
   const [s0, s1] = state.stacks;
   return input({
-    seed: String(seed),
+    seed: hexed,
     settings: { hands, turn_seconds: 30, starting_stack: 200 },
     result: s0 > s1 ? 'seat0_win' : s1 > s0 ? 'seat1_win' : 'draw',
     final_stacks: [s0, s1],
@@ -457,7 +469,7 @@ describe('GET /v1/matches/{match_id}', () => {
       match_id: match.match_id,
       players: ['Alice', 'bob'],
       settings: { hands: 2, turn_seconds: 45, starting_stack: 200 },
-      seed: 42,
+      seed: RECORDED_SEED,
       result: 'seat0_win',
       rated: true,
       ended_at: '2026-10-18T10:31:07.250Z',
@@ -510,7 +522,7 @@ describe('GET /v1/matches/{match_id}', () => {
     const match = playedMatch(7, 30);
     await recordMatch(testD1.db, match);
     const detail = await matchDetail(match.match_id);
-    expect(detail.seed).toBe(7);
+    expect(detail.seed).toBe(match.seed);
     const expected = (
       JSON.parse(JSON.stringify(match.hands)) as HandRecord[]
     ).map(h => (h.ended_by === 'fold' ? { ...h, hole_cards: null } : h));
