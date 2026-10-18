@@ -143,9 +143,9 @@ describe('makeFakeData', () => {
   it('deals every hand from the match seed and pays the better hand', () => {
     for (const detail of details) {
       for (const hand of detail.hands) {
-        if (hand.hole_cards === null) continue;
         const deal = dealHand(detail.seed, hand.hand_number);
         expect(hand.hole_cards).toEqual(deal.holeCards);
+        if (hand.ended_by !== 'showdown') continue;
         expect(hand.board).toEqual(deal.board);
         const [a, b] = deal.holeCards.map(hole =>
           evaluateHand([...hole, ...deal.board]),
@@ -198,7 +198,7 @@ describe('makeFakeData', () => {
         );
         const cards = [...hand.board, ...(hand.hole_cards?.flat() ?? [])];
         expect(new Set(cards).size).toBe(cards.length);
-        expect(hand.hole_cards !== null).toBe(hand.ended_by === 'showdown');
+        expect(hand.hole_cards).not.toBeNull();
       }
     }
   });
@@ -239,7 +239,13 @@ describe('makeFakeData', () => {
       const result = replay(configOf(detail), eventsOf(detail));
       expect(result, detail.match_id).toMatchObject({ ok: true });
       if (!result.ok) continue;
-      expect(result.hands, detail.match_id).toEqual(detail.hands);
+      expect(
+        result.hands.map(hand => ({
+          ...hand,
+          hole_cards: dealHand(detail.seed, hand.hand_number).holeCards,
+        })),
+        detail.match_id,
+      ).toEqual(detail.hands);
       expect(detail.final_stacks, detail.match_id).toEqual(
         detail.hands.at(-1)?.stacks ?? [
           detail.settings.starting_stack,
@@ -268,8 +274,12 @@ describe('makeFakeData', () => {
   it('keeps every hand within the holdem invariants', () => {
     for (const detail of details) {
       for (const hand of detail.hands) {
+        const engineHand = {
+          ...hand,
+          hole_cards: hand.ended_by === 'fold' ? null : hand.hole_cards,
+        };
         expect(
-          checkHand(hand as unknown as HandRecord, configOf(detail)),
+          checkHand(engineHand as unknown as HandRecord, configOf(detail)),
           `${detail.match_id} hand ${hand.hand_number}`,
         ).toEqual([]);
       }

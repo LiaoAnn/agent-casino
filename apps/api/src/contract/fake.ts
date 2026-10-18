@@ -148,7 +148,13 @@ function playMatch(
     if (!result.ok)
       throw new Error(`Fake data broke a rule: ${result.message}`);
     if (result.state.handNumber !== state.handNumber) plan = nextPlan();
-    hands.push(...result.finishedHands);
+    // Every hand shows both players' cards, as the public record does (A13).
+    for (const hand of result.finishedHands) {
+      hands.push({
+        ...hand,
+        hole_cards: dealHand(config.seed, hand.hand_number).holeCards,
+      });
+    }
     state = result.state;
   }
   return hands;
