@@ -37,14 +37,11 @@ export const formatClock = (time: number) =>
 
 const SUITS = { s: '♠', h: '♥', d: '♦', c: '♣' } as const;
 
-// `As` → `A♠`, `Td` → `10♦`.
-function formatCard(card: string) {
-  const rank = card[0] === 'T' ? '10' : card[0];
-  return `${rank}${SUITS[card[1] as keyof typeof SUITS]}`;
+// `As` → `{ rank: 'A', suit: 's', symbol: '♠' }`, `Td` → rank `10`.
+export function parseCard(card: string) {
+  const suit = card[1] as keyof typeof SUITS;
+  return { rank: card[0] === 'T' ? '10' : card[0], suit, symbol: SUITS[suit] };
 }
-
-export const formatCards = (cards: readonly string[]) =>
-  cards.map(formatCard).join(' ');
 
 // `+16`, `-16`, `+0`.
 export const formatSigned = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
@@ -56,23 +53,24 @@ export const STREETS = {
   river: '河牌',
 } as const;
 
-// One step of a hand in words. A call's amount is the chips added, a raise's
-// the total raised to.
-export function eventLabel(
+// One step of a hand in words, in parts so the amount can stand out. A
+// call's amount is the chips added, a raise's the total raised to.
+export function eventParts(
   event: MatchHand['events'][number],
   players: MatchDetail['players'],
 ) {
-  const who = `${STREETS[event.street]} ${players[event.seat]}`;
+  const street = STREETS[event.street];
+  const who = players[event.seat];
   switch (event.type) {
     case 'post_blind':
-      return `${who} 下盲注 ${event.amount}`;
+      return { street, who, action: '下盲注', amount: event.amount };
     case 'fold':
-      return `${who} 棄牌`;
+      return { street, who, action: '棄牌' };
     case 'check':
-      return `${who} 過牌`;
+      return { street, who, action: '過牌' };
     case 'call':
-      return `${who} 跟注 ${event.amount}`;
+      return { street, who, action: '跟注', amount: event.amount };
     case 'raise':
-      return `${who} 加注到 ${event.amount}`;
+      return { street, who, action: '加注到', amount: event.amount };
   }
 }

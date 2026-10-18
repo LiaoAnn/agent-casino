@@ -1,14 +1,7 @@
-import type {
-  MatchDetail,
-  WatchResponse,
-} from '@agent-casino/api/src/contract/schemas';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { CurrentHand } from '@/components/current-hand';
-import { Hand, Pairs, Steps } from '@/components/hand';
-import { WatchResult } from '@/components/watch-result';
+import { WatchError, WatchView } from '@/components/watch-view';
 import { getWatch, type WatchData } from '@/data';
-import { formatClock } from '@/lib/format';
 
 // Each poll is a Durable Object request (docs/cost.md 6b): every 2.5 s while
 // the match is on, never once it is over.
@@ -91,104 +84,4 @@ function Watch({
 
   if ('error' in watch) return <WatchError code={watch.error} />;
   return <WatchView watch={watch} offline={offline} updatedAt={updatedAt} />;
-}
-
-const STATUS = {
-  waiting: '等待對手',
-  playing: '進行中',
-  finished: '已結束',
-  void: '作廢',
-} as const;
-
-function WatchView({
-  watch,
-  offline,
-  updatedAt,
-}: {
-  watch: WatchResponse;
-  offline: boolean;
-  updatedAt: number | null;
-}) {
-  const { settings, view, hand_number } = watch;
-  const players: MatchDetail['players'] = [
-    watch.players[0],
-    watch.players[1] ?? '（等待對手）',
-  ];
-  const info: [string, string][] = [
-    ['觀看', players[watch.seat]],
-    ['狀態', STATUS[watch.room_status]],
-    [
-      '設定',
-      `${settings.hands} 手 · 每步 ${settings.turn_seconds} 秒 · 起始籌碼 ${settings.starting_stack}`,
-    ],
-    ['最後更新', updatedAt === null ? '' : formatClock(updatedAt)],
-  ];
-  const inPlay =
-    watch.room_status === 'playing' && view !== null && hand_number !== null;
-  return (
-    <div className="space-y-8">
-      <section className="space-y-3">
-        <h2 className="font-semibold text-xl">
-          {players[0]} vs {players[1]}
-        </h2>
-        <Pairs items={info} label="觀戰資訊" />
-        {offline && (
-          <p role="status" className="text-muted-foreground text-sm">
-            暫時連不上，稍後自動重試。
-          </p>
-        )}
-      </section>
-      {watch.room_status === 'waiting' && (
-        <p className="text-muted-foreground">等待對手加入…</p>
-      )}
-      {inPlay && (
-        <CurrentHand
-          watch={watch}
-          view={view}
-          handNumber={hand_number}
-          players={players}
-        />
-      )}
-      {'result' in watch && <WatchResult watch={watch} players={players} />}
-      <section className="space-y-3">
-        <h3 className="font-semibold">時間線</h3>
-        {watch.hands.length === 0 && !inPlay && (
-          <p className="text-muted-foreground text-sm">還沒有任何動作。</p>
-        )}
-      </section>
-      {watch.hands.map(hand => (
-        <Hand key={hand.hand_number} hand={hand} players={players} />
-      ))}
-      {inPlay && (
-        <section
-          aria-label={`第 ${hand_number} 手（進行中）`}
-          className="space-y-3 border-t pt-6">
-          <h3 className="font-semibold">第 {hand_number} 手（進行中）</h3>
-          <Steps
-            title={`第 ${hand_number} 手（進行中）`}
-            events={view.history}
-            players={players}
-          />
-        </section>
-      )}
-    </div>
-  );
-}
-
-const ERRORS = {
-  invalid_token:
-    '這個觀戰連結無效。請確認網址完整，或向你的 agent 重新要一次 watch_url。',
-  room_not_found: '找不到這個房間。',
-} as const;
-
-function WatchError({ code }: { code: keyof typeof ERRORS }) {
-  return (
-    <section className="space-y-3">
-      <h2 className="font-semibold text-xl">無法觀看這場對局</h2>
-      <p className="text-muted-foreground">{ERRORS[code]}</p>
-      <Link to="/" className="underline underline-offset-4">
-        回首頁
-      </Link>
-    </section>
-  );
 }

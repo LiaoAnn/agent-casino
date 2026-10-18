@@ -2,43 +2,14 @@ import type {
   MatchDetail,
   WatchResponse,
 } from '@agent-casino/api/src/contract/schemas';
-import type { ReactNode } from 'react';
 import { ActionLogEntry } from '@/components/action-log-entry';
-import { formatCards } from '@/lib/format';
-
-// `alice 41 · Bob 39`
-export const bySeat = (
-  players: MatchDetail['players'],
-  values: readonly [string | number, string | number],
-) => `${players[0]} ${values[0]} · ${players[1]} ${values[1]}`;
-
-export function Pairs({
-  items,
-  label,
-}: {
-  items: [string, ReactNode][];
-  label?: string;
-}) {
-  return (
-    <dl
-      aria-label={label}
-      className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
-      {items.map(([term, value]) => (
-        <div key={term} className="contents">
-          <dt className="text-muted-foreground">{term}</dt>
-          <dd className="tabular-nums">{value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
+import { BySeat, type Pair, Pairs } from '@/components/pairs';
+import { Panel } from '@/components/panel';
+import { Cards } from '@/components/playing-card';
 
 // A finished hand of a match record, or of a watch link: there the
 // opponent's cards may be unknown and the watched seat's steps carry notes.
 export type HandRecord = WatchResponse['hands'][number];
-
-const holeCards = (cards: readonly string[] | null) =>
-  cards === null ? '未亮牌' : formatCards(cards);
 
 export function Hand({
   hand,
@@ -48,30 +19,40 @@ export function Hand({
   players: MatchDetail['players'];
 }) {
   const title = `第 ${hand.hand_number} 手`;
-  const items: [string, string][] = [['莊家', players[hand.button_seat]]];
-  if (hand.board.length > 0) items.push(['公共牌', formatCards(hand.board)]);
+  const items: Pair[] = [['莊家', players[hand.button_seat]]];
+  if (hand.board.length > 0) {
+    items.push(['公共牌', <Cards key="b" cards={hand.board} />]);
+  }
   // A match record shows both in every hand (the seed is public once the
   // match is over); a watch link in play only the cards the seat has seen.
   items.push([
     '底牌',
-    bySeat(players, [
-      holeCards(hand.hole_cards[0]),
-      holeCards(hand.hole_cards[1]),
-    ]),
+    <BySeat
+      key="h"
+      players={players}
+      values={[
+        <Cards key={0} cards={hand.hole_cards[0]} />,
+        <Cards key={1} cards={hand.hole_cards[1]} />,
+      ]}
+    />,
   ]);
   items.push([
     '結果',
     hand.winner_seat === null
       ? `平分底池 ${hand.pot}`
       : `${players[hand.winner_seat]} 贏得 ${hand.pot}（${hand.ended_by === 'showdown' ? '攤牌' : '對手棄牌'}）`,
+    'text-gold-200',
   ]);
-  items.push(['籌碼', bySeat(players, hand.stacks)]);
+  items.push([
+    '籌碼',
+    <BySeat key="s" players={players} values={hand.stacks} />,
+  ]);
   return (
-    <section aria-label={title} className="space-y-3 border-t pt-6">
-      <h3 className="font-semibold">{title}</h3>
+    <Panel aria-label={title} tone="sunken">
+      <h3 className="font-semibold text-ivory">{title}</h3>
       <Pairs items={items} />
       <Steps title={title} events={hand.events} players={players} />
-    </section>
+    </Panel>
   );
 }
 
@@ -88,7 +69,7 @@ export function Steps({
   return (
     <ol
       aria-label={`${title}的動作`}
-      className="list-decimal space-y-1 pl-6 text-sm">
+      className="list-decimal space-y-1 border-gold-600/25 border-t pt-3 pl-6 text-sm marker:text-slate">
       {events.map((event, i) => (
         // Events have no id; their order is fixed.
         // biome-ignore lint/suspicious/noArrayIndexKey: see above
