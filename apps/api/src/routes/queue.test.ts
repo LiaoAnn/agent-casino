@@ -32,7 +32,12 @@ import type { Bindings } from './env';
 
 const BASE = 'http://api.test';
 const TOKEN_SECRET = 'queue-test-token-secret';
+// The long polls of the room, and of a queue caller nobody joins.
 const WAIT_MS = 100;
+// The queue window when a test expects a pair. The second caller reaches
+// Matchmaker only after its own D1 ban check, which on a busy machine can
+// take longer than WAIT_MS; a pair answers as soon as it is made.
+const PAIR_WAIT_MS = 2_000;
 let testD1: TestD1;
 
 beforeAll(async () => {
@@ -63,6 +68,7 @@ class MemoryStorage implements RoomStorage {
 const makeEnv = (
   allowTestRooms?: string,
   defaults: { DEFAULT_SETTINGS_JSON?: string; DEFAULT_TEST_JSON?: string } = {},
+  queueWaitMs = PAIR_WAIT_MS,
 ) => {
   const referees = new Map<string, RoomReferee>();
   const ROOM = {
@@ -92,7 +98,7 @@ const makeEnv = (
   const queueCall = vi.fn((id: string, input: QueueInput) => {
     let queue = queues.get(id);
     if (queue === undefined) {
-      queue = matchQueueIn(env, { waitMs: WAIT_MS });
+      queue = matchQueueIn(env, { waitMs: queueWaitMs });
       queues.set(id, queue);
     }
     return queue.queue(input);
@@ -213,7 +219,7 @@ describe('POST /v1/queue (S1)', () => {
   });
 
   it('returns waiting with the exact hint for one caller', async () => {
-    const { env } = makeEnv();
+    const { env } = makeEnv(undefined, {}, WAIT_MS);
     expect(await decodeQueue(await queue(env, 'Alice'))).toEqual({
       status: 'waiting',
       waited_seconds: 0,
@@ -223,7 +229,7 @@ describe('POST /v1/queue (S1)', () => {
   });
 
   it('removes a retained waiter banned before pairing and pairs the remaining callers', async () => {
-    const { env } = makeEnv();
+    const { env } = makeEnv(undefined, {}, WAIT_MS);
     expect((await decodeQueue(await queue(env, 'Alice'))).status).toBe(
       'waiting',
     );
@@ -243,9 +249,11 @@ describe('POST /v1/queue (S1)', () => {
   it.each([3, 10])(
     'compares effective environment settings with requested hands=%s',
     async hands => {
-      const { env } = makeEnv(undefined, {
-        DEFAULT_SETTINGS_JSON: '{"hands":3}',
-      });
+      const { env } = makeEnv(
+        undefined,
+        { DEFAULT_SETTINGS_JSON: '{"hands":3}' },
+        hands === 3 ? PAIR_WAIT_MS : WAIT_MS,
+      );
       const responses = await Promise.all([
         queue(env, 'Alice'),
         queue(env, 'Bob', { settings: { hands } }),
@@ -308,7 +316,7 @@ describe('POST /v1/queue (S1)', () => {
   it.each(['A', 'a'.repeat(32), 'Valid_09-name'])(
     'accepts valid boundary name %s',
     async name => {
-      const { env } = makeEnv();
+      const { env } = makeEnv(undefined, {}, WAIT_MS);
       expect((await decodeQueue(await queue(env, name))).status).toBe(
         'waiting',
       );
@@ -339,7 +347,7 @@ describe('POST /v1/queue (S1)', () => {
   });
 
   it('does not pair different settings', async () => {
-    const { env } = makeEnv();
+    const { env } = makeEnv(undefined, {}, WAIT_MS);
     const responses = await Promise.all([
       queue(env, 'Alice', { settings: { starting_stack: 100 } }),
       queue(env, 'Bob', { settings: { starting_stack: 200 } }),
@@ -476,7 +484,7 @@ describe('POST /v1/queue: opponent, settings and watch link (A16)', () => {
   });
 
   it('the waiter who is paired later gets the same watch_url on every call', async () => {
-    const { env } = makeEnv();
+    const { env } = makeEnv(undefined, {}, WAIT_MS);
     expect((await decodeQueue(await queue(env, 'Alice'))).status).toBe(
       'waiting',
     );
@@ -558,7 +566,7 @@ describe('POST /v1/queue queue_key (A17)', () => {
   it.each(['A'.repeat(16), 'z'.repeat(64), 'Az09_-'.repeat(3)])(
     'accepts boundary queue_key %s without echoing it',
     async queue_key => {
-      const { env, queueCall } = makeEnv();
+      const { env, queueCall } = makeEnv(undefined, {}, WAIT_MS);
       const response = await queue(env, 'Alice', { queue_key });
       expect(response.status).toBe(200);
       const body = (await response.json()) as typeof QueueResponse.Type;
@@ -573,7 +581,7 @@ describe('POST /v1/queue queue_key (A17)', () => {
   );
 
   it('rejects another key while waiting, preserves settings and lets the owner retrieve matched', async () => {
-    const { env } = makeEnv();
+    const { env } = makeEnv(undefined, {}, WAIT_MS);
     const settings = { hands: 3, turn_seconds: 10, starting_stack: 100 };
     expect(
       (

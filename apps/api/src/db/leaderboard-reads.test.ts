@@ -97,9 +97,17 @@ type RatingFixture = ReturnType<typeof ratingFixtures>[number];
 
 async function seedRatings(rows: RatingFixture[]) {
   // Stay below D1's bound-parameter limit without depending on bulk SQL.
+  const inserts = [];
   for (let start = 0; start < rows.length; start += 10) {
-    await testD1.db.insert(ratings).values(rows.slice(start, start + 10));
+    inserts.push(
+      testD1.db.insert(ratings).values(rows.slice(start, start + 10)),
+    );
   }
+  // One round trip: awaiting each insert took about 3 s, and a test timed
+  // out mid-seed kept inserting into the next test's table.
+  const [first, ...rest] = inserts;
+  if (first === undefined) throw new Error('No ratings to seed');
+  await testD1.db.batch([first, ...rest]);
 }
 
 function expectedEntries(rows: RatingFixture[], banned = new Set<string>()) {
@@ -113,7 +121,8 @@ function expectedEntries(rows: RatingFixture[], banned = new Set<string>()) {
     }));
 }
 
-describe('getLeaderboard D1 rows read', () => {
+// Seeding 1,000 rows takes about a second; a busy machine can triple that.
+describe('getLeaderboard D1 rows read', { timeout: 15_000 }, () => {
   it('reads at most 150 rows for the top 100 of 1,000 ratings', async () => {
     const rows = ratingFixtures();
     await seedRatings(rows);
