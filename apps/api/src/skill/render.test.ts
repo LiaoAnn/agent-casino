@@ -93,6 +93,9 @@ const endpointOf = (curlPath: string): Reflected | undefined => {
 
 const lines = (text: string) => text.split('\n');
 
+const numberedItems = (text: string): string[] =>
+  text.match(/^\d+[.)] [^\n]*(?:\n(?!\d+[.)] |#{1,6} )[^\n]*)*/gm) ?? [];
+
 // The text from the `## <title>` line up to the next `## ` heading.
 const section = (md: string, title: string): string => {
   const all = lines(md);
@@ -722,12 +725,14 @@ describe('renderSkill: what an agent must know', () => {
     expect(quick).toMatch(/one match/i);
     expect(quick).toMatch(/10 hands/);
     expect(quick).toContain('`settings.hands`');
+    // S5 adds an overview mentioning watch_url and waiting before the steps.
+    const flow = numberedItems(quick).slice(1).join('\n');
     const order = [
-      quick.indexOf('POST /v1/queue'),
-      quick.indexOf('`watch_url`'),
-      quick.indexOf('wait'),
-      quick.indexOf('actions'),
-      quick.indexOf('match_over'),
+      flow.indexOf('POST /v1/queue'),
+      flow.indexOf('`watch_url`'),
+      flow.indexOf('wait'),
+      flow.indexOf('actions'),
+      flow.indexOf('match_over'),
     ];
     expect(order.every(i => i > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -779,11 +784,13 @@ describe('renderSkill: what an agent must know', () => {
     expect(todo).toMatch(/\| `waiting` from `POST \/v1\/queue` [^\n]*owner/);
   });
 
-  // T32 S4: keep the owner informed without blocking queueing or play.
+  // T32 S4/S5: explain the flow up front, then keep the owner informed.
   describe.each([undefined, 'https://web.casino.test'])(
     'queue progress updates (web URL: %s)',
     webUrl => {
       const md = renderSkill(BASE_URL, webUrl);
+      const quickItems = numberedItems(section(md, 'Quick start'));
+      const first = quickItems[0] ?? '';
       const play = section(md, 'How to play');
       const step1 = play.slice(0, play.indexOf('### Step 2'));
       const items =
@@ -793,7 +800,66 @@ describe('renderSkill: what an agent must know', () => {
       const matched =
         items.find(item => /"status"\s*:\s*"matched"/.test(item)) ?? '';
 
-      it('announces the chosen name to the owner before the first queue call', () => {
+      it('makes the first Quick start item explain the whole match to the owner', () => {
+        expect(first, 'first numbered Quick start item').toMatch(/^1[.)] /);
+        expect.soft(first).toMatch(/(?:before|start|begin)/i);
+        expect.soft(first).toMatch(/(?:tell|say|explain|inform)[\s\S]*owner/i);
+        expect
+          .soft(first)
+          .toMatch(/(?:two or three|2 or 3|2[–-]3)[ -]sentences/i);
+        for (const concept of [
+          'your name',
+          'seconds',
+          'minutes',
+          '10 hands',
+          'report',
+          'result',
+        ]) {
+          expect.soft(first.toLowerCase(), concept).toContain(concept);
+        }
+        expect.soft(first).toMatch(/queu/i);
+        expect.soft(first).toMatch(/opponent/i);
+        expect.soft(first).toMatch(/(?:matched|match|paired)/i);
+        expect.soft(first).toMatch(/(?:watch_url|watch(?:ing)? link)/i);
+        expect.soft(first).toMatch(/open/i);
+        expect
+          .soft(first)
+          .toMatch(/(?:don't|do not) need to do anything|nothing to do/i);
+      });
+
+      it('starts queueing after the explanation without waiting for an owner answer', () => {
+        expect.soft(first).toMatch(/(?:then|after|once)[\s\S]*(?:queu)/i);
+        expect
+          .soft(first)
+          .toMatch(/(?:immediately|right away|directly|straight)/i);
+        expect
+          .soft(first)
+          .toMatch(
+            /(?:don't|do not|never|without)[^.!\n]*wait[^.!\n]*(?:answer|reply|response)/i,
+          );
+      });
+
+      it('keeps naming and the playable steps after the new first item in order', () => {
+        const rest = quickItems.slice(1);
+        const name = rest.findIndex(item =>
+          item.includes('openssl rand -hex 2'),
+        );
+        const queue = rest.findIndex(item => item.includes('POST /v1/queue'));
+        const watch = rest.findIndex(item => item.includes('watch_url'));
+        const loop = rest.findIndex(
+          item => item.includes('wait') && item.includes('actions'),
+        );
+        const report = rest.findIndex(
+          item => item.includes('match_over') && /report/i.test(item),
+        );
+        const order = [name, queue, watch, loop, report];
+        expect(order.every(index => index >= 0)).toBe(true);
+        for (let i = 1; i < order.length; i++) {
+          expect(order[i]).toBeGreaterThan(order[i - 1] ?? -1);
+        }
+      });
+
+      it('refers to the Quick start explanation before the first queue call', () => {
         const queueCall = fenced(step1, 'bash').find(block =>
           block.includes('"$CASINO_URL/v1/queue"'),
         );
@@ -802,17 +868,20 @@ describe('renderSkill: what an agent must know', () => {
         const announcement = beforeQueue
           .split(/\n\s*\n/)
           .find(
-            paragraph => /owner/i.test(paragraph) && /queu/i.test(paragraph),
+            paragraph =>
+              /Quick start/i.test(paragraph) &&
+              /(?:explain|explanation|overview|intro|step\s*1|first step)/i.test(
+                paragraph,
+              ),
           );
         expect(
           announcement,
-          'announcement before the first queue call',
+          'Quick start reference before the first queue call',
         ).toBeDefined();
-        expect(announcement ?? '').toMatch(/(?:before|first|start)/i);
+        expect(announcement ?? '').toMatch(/Quick start/i);
         expect(announcement ?? '').toMatch(
-          /(?:tell|say|inform|notify|announce)/i,
+          /(?:explain|explanation|overview|intro|step\s*1|first step)/i,
         );
-        expect(announcement ?? '').toMatch(/(?:name|queueing as|queuing as)/i);
       });
 
       it('reports both progress fields in one sentence on every waiting response', () => {
