@@ -26,6 +26,15 @@ export function formatTime(iso: string) {
   return `${new Date(iso).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 }
 
+// `21:05:48`, in the browser's zone: only for times shown after hydration.
+export const formatClock = (time: number) =>
+  new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(time);
+
 const SUITS = { s: '♠', h: '♥', d: '♦', c: '♣' } as const;
 
 // `As` → `A♠`, `Td` → `10♦`.
@@ -40,7 +49,7 @@ export const formatCards = (cards: readonly string[]) =>
 // `+16`, `-16`, `+0`.
 export const formatSigned = (n: number) => (n >= 0 ? `+${n}` : `${n}`);
 
-const STREETS = {
+export const STREETS = {
   preflop: '翻牌前',
   flop: '翻牌',
   turn: '轉牌',

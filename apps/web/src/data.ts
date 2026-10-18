@@ -1,5 +1,6 @@
 // The one place the web gets its data from: GET /v1/leaderboard,
-// GET /v1/matches and GET /v1/matches/{match_id} of the api Worker, through
+// GET /v1/matches, GET /v1/matches/{match_id} and GET /v1/rooms/{room_id}/watch
+// of the api Worker, through
 // the contract's typed client. The functions run on the server. Deployed, the
 // api is the service binding API (casino-api A13); under `vite dev` it is
 // VITE_API_URL, by default the local `wrangler dev` of apps/api. With
@@ -10,10 +11,11 @@ import type {
   Leaderboard,
   MatchDetail,
   MatchList,
+  WatchResponse,
 } from '@agent-casino/api/src/contract/schemas';
 import { createServerFn } from '@tanstack/react-start';
 import { Effect } from 'effect';
-import { FetchHttpClient, HttpClient } from 'effect/http';
+import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
 
 const fake = async () =>
@@ -31,13 +33,23 @@ const api = async (): Promise<{ fetch: typeof fetch; baseUrl: string }> => {
   return { fetch: env.API.fetch.bind(env.API), baseUrl: 'https://api' };
 };
 
-type ReadClient = HttpApiClient.ForApi<typeof CasinoApi>['read'];
-
-const read = async <A>(
-  call: (client: ReadClient) => Effect.Effect<A, unknown>,
+// Runs `call` against the api Worker with an HttpClient to it.
+const run = async <A>(
+  call: (baseUrl: string) => Effect.Effect<A, unknown, HttpClient.HttpClient>,
 ): Promise<A> => {
   const { fetch, baseUrl } = await api();
   return Effect.runPromise(
+    call(baseUrl).pipe(
+      Effect.provide(FetchHttpClient.layer),
+      Effect.provideService(FetchHttpClient.Fetch, fetch),
+    ),
+  );
+};
+
+type Client = HttpApiClient.ForApi<typeof CasinoApi>;
+
+const read = <A>(call: (client: Client['read']) => Effect.Effect<A, unknown>) =>
+  run(baseUrl =>
     Effect.gen(function* () {
       const httpClient = yield* HttpClient.HttpClient;
       const client = yield* HttpApiClient.group(CasinoApi, {
@@ -46,12 +58,28 @@ const read = async <A>(
         baseUrl,
       });
       return yield* call(client);
-    }).pipe(
-      Effect.provide(FetchHttpClient.layer),
-      Effect.provideService(FetchHttpClient.Fetch, fetch),
-    ),
+    }),
   );
-};
+
+// The watch group, with `Authorization: Bearer <watch token>`.
+const watch = <A>(
+  token: string,
+  call: (client: Client['watch']) => Effect.Effect<A, unknown>,
+) =>
+  run(baseUrl =>
+    Effect.gen(function* () {
+      const httpClient = HttpClient.mapRequest(
+        yield* HttpClient.HttpClient,
+        HttpClientRequest.bearerToken(token),
+      );
+      const client = yield* HttpApiClient.group(CasinoApi, {
+        group: 'watch',
+        httpClient,
+        baseUrl,
+      });
+      return yield* call(client);
+    }),
+  );
 
 const useFake = import.meta.env.VITE_FAKE_DATA === '1';
 
@@ -88,3 +116,39 @@ export const getMatch = createServerFn({ method: 'GET' })
             ),
           ),
   );
+
+// The test token of the fake watch links (VITE_FAKE_DATA=1).
+const FAKE_WATCH_TOKEN = 'fake-watch-token';
+
+export type WatchData =
+  | WatchResponse
+  | { error: 'invalid_token' | 'room_not_found' };
+
+// The owner's view of one seat (A16), or why the link shows nothing. POST, so
+// the token stays out of the server function's URL.
+export const getWatch = createServerFn({ method: 'POST' })
+  .validator((input: { roomId: string; token: string }) => input)
+  .handler(async ({ data: { roomId, token } }): Promise<WatchData> => {
+    // No token, no request: it could only be refused.
+    if (token === '') return { error: 'invalid_token' };
+    if (useFake) {
+      const { playing, finished } = (await fake()).watch;
+      if (token !== FAKE_WATCH_TOKEN) return { error: 'invalid_token' };
+      return (
+        [playing, finished].find(w => w.room_id === roomId) ?? {
+          error: 'room_not_found',
+        }
+      );
+    }
+    return watch(token, client =>
+      client.watch({ params: { room_id: roomId } }).pipe(
+        // The refusals the page explains; anything else is an outage.
+        Effect.catch(error =>
+          'code' in error &&
+          (error.code === 'invalid_token' || error.code === 'room_not_found')
+            ? Effect.succeed({ error: error.code })
+            : Effect.fail(error),
+        ),
+      ),
+    );
+  });

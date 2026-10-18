@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as MatchesMatchIdRouteImport } from './routes/matches.$matchId'
+import { Route as WatchRoomIdRouteImport } from './routes/watch.$roomId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,31 +23,40 @@ const MatchesMatchIdRoute = MatchesMatchIdRouteImport.update({
   path: '/matches/$matchId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WatchRoomIdRoute = WatchRoomIdRouteImport.update({
+  id: '/watch/$roomId',
+  path: '/watch/$roomId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/matches/$matchId': typeof MatchesMatchIdRoute
+  '/watch/$roomId': typeof WatchRoomIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/matches/$matchId': typeof MatchesMatchIdRoute
+  '/watch/$roomId': typeof WatchRoomIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/matches/$matchId': typeof MatchesMatchIdRoute
+  '/watch/$roomId': typeof WatchRoomIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/matches/$matchId'
+  fullPaths: '/' | '/matches/$matchId' | '/watch/$roomId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/matches/$matchId'
-  id: '__root__' | '/' | '/matches/$matchId'
+  to: '/' | '/matches/$matchId' | '/watch/$roomId'
+  id: '__root__' | '/' | '/matches/$matchId' | '/watch/$roomId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   MatchesMatchIdRoute: typeof MatchesMatchIdRoute
+  WatchRoomIdRoute: typeof WatchRoomIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -65,12 +75,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MatchesMatchIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/watch/$roomId': {
+      id: '/watch/$roomId'
+      path: '/watch/$roomId'
+      fullPath: '/watch/$roomId'
+      preLoaderRoute: typeof WatchRoomIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   MatchesMatchIdRoute: MatchesMatchIdRoute,
+  WatchRoomIdRoute: WatchRoomIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
