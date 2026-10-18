@@ -330,6 +330,23 @@ describe('bad request input answers 400 invalid_request', () => {
   const queue = (overrides: Partial<Call>) =>
     call({ method: 'POST', path: '/v1/queue', ...overrides });
 
+  it.each([
+    { case: 'missing', fields: {} },
+    { case: 'numeric', fields: { queue_key: 123 } },
+    { case: 'invalid format', fields: { queue_key: 'bad key' } },
+  ])(
+    'T28 S4 $case queue_key teaches generation in hint',
+    async ({ fields }) => {
+      const body = await expectError(
+        await queue({
+          body: { game: 'holdem', name: 'alice', ...fields },
+        }),
+        'invalid_request',
+      );
+      expect(body.hint).toContain('openssl rand -hex 16');
+    },
+  );
+
   it('malformed JSON body', async () => {
     const body = await expectError(
       await queue({ rawBody: '{bad' }),
@@ -476,6 +493,84 @@ describe('RoomAuth answers 401 invalid_token', () => {
       }
     },
   );
+
+  it.each([
+    { case: 'missing header', header: (_token: string) => undefined },
+    { case: 'wrong scheme', header: (token: string) => `Token ${token}` },
+    { case: 'empty Bearer', header: (_token: string) => 'Bearer ' },
+    { case: 'quoted token', header: (token: string) => `Bearer "${token}"` },
+    {
+      case: 'embedded space',
+      header: (token: string) =>
+        `Bearer ${token.slice(0, 5)} ${token.slice(5)}`,
+    },
+    {
+      case: 'non-base64url character',
+      header: (token: string) => `Bearer ${token}!`,
+    },
+    {
+      case: 'third segment',
+      header: (token: string) => `Bearer ${token}.extra`,
+    },
+  ])(
+    'T28 S4 $case differs from a bad signature and preserves the saved token',
+    async ({ header }) => {
+      const token = await roomToken();
+      const malformed = await expectError(
+        await call({
+          method: 'GET',
+          path: `/v1/rooms/${ROOM}/state`,
+          authorization: header(token),
+        }),
+        'invalid_token',
+        401,
+      );
+      const signature = await expectError(
+        await call({
+          method: 'GET',
+          path: `/v1/rooms/${ROOM}/state`,
+          authorization: `Bearer ${await roomToken({ secret: 'another-secret' })}`,
+        }),
+        'invalid_token',
+        401,
+      );
+      expect.soft(malformed.message).not.toBe(signature.message);
+      for (const error of [malformed, signature]) {
+        expect.soft(error.hint).toMatch(/saved|original/i);
+        expect
+          .soft(error.hint)
+          .not.toMatch(/POST \/v1\/queue|fresh|new token/i);
+      }
+    },
+  );
+
+  it('T28 S4 a changed signature character uses the signature message and saved-token hint', async () => {
+    const token = await roomToken();
+    const dot = token.indexOf('.');
+    const changed =
+      token.slice(0, dot + 1) +
+      (token[dot + 1] === 'A' ? 'B' : 'A') +
+      token.slice(dot + 2);
+    const read = async (authorization: string) =>
+      expectError(
+        await call({
+          method: 'GET',
+          path: `/v1/rooms/${ROOM}/state`,
+          authorization,
+        }),
+        'invalid_token',
+        401,
+      );
+    const tampered = await read(`Bearer ${changed}`);
+    const otherSecret = await read(
+      `Bearer ${await roomToken({ secret: 'another-secret' })}`,
+    );
+    const malformed = await read('Bearer not-a-token');
+    expect.soft(tampered.message).toBe(otherSecret.message);
+    expect.soft(tampered.message).not.toBe(malformed.message);
+    expect.soft(tampered.hint).toMatch(/saved|original/i);
+    expect.soft(tampered.hint).not.toMatch(/POST \/v1\/queue|fresh|new token/i);
+  });
 
   it('checks the token before the body (no token + malformed JSON)', async () => {
     const body = await expectError(
