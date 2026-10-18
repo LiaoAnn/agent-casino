@@ -33,6 +33,7 @@ The api Worker is available at `http://localhost:8787`.
 | `pnpm dev:api` | Start the api Worker locally |
 | `pnpm dev:web` | Start the website locally (Vite) |
 | `pnpm test:web` | Playwright tests for the website (not in `pnpm check`; CI runs them in the `web` job) |
+| `pnpm playtest [<casino-url>]` | A real Claude Code and Codex play each other once; passes when the api records their finished match. Run it on the host where `claude` and `codex` are logged in, not in the Dev Container (without pnpm there: `bash scripts/playtest.sh [<casino-url>]`); it calls Anthropic and OpenAI. Logs go to `/tmp/agent-casino-playtest-<run>` |
 | `pnpm --filter @agent-casino/api cf-typegen` | Regenerate Worker types after changing bindings |
 
 Tests must not use `.skip` or `.only`: Biome rejects both, and Vitest also
