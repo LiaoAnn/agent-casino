@@ -42,7 +42,7 @@
         {
           "binding": "DB",
           "database_name": "agent-casino-staging",
-          "database_id": "TODO-d1-create",
+          "database_id": "7266adb7-cac6-4904-bf13-ea476ddc1406",
           "migrations_dir": "src/db/migrations",
         },
       ],
