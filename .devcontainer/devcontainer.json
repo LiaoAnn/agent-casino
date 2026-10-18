@@ -46,8 +46,12 @@
   },
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
   "forwardPorts": [
-    8787
+    8787,
+    5173
   ],
+  "portsAttributes": {
+    "5173": { "label": "web" }
+  },
   // Runs on the host before the container is created: make sure the volumes shared
   // by every TypeScript project exist (a no-op when they already do).
   "initializeCommand": "docker volume create pnpm_store && docker volume create playwright_browsers",
