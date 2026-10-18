@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Seat } from '../holdem/match';
+import type { Matchmaker } from '../matchmaker/matchmaker';
 import { type CreateInput, type RoomApi, RoomReferee } from './referee';
 
 // One referee per room: the RPC surface of routes/room.ts. The rules of the
@@ -9,7 +10,16 @@ export class Room extends DurableObject<Env> implements RoomApi {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.#referee = new RoomReferee(ctx.storage);
+    // Elo goes through the platform's one Matchmaker, which writes one match
+    // at a time (A10). Typed as the class: RPC types would turn the tuples
+    // of the record into plain arrays.
+    const matchmaker = () =>
+      env.MATCHMAKER.get(
+        env.MATCHMAKER.idFromName('global'),
+      ) as unknown as Pick<Matchmaker, 'recordMatch'>;
+    this.#referee = new RoomReferee(ctx.storage, {
+      record: input => matchmaker().recordMatch(input),
+    });
   }
 
   create(input: CreateInput) {

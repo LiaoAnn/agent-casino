@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MatchRecordInput, RecordedMatch } from '../db/records';
 import type { CreateInput, RoomStorage } from './referee';
 import { Room } from './room';
 
@@ -44,9 +45,23 @@ const INPUT: CreateInput = {
 
 const joinedRoom = async () => {
   const storage = new MemoryStorage();
+  const recorded: RecordedMatch = {
+    rated: true,
+    ratings: [
+      { name: 'alice', rating: 1484, change: -16 },
+      { name: 'bob', rating: 1516, change: 16 },
+    ],
+  };
+  const recordMatch = vi.fn(async (_input: MatchRecordInput) => recorded);
+  const stub = { recordMatch };
+  const id = { name: 'global' };
+  const matchmaker = {
+    idFromName: vi.fn((_name: string) => id),
+    get: vi.fn((_id: unknown) => stub),
+  };
   const room = new Room(
     { storage } as unknown as DurableObjectState,
-    {} as Env,
+    { MATCHMAKER: matchmaker } as unknown as Env,
   );
   expect(await room.create(INPUT)).toEqual({ ok: true, value: null });
   expect(
@@ -55,7 +70,7 @@ const joinedRoom = async () => {
     ok: true,
     value: { seat: 1 },
   });
-  return { room, storage };
+  return { room, storage, matchmaker, id, recordMatch, recorded };
 };
 
 describe('Room Durable Object wrapper', () => {
@@ -66,6 +81,31 @@ describe('Room Durable Object wrapper', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('records a finished room through the global Matchmaker and returns its ratings', async () => {
+    const { room, matchmaker, id, recordMatch, recorded } = await joinedRoom();
+    expect(matchmaker.get).not.toHaveBeenCalled();
+    const turn = await room.status(0, { wait: false });
+    if (!turn.ok || turn.value.status !== 'your_turn') {
+      throw new Error('Expected the first turn');
+    }
+    expect(
+      await room.act(0, { turn_id: turn.value.turn_id, type: 'fold' }),
+    ).toMatchObject({ ok: true, value: { status: 'accepted' } });
+    expect(matchmaker.idFromName).toHaveBeenCalledWith('global');
+    expect(matchmaker.get).toHaveBeenCalledWith(id);
+    expect(recordMatch).toHaveBeenCalledTimes(1);
+    expect(recordMatch.mock.calls[0][0]).toMatchObject({
+      match_id: INPUT.room_id,
+      players: ['alice', 'bob'],
+    });
+    for (const wait of [false, true]) {
+      expect(await room.status(0, { wait })).toMatchObject({
+        ok: true,
+        value: { status: 'match_over', ratings: recorded.ratings },
+      });
+    }
   });
 
   it('create and join schedule the first deadline; alarm persists the timeout before any status or act call', async () => {
