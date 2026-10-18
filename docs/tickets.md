@@ -31,6 +31,7 @@
 | 5 | T11、T12 | 2 |
 | 6 | T13 | 1 |
 | 7 | T14 ★（arena）、T21 | 2 + 試玩 agent |
+| 7.5 | T23 → T24、T26（E5 與排隊修正） | 2 |
 | 8 | T15 ★🔒 | 1 + 3 個試玩 agent |
 
 最長的一條路是 T01 → T02 → T04 → T09 → T11 → T13 → T14 → T15，共 8 步（T21 跟 T14 同時進行）；其他 ticket 都在旁邊同時進行。
@@ -163,6 +164,18 @@
 - 驗證：`pnpm check`；每個做掉的防護都有測試證明上限生效（例如 alarm 重試到上限就停）。
 - 功能驗證：在 worktree 的 dev server 用 curl 重現至少一個原本會一直跑的情境（例如讓 D1 寫入失敗），確認現在會停下來。
 
+### T26 排隊要帶 queue_key（約 300 行）· Blocked by：T23
+- 照 casino-api skill A17：`POST /v1/queue` 必帶 `queue_key`。同一個名字在排隊中或配對後 45 秒內，`queue_key` 不同就回 409 `name_in_use`，不給任何房間資訊。修掉 T12 的漏洞：對手用你的名字重叫 queue，就能拿到你的座位 token 和 `watch_url`。
+- 合約 ticket：可以改 `apps/api/src/contract/`（只限 queue 的請求欄位、`name_in_use` 錯誤碼、假資料）。
+- 只改：`contract/`（如上）、`apps/api/src/matchmaker/`、`apps/api/src/routes/queue.ts`、`apps/api/src/skill/`、`scripts/`（e2e 等呼叫 queue 的地方）。
+- 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`、`pnpm e2e --target=local`。測試至少要涵蓋：
+  - 沒帶、太短、太長、有不合法字元的 `queue_key` 回 `invalid_request`；
+  - 帶同一個 `queue_key` 續等、配對後重叫拿到同一份 `matched`（含同一個 `watch_url`）；
+  - 排隊中和配對後 45 秒內，同名不同 `queue_key` 回 409 `name_in_use`，回應裡沒有 `room_id`、`token`、`watch_url`，原本那個人的排隊與配對不受影響；
+  - 資格過期後，同名可以用新的 `queue_key` 重新排隊。
+- 功能驗證：在 worktree 網址用 curl 開兩個名字排隊配對，再用其中一個名字、不同的 `queue_key` 重叫，被拒絕；用原本的 `queue_key` 重叫，拿到同一份 `matched`。
+- 改了參賽 agent 看到的請求和 skill.md，下一輪 arena 一起測。
+
 ## Epic E3 Skill 與接入
 
 **完成定義**：全新的 Claude Code、Codex 只收到一句話就能自己打完一場，不問人。
@@ -214,7 +227,7 @@
 
 **完成定義**：正式環境可用，三個 agent 試玩通過。
 
-### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22
+### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26
 - 正式環境部署（人同意後）、管理員金鑰、試玩發現的小修正。
 - 部署前先跑 `db:migrate:<環境>`（T22 的 `0001_ratings_rank.sql`、T23 的 note 欄位）；部署後第一週每天看 DO 請求、D1 寫入列數、log 筆數，看到 `gave up storing the match` 就是 D1 有問題（見 `docs/cost.md`）。
 - 驗證：`pnpm e2e --target=prod`。
