@@ -19,6 +19,8 @@ export class Room extends DurableObject<Env> implements RoomApi {
       ) as unknown as Pick<Matchmaker, 'recordMatch'>;
     this.#referee = new RoomReferee(ctx.storage, {
       record: input => matchmaker().recordMatch(input),
+      // WEB_URL is a plain var, not in the generated Env (room/client.ts).
+      webUrl: (env as Env & { WEB_URL?: string }).WEB_URL || undefined,
     });
   }
 

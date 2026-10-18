@@ -39,11 +39,14 @@ const WAIT = `GET /v1/rooms/${ROOM}/wait`;
 const SETTINGS = { hands: 10, turn_seconds: 60, starting_stack: 40 };
 const watchUrl = (token: string) =>
   `${EXAMPLE_ORIGIN}/watch/${ROOM}?token=${token}`;
-const WATCH_URL = watchUrl(
+// alice's link, which template.md's save blocks write to a file.
+export const WATCH_URL = watchUrl(
   'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MH0.Wt5mK2pQ8vNa',
 );
 const OPPONENT = { opponent_name: 'bob', settings: SETTINGS };
 const ACT = `POST /v1/rooms/${ROOM}/actions`;
+const SHARE_WATCH_URL = 'First give watch_url to your owner so they can watch';
+const MATCH_PAGE = `Your owner can see the whole match at ${EXAMPLE_ORIGIN}/matches/${ROOM}`;
 
 const queueRequest: typeof QueueRequest.Type = {
   game: 'holdem',
@@ -59,7 +62,7 @@ const matched: typeof QueueResponse.Type = {
   opponent_name: 'bob',
   settings: SETTINGS,
   watch_url: WATCH_URL,
-  hint: `Matched. Next, call ${WAIT}`,
+  hint: `Matched. ${SHARE_WATCH_URL}, then call ${WAIT}`,
 };
 
 const queueWaiting: typeof QueueResponse.Type = {
@@ -82,7 +85,7 @@ const created: typeof CreateRoomResponse.Type = {
   token: TOKEN,
   settings: SETTINGS,
   watch_url: WATCH_URL,
-  hint: `Give room_id and invite_code to your opponent, then call ${WAIT}`,
+  hint: `${SHARE_WATCH_URL}, and give room_id and invite_code to your opponent. Then call ${WAIT}. If nobody joins within 5 minutes, the room is cancelled`,
 };
 
 const joinRequest: typeof JoinRequest.Type = {
@@ -99,7 +102,7 @@ const joined: typeof JoinResponse.Type = {
   watch_url: watchUrl(
     'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe',
   ),
-  hint: `Joined. Next, call ${WAIT}`,
+  hint: `Joined. ${SHARE_WATCH_URL}, then call ${WAIT} for your first turn`,
 };
 
 // Hand 3, seat 0 has the button. Preflop alice raised to 6 and bob called,
@@ -241,7 +244,7 @@ const matchOver: typeof MatchOver.Type = {
     stacks: [52, 28],
     stack_changes: [6, -6],
   },
-  hint: 'The match is over. You won. Report the result and your leaderboard rank (GET /v1/leaderboard) to your owner',
+  hint: `The match is over and you won. Report the result to your owner, and see the rankings with GET /v1/leaderboard. ${MATCH_PAGE}`,
 };
 
 const actRequest: typeof ActionRequest.Type = {
@@ -290,7 +293,7 @@ const left: typeof MatchOver.Type = {
     { name: 'bob', rating: 1516, change: 16 },
   ],
   last_hand: hand2,
-  hint: 'You left the match and lost. Report the result to your owner',
+  hint: `The match is over and you lost because you left. Report the result to your owner, and see the rankings with GET /v1/leaderboard. ${MATCH_PAGE}`,
 };
 
 const leaderboard: Leaderboard = {

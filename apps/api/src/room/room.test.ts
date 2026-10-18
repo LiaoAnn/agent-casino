@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MatchRecordInput, RecordedMatch } from '../db/records';
-import type { CreateInput, RoomStorage } from './referee';
+import { type CreateInput, RoomReferee, type RoomStorage } from './referee';
 import { Room } from './room';
 
 vi.mock('cloudflare:workers', () => ({
@@ -43,7 +43,7 @@ const INPUT: CreateInput = {
   test: null,
 };
 
-const joinedRoom = async () => {
+const joinedRoom = async (webUrl?: string) => {
   const storage = new MemoryStorage();
   const recorded: RecordedMatch = {
     rated: true,
@@ -61,7 +61,7 @@ const joinedRoom = async () => {
   };
   const room = new Room(
     { storage } as unknown as DurableObjectState,
-    { MATCHMAKER: matchmaker } as unknown as Env,
+    { MATCHMAKER: matchmaker, WEB_URL: webUrl } as unknown as Env,
   );
   expect(await room.create(INPUT)).toEqual({ ok: true, value: null });
   expect(
@@ -143,4 +143,149 @@ describe('Room Durable Object wrapper', () => {
       });
     }
   });
+
+  it('passes WEB_URL to the referee for match_over hints', async () => {
+    const { room } = await joinedRoom('https://web.test');
+    const response = await room.leave(0);
+    expect(response).toMatchObject({
+      ok: true,
+      value: { status: 'match_over', result: 'loss' },
+    });
+    if (!response.ok) throw new Error('Expected leave to succeed');
+    expect(response.value.hint).toContain(
+      `https://web.test/matches/${INPUT.room_id}`,
+    );
+  });
+});
+
+describe('match_over record links (T32, A15)', () => {
+  const endings = [
+    { ending: 'fold', joined: true, results: ['loss', 'win'], hasRecord: true },
+    {
+      ending: 'draw',
+      joined: true,
+      results: ['draw', 'draw'],
+      hasRecord: true,
+    },
+    {
+      ending: 'leave',
+      joined: true,
+      results: ['loss', 'win'],
+      hasRecord: true,
+    },
+    {
+      ending: 'abort',
+      joined: true,
+      results: ['void', 'void'],
+      hasRecord: true,
+    },
+    {
+      ending: 'timeout',
+      joined: false,
+      results: ['cancelled'],
+      hasRecord: false,
+    },
+    {
+      ending: 'leave',
+      joined: false,
+      results: ['cancelled'],
+      hasRecord: false,
+    },
+    { ending: 'abort', joined: false, results: ['void'], hasRecord: false },
+  ] as const;
+
+  for (const webUrl of ['https://web.test', undefined]) {
+    describe(`webUrl=${webUrl ?? 'unset'}`, () => {
+      it.each(endings)(
+        '$ending with joined=$joined gives links only for a started match',
+        async ({ ending, joined, results, hasRecord }) => {
+          const clock = { ms: Date.parse('2026-10-18T00:00:00Z') };
+          // Keep options assignable before the new optional webUrl is declared.
+          const options = { webUrl, now: () => clock.ms, waitMs: 1 };
+          const referee = new RoomReferee(new MemoryStorage(), options);
+          expect(
+            await referee.create({
+              ...INPUT,
+              settings: { ...INPUT.settings, hands: ending === 'draw' ? 2 : 1 },
+            }),
+          ).toMatchObject({ ok: true });
+          if (joined) {
+            expect(
+              await referee.join({
+                name: 'bob',
+                invite_code: INPUT.invite_code,
+              }),
+            ).toMatchObject({ ok: true });
+          }
+
+          const expectLink = (hint: string) => {
+            if (webUrl && hasRecord) {
+              expect.soft(hint).toContain(`${webUrl}/matches/${INPUT.room_id}`);
+            } else {
+              expect.soft(hint).not.toContain('/matches/');
+            }
+          };
+
+          if (ending === 'leave') {
+            const left = await referee.leave(0);
+            expect(left).toMatchObject({
+              ok: true,
+              value: { status: 'match_over', result: results[0] },
+            });
+            if (!left.ok) throw new Error('Expected leave to succeed');
+            expectLink(left.value.hint);
+          } else if (ending === 'abort') {
+            expect(await referee.abort()).toMatchObject({ ok: true });
+          } else if (ending === 'timeout') {
+            clock.ms += 5 * 60 * 1000;
+            await referee.alarm();
+          } else {
+            for (let hand = 0; hand < (ending === 'draw' ? 2 : 1); hand++) {
+              const seat = hand === 0 ? 0 : 1;
+              const turn = await referee.status(seat, { wait: false });
+              if (!turn.ok || turn.value.status !== 'your_turn') {
+                throw new Error('Expected a turn to finish by folding');
+              }
+              expect(
+                await referee.act(seat, {
+                  turn_id: turn.value.turn_id,
+                  type: 'fold',
+                }),
+              ).toMatchObject({ ok: true, value: { status: 'accepted' } });
+            }
+          }
+
+          for (const seat of joined ? ([0, 1] as const) : ([0] as const)) {
+            for (const wait of [false, true]) {
+              const response = await referee.status(seat, { wait });
+              expect(response).toMatchObject({
+                ok: true,
+                value: { status: 'match_over', result: results[seat] },
+              });
+              if (!response.ok) throw new Error('Expected finished status');
+              expectLink(response.value.hint);
+            }
+
+            const errors = [
+              await referee.act(seat, { turn_id: 't_999', type: 'check' }),
+              await referee.leave(seat),
+            ];
+            for (const response of errors) {
+              expect(response).toMatchObject({
+                ok: false,
+                error: {
+                  code: 'match_over',
+                  state: { status: 'match_over', result: results[seat] },
+                },
+              });
+              if (response.ok || !response.error.state) {
+                throw new Error('Expected match_over error with state');
+              }
+              expectLink(response.error.state.hint);
+            }
+          }
+        },
+      );
+    });
+  }
 });

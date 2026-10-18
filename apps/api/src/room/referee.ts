@@ -46,6 +46,9 @@ export interface RefereeOptions {
   record?: (input: MatchRecordInput) => Promise<RecordedMatch>;
   // Where house-bot draws its random but legal actions from (A1).
   random?: () => number;
+  // The web's address (WEB_URL): match_over's hint links the match page
+  // (T32). Without it, the hint has no link.
+  webUrl?: string;
 }
 
 interface RoomSettings {
@@ -190,6 +193,7 @@ export class RoomReferee {
   readonly #now: () => number;
   readonly #recordMatch: (input: MatchRecordInput) => Promise<RecordedMatch>;
   readonly #random: () => number;
+  readonly #webUrl: string | undefined;
   #data: Promise<RoomData | undefined> | undefined;
   // The write of the finished match in flight, so it runs once at a time.
   #recording: Promise<boolean> | undefined;
@@ -203,6 +207,7 @@ export class RoomReferee {
     this.#recordMatch =
       options.record ?? (async () => ({ rated: false, ratings: null }));
     this.#random = options.random ?? Math.random;
+    this.#webUrl = options.webUrl;
   }
 
   // Fails only when the room id is already taken.
@@ -562,7 +567,11 @@ export class RoomReferee {
         : await this.#storage.get<HandRecord>(`hand:${n - 1}`);
     if (n > 1 && !before) throw new Error(`Room has no hand ${n - 1} stored`);
     const start = data.settings.starting_stack;
-    return { now: this.#now(), stacksBefore: before?.stacks ?? [start, start] };
+    return {
+      now: this.#now(),
+      stacksBefore: before?.stacks ?? [start, start],
+      webUrl: this.#webUrl,
+    };
   }
 
   // The finished hands of the match, in order.
@@ -1037,6 +1046,7 @@ const seatFields = (data: RoomData, seat: Seat) => ({
 interface Answering {
   now: number;
   stacksBefore: [number, number];
+  webUrl: string | undefined;
 }
 
 // The last finished hand with what each seat won or lost in it (A15).
@@ -1138,16 +1148,26 @@ function matchOver(
     final_stacks: ended.final_stacks,
     ratings: data.recorded?.ratings ?? null,
     last_hand: lastHandOut(seen?.last_hand ?? null, answering),
-    hint: matchOverHint(ended, result),
+    hint: matchOverHint(ended, result, matchPage(data, answering)),
   };
 }
 
-function matchOverHint(ended: Ended, result: MatchOverBody['result']) {
+// The web page of a played match, once it is stored (T32). Rooms nobody
+// joined are never stored (A9), so they have none.
+const matchPage = (data: RoomData, { webUrl }: Answering) =>
+  webUrl && data.match ? `${webUrl}/matches/${data.room_id}` : null;
+
+function matchOverHint(
+  ended: Ended,
+  result: MatchOverBody['result'],
+  page: string | null,
+) {
+  const see = page ? `. Your owner can see the whole match at ${page}` : '';
   if (result === 'cancelled') {
     return `The room closed before the match started. ${PLAY_AGAIN}`;
   }
   if (result === 'void') {
-    return `The match was called off by the platform and does not count. ${PLAY_AGAIN}`;
+    return `The match was called off by the platform and does not count${see}. ${PLAY_AGAIN}`;
   }
   const how =
     ended.reason !== 'left'
@@ -1155,5 +1175,5 @@ function matchOverHint(ended: Ended, result: MatchOverBody['result']) {
       : result === 'loss'
         ? 'you lost because you left'
         : 'you won because your opponent left';
-  return `The match is over and ${how}. Report the result to your owner, and see the rankings with GET /v1/leaderboard`;
+  return `The match is over and ${how}. Report the result to your owner, and see the rankings with GET /v1/leaderboard${see}`;
 }

@@ -189,7 +189,12 @@ describe('skill.md examples, run against the API', () => {
     const tokens: string[] = [];
     let invite = '';
     // alice's seat, once she has one: what she copies into her blocks.
-    let seat: { room: string; token: string } | undefined;
+    let seat: { room: string; token: string; watchUrl: string } | undefined;
+    const exampleWatchUrls = [...md.matchAll(/"watch_url": "([^"]+)"/g)].map(
+      match => match[1] ?? '',
+    );
+    expect(exampleWatchUrls).toHaveLength(3);
+    let savedWatchUrls = 0;
     let queueKey = '';
     // The room alice is matched into from the queue, once she saved it.
     let matchedRoom = '';
@@ -212,19 +217,38 @@ describe('skill.md examples, run against the API', () => {
 
     for (const block of bashBlocks(md)) {
       if (!block.includes('curl')) {
-        // alice copies her own room_id and token into the save blocks.
-        const script = seat
-          ? block
-              .replaceAll(EXAMPLE_ROOM, seat.room)
-              .replaceAll(EXAMPLE_TOKEN, seat.token)
+        // Copy the whole watch URL first: it contains the example room_id.
+        const savedSeat = seat;
+        const script = savedSeat
+          ? exampleWatchUrls
+              .reduce(
+                (script, watchUrl) =>
+                  script.replaceAll(watchUrl, savedSeat.watchUrl),
+                block,
+              )
+              .replaceAll(EXAMPLE_ROOM, savedSeat.room)
+              .replaceAll(EXAMPLE_TOKEN, savedSeat.token)
           : block;
         runBlock(script, vars);
-        if (block.includes('openssl rand')) {
+        if (block.includes('openssl rand -hex 16')) {
           queueKey = readFileSync(
             join(cwd, '.casino/alice.queue_key'),
             'utf8',
           ).trim();
           expect(queueKey).toMatch(QUEUE_KEY_PATTERN);
+        }
+        if (block.includes('> .casino/$ROOM_ID.token') && seat) {
+          const files = casinoFiles();
+          expect(files, 'save watch_url alongside the room token').toContain(
+            `${seat.room}.watch_url`,
+          );
+          expect(
+            readFileSync(
+              join(cwd, `.casino/${seat.room}.watch_url`),
+              'utf8',
+            ).trim(),
+          ).toBe(seat.watchUrl);
+          savedWatchUrls++;
         }
         // The matched save block: the token file opens the room, and the
         // queue_key moved next to it.
@@ -283,7 +307,12 @@ describe('skill.md examples, run against the API', () => {
           endpoint.key === 'lobby.queue' ||
           endpoint.key === 'lobby.createRoom'
         ) {
-          seat = { room: String(value.room_id), token: String(value.token) };
+          expect(value.watch_url).toEqual(expect.any(String));
+          seat = {
+            room: String(value.room_id),
+            token: String(value.token),
+            watchUrl: String(value.watch_url),
+          };
           vars.ROOM_ID = seat.room;
         }
         if (endpoint.key === 'lobby.createRoom')
@@ -311,11 +340,13 @@ describe('skill.md examples, run against the API', () => {
     expect(queueKey).not.toBe('');
     expect(matchedRoom).not.toBe('');
     expect(tokens).toHaveLength(3);
+    expect(savedWatchUrls).toBeGreaterThanOrEqual(2);
     // The room she played to the end and reported has no files left; the
     // queue match she never played still has its own.
     expect(casinoFiles()).toEqual([
       `${matchedRoom}.queue_key`,
       `${matchedRoom}.token`,
+      `${matchedRoom}.watch_url`,
     ]);
     expect(ran[0]?.body).toMatchObject({ status: 'matched' });
     expect(ran[3]?.body).toMatchObject({ status: 'your_turn' });

@@ -177,8 +177,8 @@ const pair = async (env: Bindings, options: Record<string, unknown> = {}) => {
   expect([alice.seat, bob.seat].sort()).toEqual([0, 1]);
   expect(alice.token).not.toBe(bob.token);
   for (const player of [alice, bob]) {
-    expect(player.hint).toBe(
-      `Matched. Next, call GET /v1/rooms/${player.room_id}/wait`,
+    expect(player.hint).toMatch(
+      new RegExp(`watch_url[\\s\\S]*GET /v1/rooms/${player.room_id}/wait`),
     );
   }
   return [alice, bob] as const;

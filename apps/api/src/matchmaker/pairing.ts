@@ -102,7 +102,7 @@ const roomInput = ({ queue_key: _, ...input }: QueueInput): RoomInput => input;
 const matchedAnswer = (seated: Seated): Matched => ({
   status: 'matched',
   ...seated,
-  hint: `Matched. Next, call GET /v1/rooms/${seated.room_id}/wait`,
+  hint: `Matched. First give watch_url to your owner so they can watch, then call GET /v1/rooms/${seated.room_id}/wait`,
 });
 
 // JSON with object keys sorted, so equal settings give equal strings.
