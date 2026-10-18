@@ -83,24 +83,29 @@ const handResult = (m: MatchDetail, h: MatchHand) => {
   return `${m.players[h.winner_seat]} 贏得 ${h.pot}（${how}）`;
 };
 
-const handPairs = (m: MatchDetail, h: MatchHand): [string, string][] => [
+// The middle of the table as the hand ended.
+const centerPairs = (m: MatchDetail, h: MatchHand): [string, string][] => [
+  ['公共牌', h.board.length > 0 ? h.board.map(card).join(' ') : '沒有發公共牌'],
+  ['底池', String(h.pot)],
   ['莊家', m.players[h.button_seat]],
-  ...(h.board.length > 0
-    ? [['公共牌', h.board.map(card).join(' ')] as [string, string]]
-    : []),
-  [
-    '底牌',
-    pairText(
-      m,
-      h.hole_cards.map(hole => hole.map(card).join(' ')) as [string, string],
-    ),
-  ],
   ['結果', handResult(m, h)],
-  ['籌碼', pairText(m, h.stacks)],
 ];
 
-const holeText = (m: MatchDetail, h: MatchHand) =>
-  `${m.players[0]} ${h.hole_cards[0].map(card).join(' ')} · ${m.players[1]} ${h.hole_cards[1].map(card).join(' ')}`;
+// A seat's plate: hole cards, chips after the hand, Elo before a rated match.
+const seatPairs = (
+  m: MatchDetail,
+  h: MatchHand,
+  seat: 0 | 1,
+): [string, string][] => {
+  const before = m.rating_changes?.[seat].before;
+  return [
+    ['底牌', h.hole_cards[seat].map(card).join(' ')],
+    ['籌碼', String(h.stacks[seat])],
+    ...(before === undefined
+      ? []
+      : ([['Elo', String(before)]] as [string, string][])),
+  ];
+};
 
 const STREETS = {
   preflop: '翻牌前',
@@ -144,6 +149,9 @@ const expectPairs = async (dl: Locator, pairs: [string, string][]) => {
   await expect(dl.locator('dd')).toHaveText(pairs.map(p => p[1]));
 };
 
+const seatPanel = (section: Locator, name: string) =>
+  section.getByRole('region', { name: `座位：${name}`, exact: true });
+
 const expectHand = async (page: Page, m: MatchDetail, h: MatchHand) => {
   const section = handSection(page, h.hand_number);
   await expect(
@@ -153,7 +161,25 @@ const expectHand = async (page: Page, m: MatchDetail, h: MatchHand) => {
       exact: true,
     }),
   ).toBeVisible();
-  await expectPairs(section.locator('dl'), handPairs(m, h));
+  await expectPairs(
+    section.locator('dl[aria-label="牌桌"]'),
+    centerPairs(m, h),
+  );
+  // Seat 1 at the top edge, seat 0 at the bottom.
+  await expect(section.getByRole('region', { name: /^座位：/ })).toHaveText([
+    new RegExp(`^${m.players[1]}`),
+    new RegExp(`^${m.players[0]}`),
+  ]);
+  for (const seat of [0, 1] as const) {
+    const panel = seatPanel(section, m.players[seat]);
+    await expectPairs(panel.locator('dl'), seatPairs(m, h, seat));
+    await expect(panel.getByText('莊家', { exact: true })).toHaveCount(
+      h.button_seat === seat ? 1 : 0,
+    );
+    await expect(panel.getByText('勝', { exact: true })).toHaveCount(
+      h.winner_seat === seat ? 1 : 0,
+    );
+  }
   await expect(steps(section, h.hand_number)).toHaveText(
     h.events.map(e => eventText(m, e)),
   );
@@ -203,9 +229,20 @@ test('shows a showdown hand step by step', async ({ page }) => {
   await open(page, m);
   const section = handSection(page, h.hand_number);
   await expectHand(page, m, h);
-  await expect(section).toContainText(holeText(m, h));
-  await expect(section).toContainText(h.board.map(card).join(' '));
+  await expect(seatPanel(section, m.players[0])).toContainText(
+    h.hole_cards[0].map(card).join(' '),
+  );
+  await expect(section.locator('dl[aria-label="牌桌"]')).toContainText(
+    h.board.map(card).join(' '),
+  );
   await expect(section).toContainText('（攤牌）');
+  // The table on the left, the hand's steps on the right.
+  const tableBox = await section.locator('dl[aria-label="牌桌"]').boundingBox();
+  const stepsBox = await section
+    .getByRole('list', { name: `第 ${h.hand_number} 手的動作`, exact: true })
+    .boundingBox();
+  if (tableBox === null || stepsBox === null) throw new Error('no layout');
+  expect(stepsBox.x).toBeGreaterThanOrEqual(tableBox.x + tableBox.width);
 });
 
 test('shows a fold hand step by step with both hole cards', async ({
@@ -215,7 +252,10 @@ test('shows a fold hand step by step with both hole cards', async ({
   await open(page, m);
   const section = handSection(page, h.hand_number);
   await expectHand(page, m, h);
-  await expect(section).toContainText(holeText(m, h));
+  for (const seat of [0, 1] as const)
+    await expect(seatPanel(section, m.players[seat])).toContainText(
+      h.hole_cards[seat].map(card).join(' '),
+    );
   await expect(section).toContainText('（對手棄牌）');
   await expect(steps(section, h.hand_number).last()).toContainText('棄牌');
 });

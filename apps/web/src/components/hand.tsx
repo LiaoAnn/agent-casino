@@ -7,9 +7,13 @@ import { BySeat, type Pair, Pairs } from '@/components/pairs';
 import { Panel } from '@/components/panel';
 import { Cards } from '@/components/playing-card';
 
-// A finished hand of a match record, or of a watch link: there the
-// opponent's cards may be unknown and the watched seat's steps carry notes.
+// A finished hand of a watch link: the opponent's cards may be unknown and
+// the watched seat's steps carry notes. A match record's hand has the same
+// fields, with every card known.
 export type HandRecord = WatchResponse['hands'][number];
+
+// A finished hand in the watch page's timeline, compact: small cards,
+// corners only, and its steps.
 
 export function Hand({
   hand,
@@ -25,8 +29,8 @@ export function Hand({
   if (hand.board.length > 0) {
     items.push(['公共牌', <Cards key="b" cards={hand.board} />]);
   }
-  // A match record shows both in every hand (the seed is public once the
-  // match is over); a watch link in play only the cards the seat has seen.
+  // While the match is on, only the cards the seat has seen; once it is
+  // over, both (the seed is public then).
   items.push([
     '底牌',
     <BySeat

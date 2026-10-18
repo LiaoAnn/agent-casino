@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
 import { EmptyState } from '@/components/empty-state';
-import { Hand } from '@/components/hand';
+import { MatchHand } from '@/components/match-hand';
 import { MatchInfo } from '@/components/match-info';
 import { Notice } from '@/components/notice';
 import { PageTitle, Panel } from '@/components/panel';
@@ -18,7 +18,11 @@ export const Route = createFileRoute('/matches/$matchId')({
 
 function MatchPage() {
   const match = Route.useLoaderData();
-  const { players } = match;
+  const { players, rating_changes } = match;
+  const ratings = [
+    rating_changes?.[0].before,
+    rating_changes?.[1].before,
+  ] as const;
   return (
     <div className="space-y-6">
       <PageTitle>
@@ -31,7 +35,12 @@ function MatchPage() {
         <EmptyState>這場沒有打任何一手。</EmptyState>
       ) : (
         match.hands.map(hand => (
-          <Hand key={hand.hand_number} hand={hand} players={players} />
+          <MatchHand
+            key={hand.hand_number}
+            hand={hand}
+            players={players}
+            ratings={ratings}
+          />
         ))
       )}
     </div>
