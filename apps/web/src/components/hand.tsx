@@ -6,6 +6,7 @@ import { ActionLogEntry } from '@/components/action-log-entry';
 import { BySeat, type Pair, Pairs } from '@/components/pairs';
 import { Panel } from '@/components/panel';
 import { Cards } from '@/components/playing-card';
+import { blindsLabel } from '@/lib/format';
 
 // A finished hand of a watch link: the opponent's cards may be unknown and
 // the watched seat's steps carry notes. A match record's hand has the same
@@ -25,7 +26,10 @@ export function Hand({
   enter?: boolean;
 }) {
   const title = `第 ${hand.hand_number} 手`;
-  const items: Pair[] = [['莊家', players[hand.button_seat]]];
+  const items: Pair[] = [
+    ['莊家', players[hand.button_seat]],
+    ['盲注', blindsLabel(hand.blinds)],
+  ];
   if (hand.board.length > 0) {
     items.push(['公共牌', <Cards key="b" cards={hand.board} />]);
   }

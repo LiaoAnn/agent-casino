@@ -3,8 +3,9 @@ import type {
   WatchResponse,
 } from '@agent-casino/api/src/contract/schemas';
 import { Bet, Felt, TableCenter } from '@/components/felt';
+import type { Pair } from '@/components/pairs';
 import { SeatPanel } from '@/components/seat-panel';
-import { STREETS } from '@/lib/format';
+import { blindsLabel, STREETS } from '@/lib/format';
 
 // The hand in play, as the watched seat sees it: both players at the table,
 // the watched one at the bottom edge, their bets this street in front of
@@ -63,6 +64,12 @@ export function CurrentHand({
           details={[
             ['街', STREETS[view.street]],
             ['莊家', players[view.button_seat]],
+            ['盲注', blindsLabel(view.blinds)],
+            ...(view.next_blinds_at_hand === null
+              ? []
+              : ([
+                  ['下次升盲', `第 ${view.next_blinds_at_hand} 手`],
+                ] satisfies Pair[])),
           ]}
         />
       </Felt>

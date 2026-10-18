@@ -10,7 +10,7 @@ import { Notice } from '@/components/notice';
 import { type Pair, Pairs } from '@/components/pairs';
 import { PageTitle, Panel } from '@/components/panel';
 import { WatchResult } from '@/components/watch-result';
-import { formatClock } from '@/lib/format';
+import { formatClock, settingsLabel } from '@/lib/format';
 
 const STATUS = {
   waiting: '等待對手',
@@ -43,10 +43,7 @@ export function WatchView({
   const info: Pair[] = [
     ['觀看', players[watch.seat], 'font-semibold text-gold-200'],
     ['狀態', STATUS[watch.room_status]],
-    [
-      '設定',
-      `${settings.hands} 手 · 每步 ${settings.turn_seconds} 秒 · 起始籌碼 ${settings.starting_stack}`,
-    ],
+    ['設定', settingsLabel(settings)],
     ['最後更新', updatedAt === null ? '' : formatClock(updatedAt)],
   ];
   const seatRatings = [
