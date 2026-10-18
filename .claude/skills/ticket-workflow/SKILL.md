@@ -82,22 +82,20 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 
 **subagent 用 Codex**：主要的 agent 一定是 Claude（你），負責計畫、實作和所有決定。繁瑣但必須做的事交給 Codex：照規格寫測試、照 lens 看 diff、從乾淨狀態重跑驗證。兩邊互相檢查對方寫的東西：Codex 寫的測試你檢查，你寫的程式 Codex review，Codex 的驗證結果你看過才開 PR。這樣省 Claude 的額度，不同模型也比較容易看到對方沒看到的東西。
 
-**不要鑽牛角尖**：給 Codex 的每個任務都要寫明下面這段，你判斷它的意見時也用同一個標準：
-- 只回報有實際觸發情境的問題：參賽 agent 照 skill.md 用 curl 會做的事（包括常見的錯誤用法：重送、太晚、斷線、交錯動作）、看網頁的人、管理員、平台自己的程式（Room DO、Matchmaker、D1）。
-- 不回報：合約或 schema 已經擋掉的輸入、需要攻擊者控制伺服器或環境的情況、DO 單執行緒下不可能發生的競態、單挑不會出現的牌局、只有理論上可能的事。
-- 屬於別張 ticket 的問題只寫一行（哪張 ticket、什麼問題），不要求這張修。
-- 每個 lens 的 Hardening 最多 3 個，挑最重要的。
+**任務說明要短**：subagent 自己會讀 Dev VM 的 AGENTS.md（VM 規則與環境）和 [subagents.md](subagents.md)（角色能改什麼、這個 repo 在 VM 的坑、「不要鑽牛角尖」的標準、規格在哪、回報格式），任務說明不要再重寫這些。任務說明只寫：
+- 第一行：「先讀 `<worktree>/.claude/skills/ticket-workflow/subagents.md`。你是 <角色>。」
+- worktree 路徑和網址。
+- 這次的範圍與輸入：test-author 給計畫的 Why、slice 的 Outcome 與 Acceptance、公開介面、要讀的 skill 段落；reviewer 給 diff 範圍（base commit）、lens 名稱、ticket 原文；verifier 給 ticket 原文。
+- 這次特別要注意的事（如果有）。
+
+你判斷 subagent 的意見時，也用 subagents.md「不要鑽牛角尖」的標準。
+
+呼叫方式：
 - 用 t3 的 `delegate_task`，不要用 Claude 內建的 subagent。先呼叫 `orchestrator_capabilities` 找 Codex 的 `providerInstanceId`（目前是 `codex`），`target` 填 `{"providerInstanceId":"codex","model":"gpt-6.1-sol","options":{"reasoningEffort":"medium","serviceTier":"priority"}}`（`priority` 就是 Fast），`role` 填 `test`、`review` 或 `general`。
 - **Codex 不能用時改用 Sonnet**：`orchestrator_capabilities` 裡 Codex 有 constraints 或沒有 `gpt-6.1-sol`，或同一個任務實際跑了兩次都失敗，就用同一份任務說明再呼叫一次 `delegate_task`，`target` 換成 `{"providerInstanceId":"claudeAgent","model":"claude-sonnet-5-5","options":{"effort":"high"}}`，`clientRequestId` 換新的（例如加 `-sonnet`）。PR 裡寫明哪些任務改用 Sonnet、為什麼。
 - `isolation` 用預設的 `shared`：子任務直接在你的 worktree 裡跑，看得到還沒 commit 的改動。不要用 `worktree`，那會從上一個 commit 開新的 checkout，看不到你正在改的東西。子任務在跑的時候，你不要改檔案。
 - 每個任務一個 `clientRequestId`（例如 `t09-s2-test-author-1`）。同一個任務重送時用同一個 id，不然會開出重複的子任務；新的一輪才換新 id。記下每個回傳的 `taskId`。
 - 要等結果才能往下走時用 `mode:"wait"`、`timeoutMs: 1800000`。幾個 lens 可以各用 `mode:"async"` 同時開，等它們做完的通知。回傳 `waitTimedOut` 或收到通知後，用 `task_status` 拿最後的報告再往下走。
-- 子任務只拿到你寫的任務說明，看不到你的對話。VM 規則它會自己讀（Codex 讀 `~/.codex/AGENTS.md`，跟 Claude 的 `~/.claude/CLAUDE.md` 是同一份），但它沒有 `/tdd`、`/verification-evidence` 這些斜線指令。任務說明要寫：
-  - worktree 路徑（指令用 `T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "..."`，git 用 `git -C <path>`）。
-  - 這個任務的限制：不准 commit、push、開 PR；test-author 只寫測試檔；reviewer 不改任何檔案；verifier 不改程式，只能開關自己的 dev server。
-  - `pnpm check` 要跟 export 在同一個容器 shell 裡跑：`T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "export KNIP_DISABLE_RAW_TRANSFER=1; pnpm check"`；開過的 dev server 用完要關（見開工訊息的 VM 注意事項）。
-  - 要它讀的規格檔：相關的 repo skill（`.claude/skills/<名字>/SKILL.md`），以及使用者層級的 `/home/dev/.claude/skills/review-change/lenses.md`、`/home/dev/.claude/skills/verification-evidence/SKILL.md`。
-  - 上面「不要鑽牛角尖」那段。
 - PR 的「驗證」和「Review」段寫明每個角色用了哪個 provider 和模型。
 
 ## 4. 獨立驗證
