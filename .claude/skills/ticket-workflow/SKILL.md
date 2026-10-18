@@ -60,7 +60,7 @@ Ann 在 2026-10-17 同意，ticket thread 不用每次問就可以：
 | 自己寫 | 設定、膠水程式、純搬移或刪除 | 同一個 agent 照 `/tdd` 做 red → green，或寫明豁免理由 |
 
 拆開寫的三步：
-1. **test-author subagent 先寫測試。** 給它：計畫的 Why、這個 slice 的 Outcome 與 Acceptance、公開介面、相關 skill 的規格。**不給**實作方式，也不讓它看實作。請它從規格和邊界情況寫測試（規則用「種子 + 動作 → 預期結果」），跑一次，交回測試和 RED 的輸出。
+1. **test-author subagent 先寫測試**（用 Codex，見下面「subagent 用 Codex」）。 給它：計畫的 Why、這個 slice 的 Outcome 與 Acceptance、公開介面、相關 skill 的規格。**不給**實作方式，也不讓它看實作。請它從規格和邊界情況寫測試（規則用「種子 + 動作 → 預期結果」），跑一次，交回測試和 RED 的輸出。
 2. **確認 RED 的原因是對的**：失敗是因為功能還沒做（例如找不到函式、回傳不符），不是語法、import 或設定錯。原因不對就退回 test-author 修。
 3. **確認 RED 之後才開始實作**，寫到測試全過。實作者可以讀測試（測試就是規格），但**不准改測試**；覺得某個測試錯了，連同理由退回 test-author，還有爭議就通知 coordinator 問人。
 
@@ -78,10 +78,24 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 
 **驗收（slice loop 第 5 步）** 照 `/verification-evidence` 拿 Observed 的證據：API 用 `curl https://<route>-<wt>.<vm>.liaoann.net/...`（網址看 `wt-status`），網頁用 t3 preview 截圖。需要 dev server 時開在 tmux（`<wt>-api`），用完就關，VM 記憶體很少。
 
-**Review（slice loop 第 6 步與最後）** 每個 slice 跑 `/review-change`，最後整個 branch 再跑一次（finished-feature 的 lenses）。給 reviewer 的 plan 要附 ticket 原文，讓它也檢查：做多、做少、寫死的數字、碰了範圍外的檔案、改了合約、跟 skill 規格不符。有 Blocker 就修，重跑受影響的檢查和驗收。
+**Review（slice loop 第 6 步與最後）** 每個 slice 跑 `/review-change`，最後整個 branch 再跑一次（finished-feature 的 lenses）。每個 lens 的 reviewer 用 Codex（見下面「subagent 用 Codex」），選 lens、合併重複、確認 Blocker 仍由你自己做。給 reviewer 的 plan 要附 ticket 原文，讓它也檢查：做多、做少、寫死的數字、碰了範圍外的檔案、改了合約、跟 skill 規格不符。有 Blocker 就修，重跑受影響的檢查和驗收。
+
+**subagent 用 Codex**：test-author、review lens 和 verifier 交給別家模型，一方面省 Claude 的額度，一方面寫測試、review 和實作的不是同一個模型，比較容易抓到盲點。
+- 用 t3 的 `delegate_task`，不要用 Claude 內建的 subagent。先呼叫 `orchestrator_capabilities` 找 Codex 的 `providerInstanceId`（目前是 `codex`），`target` 填 `{"providerInstanceId":"codex","model":"gpt-6.1-sol","options":{"reasoningEffort":"medium"}}`，`role` 填 `test`、`review` 或 `general`。
+- `isolation` 用預設的 `shared`：子任務直接在你的 worktree 裡跑，看得到還沒 commit 的改動。不要用 `worktree`，那會從上一個 commit 開新的 checkout，看不到你正在改的東西。子任務在跑的時候，你不要改檔案。
+- 每個任務一個 `clientRequestId`（例如 `t09-s2-test-author-1`）。同一個任務重送時用同一個 id，不然會開出重複的子任務；新的一輪才換新 id。記下每個回傳的 `taskId`。
+- 要等結果才能往下走時用 `mode:"wait"`、`timeoutMs: 1800000`。幾個 lens 可以各用 `mode:"async"` 同時開，等它們做完的通知。回傳 `waitTimedOut` 或收到通知後，用 `task_status` 拿最後的報告再往下走。
+- Codex **不會讀** `~/.claude/CLAUDE.md`，也沒有 `/tdd`、`/verification-evidence` 這些斜線指令。任務說明要自己寫完整：
+  - worktree 路徑；指令用 `T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "..."` 在容器裡跑，git 只能 `git -C <path>` 在 VM 上跑。
+  - 不准碰別的 worktree、容器和 tmux；不准 commit、push、開 PR；不准呼叫外部服務。
+  - 可以改哪些檔案：test-author 只寫測試檔；reviewer 不改任何檔案；verifier 不改程式，只能開關自己的 dev server。
+  - `pnpm check` 要跟 export 在同一個容器 shell 裡跑：`T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "export KNIP_DISABLE_RAW_TRANSFER=1; pnpm check"`；開過的 dev server 用完要關（見開工訊息的 VM 注意事項）。
+  - 要它讀的規格檔：相關的 repo skill（`.claude/skills/<名字>/SKILL.md`），以及使用者層級的 `/home/dev/.claude/skills/review-change/lenses.md`、`/home/dev/.claude/skills/verification-evidence/SKILL.md`。
+- Codex 不能用時（`orchestrator_capabilities` 裡 Codex 有 constraints、沒有 `gpt-6.1-sol`，或同一個任務實際跑了兩次都失敗），改用 Claude 內建的 subagent，並在 PR 裡寫明。
+- PR 的「驗證」和「Review」段寫明每個角色用了哪個 provider 和模型。
 
 ## 4. 獨立驗證
-全部 slice 做完、整體 review 沒有 Blocker 後，開一個**全新的 verifier subagent**。作者自己的驗收不算數。給它 ticket 原文、worktree 路徑和網址，請它照 `/verification-evidence`：
+全部 slice 做完、整體 review 沒有 Blocker 後，開一個**全新的 verifier subagent**（用 Codex，見上面「subagent 用 Codex」）。作者自己的驗收不算數。給它 ticket 原文、worktree 路徑和網址，請它照 `/verification-evidence`：
 1. 確認 `git -C <path> status` 乾淨（都已 commit）。
 2. 在容器裡重裝依賴（`pnpm install --frozen-lockfile`），重跑 `pnpm check` 和 ticket 的每個驗證指令。
 3. 自己起 dev server，照 ticket 的「功能驗證」在 worktree 網址上實際操作。
