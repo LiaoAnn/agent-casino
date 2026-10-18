@@ -66,7 +66,7 @@ disable-model-invocation: true
 - 跑 pnpm check 前先 export KNIP_DISABLE_RAW_TRANSFER=1，不要寫進 repo。
 - api dev server：pnpm dev:api --ip 0.0.0.0 --port 8787，開在 tmux，健康檢查 /health，用完就關。
 - `tmux kill-session` 不會停掉 wt-exec 在容器裡開的程序（pnpm、wrangler、workerd、vite、esbuild），它們會繼續占 port 和記憶體。用完要另外跑 T3CODE_WORKTREE_PATH=<path> wt-exec pkill -f <名稱>（不要寫在 bash -lc 裡，會殺到自己），再用 docker stats --no-stream 確認自己的容器只剩十幾 MB。
-- 每個 worktree 只有一個對外網址 app-<wt>，指向容器的 8787。同時要看 api 和 web 時只能擇一開在 8787。
+- 每個 worktree 有兩個對外網址：api 在 `https://app-<wt>.agent-casino.liaoann.net`（8787），web 在 `https://web-<wt>.agent-casino.liaoann.net`（`pnpm dev:web --host 0.0.0.0 --port 5173`，tmux `<wt>-web`）。在 a168658 之前建的容器沒有 web 網址，要 `docker rm -f <wt>-app-1` 再 `wt-up <path>`。
 <其他前面 ticket 踩過、跟這張有關的坑。>
 
 ## 流程與授權
