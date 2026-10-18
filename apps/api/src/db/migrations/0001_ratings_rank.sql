@@ -1,0 +1,1 @@
+CREATE INDEX `ratings_rank_idx` ON `ratings` ("rating" desc,`name_key`);

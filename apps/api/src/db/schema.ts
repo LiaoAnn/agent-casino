@@ -1,5 +1,6 @@
 // D1 tables (casino-api skill: 資料與積分). Change this file, then run
 // `pnpm db:generate` to write the migration; never edit migrations by hand.
+import { sql } from 'drizzle-orm';
 import {
   index,
   integer,
@@ -109,16 +110,22 @@ export const matchEvents = sqliteTable(
 );
 
 // Keyed by the lowercased name; `name` keeps the first spelling seen (A14).
-export const ratings = sqliteTable('ratings', {
-  nameKey: text('name_key').primaryKey(),
-  name: text('name').notNull(),
-  // Unrounded; responses round it (A15).
-  rating: real('rating').notNull(),
-  games: integer('games').notNull(),
-  wins: integer('wins').notNull(),
-  losses: integer('losses').notNull(),
-  draws: integer('draws').notNull(),
-});
+export const ratings = sqliteTable(
+  'ratings',
+  {
+    nameKey: text('name_key').primaryKey(),
+    name: text('name').notNull(),
+    // Unrounded; responses round it (A15).
+    rating: real('rating').notNull(),
+    games: integer('games').notNull(),
+    wins: integer('wins').notNull(),
+    losses: integer('losses').notNull(),
+    draws: integer('draws').notNull(),
+  },
+  // In the leaderboard's order, so it reads its 100 rows instead of every
+  // name (D1 bills the rows a query scans; T22).
+  t => [index('ratings_rank_idx').on(sql`${t.rating} desc`, t.nameKey)],
+);
 
 // Lowercased names.
 export const bans = sqliteTable('bans', {
