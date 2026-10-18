@@ -32,6 +32,7 @@
 | 6 | T13 | 1 |
 | 7 | T14 ★（arena）、T21 | 2 + 試玩 agent |
 | 7.5 | T23 → T24、T26（E5 與排隊修正） | 2 |
+| 7.6 | T27、T28（arena 回饋） | 2 |
 | 8 | T15 ★🔒 | 1 + 3 個試玩 agent |
 
 最長的一條路是 T01 → T02 → T04 → T09 → T11 → T13 → T14 → T15，共 8 步（T21 跟 T14 同時進行）；其他 ticket 都在旁邊同時進行。
@@ -175,6 +176,25 @@
   - 資格過期後，同名可以用新的 `queue_key` 重新排隊。
 - 功能驗證：在 worktree 網址用 curl 開兩個名字排隊配對，再用其中一個名字、不同的 `queue_key` 重叫，被拒絕；用原本的 `queue_key` 重叫，拿到同一份 `matched`。
 - 改了參賽 agent 看到的請求和 skill.md，下一輪 arena 一起測。
+
+### T27 skill.md 上手改善（約 300 行）· Blocked by：T26
+- 來源：`docs/playtests/arena-1.md`、`arena-2.md` 的合併提案 1、2、5、7、8。只改說明書，不改 API 行為。
+- skill.md 開頭加「最短流程」：一次配對 = 一場比賽，預設 10 手；排隊 → 把 `watch_url` 交給主人 → wait／actions → 結果。
+- 名字：主人沒給名字時怎麼取（例如 `<模型>-<4 碼亂數>`），並說明名字公開、同名共用積分與戰績。
+- 保存憑證：教 agent 一拿到就把 `token`、`queue_key` 存下來，之後的 curl 都從存檔讀，不要每步重貼。存法要支援同時打好幾場，例如每個房間一個檔案 `.casino/<room_id>.token`，範例 curl 用 `$(cat .casino/$ROOM_ID.token)`。
+- note：建議每一步都寫一句，用主人跟你說話的語言；不要因此拖過 deadline。
+- 「斷線怎麼辦」：token 存好；`wait`／`state` 可以接回；超時會代打；同一個名字加同一個 `queue_key` 重新排隊，可以拿回同一份 `matched`。
+- 範例跟真實回應一致：`watch_url` 範例用真正的 `WEB_URL`（或請求的網域），`deadline` 的格式跟實際回應一樣（帶毫秒），並說明 `raise.max` 已經算進自己這一輪下過的注。
+- 只改：`apps/api/src/skill/`，以及它的測試。
+- 驗證：`pnpm test:skill`（範例檢查照樣全過）；arena 再跑一輪，看「一局幾手」、名字、重貼 token、note 的問題有沒有消失。
+
+### T28 回應補上一手的結果與剩餘秒數（約 400 行）· Blocked by：T26
+- 來源：arena 合併提案 3、4、6。合約 ticket：可以改 `apps/api/src/contract/`（只限下面的欄位和假資料）。
+- `last_hand` 加上結束原因（`fold` 或 `showdown`），以及每個座位這一手的籌碼變化；skill.md 寫明「對手翻牌前就棄牌時，`wait` 會直接跳到下一手，上一手的結果看 `last_hand`」。
+- `your_turn`（wait、state）在 `deadline` 之外多給 `seconds_remaining`（整數，無條件捨去）。它只是幫 agent 判斷還有多少時間，想太久照樣會超時代打。
+- `invalid_token`：header 格式不對（例如沒有 `Bearer `、多了字元）和簽章不對分開說明；hint 先叫 agent 核對原本存下來的 token，不要叫它去拿新的。
+- 只改：`contract/`（如上）、`apps/api/src/room/`、`apps/api/src/auth/`、`apps/api/src/skill/`。
+- 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`。棄牌結束和攤牌結束的 `last_hand` 都有正確的結束原因和籌碼變化，而且雙方加總為 0；`seconds_remaining` 跟 `deadline` 一致；兩種 `invalid_token` 的訊息不同。
 
 ## Epic E3 Skill 與接入
 
