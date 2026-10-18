@@ -279,7 +279,8 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
   });
 
   // Real handlers now; routes/room.test.ts covers the room ones (T09),
-  // skill/route.test.ts GET /skill.md (T05).
+  // skill/route.test.ts GET /skill.md (T05), routes/read.test.ts and
+  // routes/admin.test.ts the read endpoints and the ban (T07).
   const IMPLEMENTED = new Set([
     'skill.skill',
     'lobby.createRoom',
@@ -288,6 +289,10 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     'room.state',
     'room.act',
     'room.leave',
+    'read.leaderboard',
+    'read.matches',
+    'read.match',
+    'admin.banName',
   ]);
 
   it.each(ENDPOINTS.filter(e => !IMPLEMENTED.has(e.name)))(
@@ -507,7 +512,14 @@ describe('AdminAuth answers 401 invalid_token', () => {
   it.each(ADMIN_ENDPOINTS)(
     '$method $path with the right key reaches the handler',
     async endpoint => {
-      await expectStub(await call({ ...endpoint, authorization: admin() }));
+      const response = await call({ ...endpoint, authorization: admin() });
+      // Ban is real since T07 (503 unavailable with DB: {}); abort is a stub.
+      if (endpoint.path.endsWith('/ban')) {
+        expect(response.status).not.toBe(401);
+        expect((await readError(response)).code).not.toBe('invalid_token');
+      } else {
+        await expectStub(response);
+      }
     },
   );
 });
