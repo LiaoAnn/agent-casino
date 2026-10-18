@@ -77,6 +77,110 @@ const start = (queue: MatchQueue, input: QueueInput) => {
 };
 
 describe('MatchQueue (A2)', () => {
+  it('does not pair settings changed while the waiter ban check is pending', async () => {
+    vi.useFakeTimers();
+    try {
+      const checks: { name: string; resolve: (banned: boolean) => void }[] = [];
+      const isBanned = (name: string) =>
+        new Promise<boolean>(resolve => checks.push({ name, resolve }));
+      const openMatch = vi.fn<OpenMatch>().mockResolvedValue(opened);
+      const queue = new MatchQueue(openMatch, { waitMs: WAIT_MS, isBanned });
+      const alice = start(queue, {
+        name: 'Alice',
+        settings: { ...SETTINGS_DEFAULTS, hands: 3 },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const bob = start(queue, {
+        name: 'Bob',
+        settings: { ...SETTINGS_DEFAULTS, hands: 3 },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(checks.map(check => check.name.toLowerCase())).toEqual(['alice']);
+
+      const aliceRetry = start(queue, {
+        name: 'Alice',
+        settings: { ...SETTINGS_DEFAULTS, hands: 10 },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      checks[0]?.resolve(false);
+      await vi.advanceTimersByTimeAsync(WAIT_MS);
+
+      expect.soft(openMatch).not.toHaveBeenCalled();
+      expect(await Promise.all([alice, bob, aliceRetry])).toEqual([
+        waiting,
+        waiting,
+        waiting,
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the earlier waiter in seat 0 when concurrent ban checks finish in reverse order', async () => {
+    vi.useFakeTimers();
+    try {
+      const checks: { name: string; resolve: (banned: boolean) => void }[] = [];
+      const isBanned = (name: string) =>
+        new Promise<boolean>(resolve => checks.push({ name, resolve }));
+      const openMatch = vi
+        .fn<OpenMatch>()
+        .mockImplementation(async (first, second) => ({
+          ok: true,
+          value: [
+            { room_id: ROOM, seat: 0, token: `${first.name}-token` },
+            { room_id: ROOM, seat: 1, token: `${second.name}-token` },
+          ],
+        }));
+      const queue = new MatchQueue(openMatch, { waitMs: WAIT_MS, isBanned });
+      const aliceInput = { name: 'Alice' };
+      const bobInput = { name: 'Bob' };
+      const alice = start(queue, aliceInput);
+      await vi.advanceTimersByTimeAsync(0);
+      const bob = start(queue, bobInput);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(checks.map(check => check.name.toLowerCase())).toEqual(['alice']);
+      const aliceRetry = start(queue, aliceInput);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(checks.map(check => check.name.toLowerCase())).toEqual([
+        'alice',
+        'bob',
+      ]);
+
+      checks[1]?.resolve(false);
+      await vi.advanceTimersByTimeAsync(0);
+      checks[0]?.resolve(false);
+      await vi.advanceTimersByTimeAsync(WAIT_MS);
+
+      expect
+        .soft(openMatch)
+        .toHaveBeenCalledExactlyOnceWith(aliceInput, bobInput);
+      const aliceMatch = {
+        ok: true,
+        value: {
+          status: 'matched',
+          room_id: ROOM,
+          seat: 0,
+          token: 'Alice-token',
+        },
+      };
+      expect(await Promise.all([alice, aliceRetry, bob])).toMatchObject([
+        aliceMatch,
+        aliceMatch,
+        {
+          ok: true,
+          value: {
+            status: 'matched',
+            room_id: ROOM,
+            seat: 1,
+            token: 'Bob-token',
+          },
+        },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('defaults to a 30 second long poll', async () => {
     vi.useFakeTimers();
     try {

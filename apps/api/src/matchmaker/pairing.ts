@@ -219,11 +219,16 @@ export class MatchQueue {
     if (
       banned ||
       this.#waiting.get(partner.key) !== partner ||
-      this.#waiting.get(key) !== entry
+      this.#waiting.get(key) !== entry ||
+      partner.pairingKey !== entry.pairingKey
     ) {
       return this.queue(input);
     }
-    return this.#pair(partner, entry);
+    // Whoever queued first sits in seat 0, even if it is the caller.
+    const order = [...this.#waiting.values()];
+    return order.indexOf(partner) < order.indexOf(entry)
+      ? this.#pair(partner, entry, key)
+      : this.#pair(entry, partner, key);
   }
 
   // Drops expired entries and answers; pairings still opening stay.
@@ -276,10 +281,11 @@ export class MatchQueue {
   }
 
   // Takes both out of the queue before the room is opened, so nobody else
-  // is paired with them meanwhile. Answers `second`, the caller.
+  // is paired with them meanwhile. Answers the caller, by key.
   async #pair(
     first: Entry,
     second: Entry,
+    caller: string,
   ): Promise<Result<Answer, 'unavailable'>> {
     this.#waiting.delete(first.key);
     this.#waiting.delete(second.key);
@@ -328,7 +334,7 @@ export class MatchQueue {
     pairing.matched = answers;
     opened.resolve(answers);
     await this.#save();
-    return { ok: true, value: answers[1] };
+    return { ok: true, value: answers[pairing.keys.indexOf(caller)] };
   }
 
   // Waits up to waitMs for someone to be paired with `entry`.
