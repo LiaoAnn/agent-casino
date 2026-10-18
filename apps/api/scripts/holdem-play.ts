@@ -1,10 +1,11 @@
 /// <reference types="node" />
 /**
  * Play heads-up against the random bot in the terminal, no server needed:
- *   pnpm holdem:play [--seed N] [--hands N] [--stack N] [--bot-seed N]
+ *   pnpm holdem:play [--seed HEX64] [--hands N] [--stack N] [--bot-seed N]
  * You are seat 0. Type `fold`, `check`, `call` or `raise <total>` (or
  * `f`, `k`, `c`, `r <total>`). Input can be piped in, one action per line.
  */
+import { randomBytes } from 'node:crypto';
 import { registerHooks } from 'node:module';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
@@ -44,7 +45,7 @@ const { values } = parseArgs({
   },
 });
 const config = {
-  seed: values.seed === undefined ? randomSeed() : Number(values.seed),
+  seed: values.seed ?? randomBytes(32).toString('hex'),
   hands: Number(values.hands),
   startingStack: Number(values.stack),
 };

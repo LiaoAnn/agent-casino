@@ -24,13 +24,14 @@ const pattern = (regExp: RegExp) =>
 const between = (minimum: number, maximum: number) =>
   Schema.Int.check(Schema.isBetween({ minimum, maximum }));
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
-const Uint32 = between(0, 0xffff_ffff);
 
 export const Name = pattern(NAME_PATTERN);
 export const RoomId = pattern(/^r_[a-z0-9]{10}$/);
 const MatchId = RoomId;
 export const InviteCode = pattern(/^[A-HJ-NP-Z2-9]{6}$/);
 export const Card = pattern(/^[2-9TJQKA][shdc]$/);
+// 256 secret bits (holdem-rules: 種子與洗牌).
+const Seed = pattern(/^[0-9a-f]{64}$/);
 const Seat = Schema.Literals([0, 1]);
 const Street = Schema.Literals(['preflop', 'flop', 'turn', 'river']);
 export const IsoTime = pattern(
@@ -57,7 +58,7 @@ export const Settings = Schema.Struct({
 
 // Only honoured where ALLOW_TEST_ROOMS=true (A11).
 export const TestSettings = Schema.Struct({
-  seed: Schema.optionalKey(Uint32),
+  seed: Schema.optionalKey(Seed),
   chaos: Schema.optionalKey(
     Schema.Struct({
       reject_first_action: Schema.optionalKey(Schema.Boolean),
@@ -298,7 +299,7 @@ export const MatchDetail = Schema.Struct({
   match_id: MatchId,
   players: Players,
   settings: RoomSettings,
-  seed: Uint32,
+  seed: Seed,
   result: SeatResult,
   rated: Schema.Boolean,
   ended_at: IsoTime,

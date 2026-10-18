@@ -13,10 +13,9 @@ import {
 import { dealHand } from './shuffle';
 import { type SeatView, viewFor } from './view';
 
-// Deals used below (seat 0 cards | seat 1 cards | board), same as match.test.ts:
-//
-// seed 1 hand 1: 2d As | Jc 7c | 6d Js 7h 5h 6c   (seat 1 wins a showdown)
-// seed 1 hand 2: 8d Kh | Ad 6c | 5c Tc 5s Kc 2d
+// Independent reference deals, same fixture as match.test.ts:
+// ...0005 hand 1: 9c Ks | Jh 9d | Jc Qh 3d 7c 3c (seat 1 wins)
+// ...0005 hand 2: Qc Th | Qs Ac | 7d 9d Jc 8d 5h
 
 type Step = [Seat, Action];
 
@@ -26,7 +25,7 @@ const CALL: Action = { type: 'call' };
 const raise = (amount: number): Action => ({ type: 'raise', amount });
 
 const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
-  seed: 1,
+  seed: '0000000000000000000000000000000000000000000000000000000000000005',
   hands: 10,
   startingStack: 40,
   ...overrides,
@@ -92,10 +91,10 @@ const HAND_1_SHOWDOWN: LastHand = {
   winner_seat: 1,
   pot: 4,
   ended_by: 'showdown',
-  board: ['6d', 'Js', '7h', '5h', '6c'],
+  board: ['Jc', 'Qh', '3d', '7c', '3c'],
   hole_cards: [
-    ['2d', 'As'],
-    ['Jc', '7c'],
+    ['9c', 'Ks'],
+    ['Jh', '9d'],
   ],
   stacks: [38, 42],
 };
@@ -180,7 +179,7 @@ describe('viewFor', () => {
         street: 'preflop',
         my_seat: 0,
         button_seat: 0,
-        my_cards: ['2d', 'As'],
+        my_cards: ['9c', 'Ks'],
         board: [],
         pot: 3,
         my_stack: 39,
@@ -201,7 +200,7 @@ describe('viewFor', () => {
         street: 'preflop',
         my_seat: 1,
         button_seat: 0,
-        my_cards: ['Jc', '7c'],
+        my_cards: ['Jh', '9d'],
         board: [],
         pot: 3,
         my_stack: 38,
@@ -234,8 +233,8 @@ describe('viewFor', () => {
         street: 'flop',
         my_seat: 0,
         button_seat: 0,
-        my_cards: ['2d', 'As'],
-        board: ['6d', 'Js', '7h'],
+        my_cards: ['9c', 'Ks'],
+        board: ['Jc', 'Qh', '3d'],
         pot: 8,
         my_stack: 38,
         opponent_stack: 34,
@@ -252,8 +251,8 @@ describe('viewFor', () => {
         street: 'flop',
         my_seat: 1,
         button_seat: 0,
-        my_cards: ['Jc', '7c'],
-        board: ['6d', 'Js', '7h'],
+        my_cards: ['Jh', '9d'],
+        board: ['Jc', 'Qh', '3d'],
         pot: 8,
         my_stack: 34,
         opponent_stack: 38,
@@ -283,7 +282,7 @@ describe('viewFor', () => {
         street: 'preflop',
         my_seat: 1,
         button_seat: 1,
-        my_cards: ['Ad', '6c'],
+        my_cards: ['Qs', 'Ac'],
         board: [],
         pot: 3,
         my_stack: 40,
@@ -300,7 +299,7 @@ describe('viewFor', () => {
       view: {
         my_seat: 0,
         button_seat: 1,
-        my_cards: ['8d', 'Kh'],
+        my_cards: ['Qc', 'Th'],
         my_stack: 37,
         opponent_stack: 40,
         my_bet_this_street: 2,
@@ -324,17 +323,17 @@ describe('viewFor', () => {
         winner_seat: 1,
         pot: 4,
         ended_by: 'fold',
-        board: ['6d', 'Js', '7h'],
+        board: ['Jc', 'Qh', '3d'],
         hole_cards: null,
         stacks: [38, 42],
       });
       expect(seen.view).toMatchObject({ pot: 3, board: [] });
     }
     // Hand 1 hole cards stay hidden from the other seat after the fold.
-    expect(cardsIn(viewFor(state, 0))).not.toContain('Jc');
-    expect(cardsIn(viewFor(state, 0))).not.toContain('7c');
-    expect(cardsIn(viewFor(state, 1))).not.toContain('2d');
-    expect(cardsIn(viewFor(state, 1))).not.toContain('As');
+    expect(cardsIn(viewFor(state, 0))).not.toContain('Jh');
+    expect(cardsIn(viewFor(state, 0))).not.toContain('9d');
+    expect(cardsIn(viewFor(state, 1))).not.toContain('9c');
+    expect(cardsIn(viewFor(state, 1))).not.toContain('Ks');
     expect(viewFor(state, 0).view).toMatchObject({
       my_stack: 36,
       opponent_stack: 41,
@@ -353,7 +352,7 @@ describe('viewFor', () => {
       view: {
         street: 'preflop',
         button_seat: 1,
-        my_cards: ['8d', 'Kh'],
+        my_cards: ['Qc', 'Th'],
         board: [],
         pot: 3,
         my_stack: 36,
@@ -361,9 +360,9 @@ describe('viewFor', () => {
         history: [blind(1, 1), blind(0, 2)],
       },
     });
-    expect(seat1.view.my_cards).toEqual(['Ad', '6c']);
-    expect(cardsIn(seat0.view)).not.toContain('Ad');
-    expect(cardsIn(seat1.view)).not.toContain('8d');
+    expect(seat1.view.my_cards).toEqual(['Qs', 'Ac']);
+    expect(cardsIn(seat0.view)).not.toContain('Qs');
+    expect(cardsIn(seat1.view)).not.toContain('Qc');
   });
 
   it('match over after a showdown: to_act_seat null, pot 0, final stacks, last_hand = final hand', () => {
@@ -375,8 +374,8 @@ describe('viewFor', () => {
         street: 'river',
         my_seat: 0,
         button_seat: 0,
-        my_cards: ['2d', 'As'],
-        board: ['6d', 'Js', '7h', '5h', '6c'],
+        my_cards: ['9c', 'Ks'],
+        board: ['Jc', 'Qh', '3d', '7c', '3c'],
         pot: 0,
         my_stack: 38,
         opponent_stack: 42,
@@ -388,7 +387,7 @@ describe('viewFor', () => {
     });
     expect(viewFor(state, 1)).toMatchObject({
       to_act_seat: null,
-      view: { my_seat: 1, my_cards: ['Jc', '7c'], pot: 0, my_stack: 42 },
+      view: { my_seat: 1, my_cards: ['Jh', '9d'], pot: 0, my_stack: 42 },
       last_hand: HAND_1_SHOWDOWN,
     });
   });
@@ -406,7 +405,7 @@ describe('viewFor', () => {
         street: 'preflop',
         my_seat: 0,
         button_seat: 1,
-        my_cards: ['8d', 'Kh'],
+        my_cards: ['Qc', 'Th'],
         board: [],
         pot: 0,
         my_stack: 40,
@@ -429,8 +428,8 @@ describe('viewFor', () => {
         stacks: [40, 40],
       },
     });
-    expect(cardsIn(seen)).toEqual(['8d', 'Kh']);
-    expect(cardsIn(viewFor(state, 1))).toEqual(['Ad', '6c']);
+    expect(cardsIn(seen)).toEqual(['Qc', 'Th']);
+    expect(cardsIn(viewFor(state, 1))).toEqual(['Qs', 'Ac']);
   });
 
   it('passes the timeout flag through history unchanged', () => {
@@ -449,7 +448,7 @@ describe('viewFor', () => {
   });
 
   it('never leaks the opponent cards and has exact keys at every step of a 6-hand match', () => {
-    // seed 1, 6 hands: preflop fold, flop fold, showdown, preflop fold,
+    // seed ...0005, 6 hands: preflop fold, flop fold, showdown, preflop fold,
     // raised showdown, flop fold; then the match is over.
     const script: Step[] = [
       [0, FOLD],

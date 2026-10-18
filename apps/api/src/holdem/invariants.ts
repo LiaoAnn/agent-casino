@@ -183,9 +183,9 @@ function checkLegal(state: MatchState, seat: Seat): string[] {
 }
 
 function checkConfig({ seed }: MatchConfig): string[] {
-  return Number.isInteger(seed) && seed >= 0 && seed <= 0xffffffff
+  return /^[0-9a-f]{64}$/.test(seed)
     ? []
-    : [`Seed must be a 32-bit unsigned integer: ${seed}`];
+    : [`Seed must be 64 lowercase hex characters: ${seed}`];
 }
 
 /**

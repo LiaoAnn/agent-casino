@@ -41,14 +41,18 @@ const MAX_ACTIONS_PER_MATCH = 200_000;
 const randomInt = (random: () => number, min: number, max: number) =>
   min + Math.floor(random() * (max - min + 1));
 
-/** Seeds 0 and 2^32 - 1 first; stacks mostly small so blinds go all-in. */
+/** All-zero and all-f seeds first; stacks mostly small so blinds go all-in. */
 function pickConfig(random: () => number, matchIndex: number): MatchConfig {
   const seed =
     matchIndex === 0
-      ? 0
+      ? '0'.repeat(64)
       : matchIndex === 1
-        ? 0xffffffff
-        : Math.floor(random() * 2 ** 32);
+        ? 'f'.repeat(64)
+        : Array.from({ length: 8 }, () =>
+            Math.floor(random() * 2 ** 32)
+              .toString(16)
+              .padStart(8, '0'),
+          ).join('');
   const hands = randomInt(random, 1, 200);
   const roll = random();
   const startingStack =

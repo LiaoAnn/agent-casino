@@ -6,7 +6,7 @@ export type Seat = 0 | 1;
 export type Street = 'preflop' | 'flop' | 'turn' | 'river';
 
 export interface MatchConfig {
-  seed: number;
+  seed: string;
   hands: number;
   startingStack: number;
 }

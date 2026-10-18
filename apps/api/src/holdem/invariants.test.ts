@@ -14,11 +14,10 @@ import {
 } from './match';
 import { dealHand, mulberry32 } from './shuffle';
 
-// Deals used below (seat 0 cards | seat 1 cards | board), see match.test.ts:
-//
-// seed 1 hand 1: 2d As | Jc 7c | 6d Js 7h 5h 6c   seat 1 wins a showdown
-// seed 6 hand 1: 9d 5s | 3d 9s | 8d 4d 9h Jc 8c   tie
-// seed 42 hand 1: 6d 5s | 7s 3h | Jh Jc Ks Qh Jd  tie
+// Independent reference fixtures (seat 0 | seat 1 | board), see match.test.ts:
+// ...0005 hand 1: 9c Ks | Jh 9d | Jc Qh 3d 7c 3c   seat 1 wins
+// ...0016 hand 1: 7s 3d | 3s 4d | 3c 2s Qd 5s 2h   tie
+// ...001a hand 1: 7h Jd | Js 2s | Ks Ad 3h 8d 9h   tie
 
 type Step = [Seat, Action, { timeout?: boolean }?];
 
@@ -28,7 +27,7 @@ const CALL: Action = { type: 'call' };
 const raise = (amount: number): Action => ({ type: 'raise', amount });
 
 const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
-  seed: 1,
+  seed: '0000000000000000000000000000000000000000000000000000000000000005',
   hands: 10,
   startingStack: 40,
   ...overrides,
@@ -75,7 +74,7 @@ const checkPostflop = (first: Seat): Step[] => {
 
 const CHECK_DOWN_HAND_1: Step[] = [[0, CALL], [1, CHECK], ...checkPostflop(1)];
 
-// Seed 1, 10 chips (match.test.ts "blind all-ins"): hand 3 seat 0 is all-in
+// Seed ...0005, 10 chips (match.test.ts "blind all-ins"): hand 3 seat 0 is all-in
 // by posting the small blind, hand 4 by posting the big blind.
 const BLIND_ALL_IN_SCRIPT: Step[] = [
   [0, raise(4)],
@@ -92,8 +91,10 @@ const BLIND_ALL_IN_SCRIPT: Step[] = [
 const SCENARIOS: [string, Partial<MatchConfig>, Step[]][] = [
   ['check-down, seat 1 wins', {}, CHECK_DOWN_HAND_1],
   [
-    'raises on every street and a split pot (seed 42)',
-    { seed: 42 },
+    'raises on every street and a split pot (seed ...001a)',
+    {
+      seed: '000000000000000000000000000000000000000000000000000000000000001a',
+    },
     [
       [0, raise(6)],
       [1, CALL],
@@ -105,8 +106,11 @@ const SCENARIOS: [string, Partial<MatchConfig>, Step[]][] = [
     ],
   ],
   [
-    'split pot on the last hand (seed 6, hands 1)',
-    { seed: 6, hands: 1 },
+    'split pot on the last hand (seed ...0016, hands 1)',
+    {
+      seed: '0000000000000000000000000000000000000000000000000000000000000016',
+      hands: 1,
+    },
     [[0, raise(6)], [1, CALL], ...checkPostflop(1)],
   ],
   [
@@ -136,7 +140,9 @@ const SCENARIOS: [string, Partial<MatchConfig>, Step[]][] = [
   ],
   [
     'all-in on the flop',
-    { seed: 3 },
+    {
+      seed: '0000000000000000000000000000000000000000000000000000000000000000',
+    },
     [
       [0, CALL],
       [1, CHECK],
@@ -198,11 +204,32 @@ function randomMatch(overrides: Partial<MatchConfig>, botSeed: number) {
 }
 
 const RANDOM_MATCHES: [Partial<MatchConfig>, number][] = [
-  [{ seed: 0, hands: 30, startingStack: 10 }, 1],
-  [{ seed: 0xffffffff, hands: 30, startingStack: 10 }, 2],
-  [{ seed: 11, hands: 40, startingStack: 40 }, 3],
-  [{ seed: 12, hands: 20, startingStack: 2000 }, 4],
-  [{ seed: 13, hands: 200, startingStack: 15 }, 5],
+  [{ seed: '0'.repeat(64), hands: 30, startingStack: 10 }, 1],
+  [{ seed: 'f'.repeat(64), hands: 30, startingStack: 10 }, 2],
+  [
+    {
+      seed: '000000000000000000000000000000000000000000000000000000000000000b',
+      hands: 40,
+      startingStack: 40,
+    },
+    3,
+  ],
+  [
+    {
+      seed: '000000000000000000000000000000000000000000000000000000000000000c',
+      hands: 20,
+      startingStack: 2000,
+    },
+    4,
+  ],
+  [
+    {
+      seed: '000000000000000000000000000000000000000000000000000000000000000d',
+      hands: 200,
+      startingStack: 15,
+    },
+    5,
+  ],
 ];
 
 function expectViolations(found: unknown): void {
@@ -234,8 +261,8 @@ describe('checkState on legal play', () => {
   it('the start of a match has no violations', () => {
     for (const overrides of [
       {},
-      { seed: 0, hands: 1, startingStack: 10 },
-      { seed: 0xffffffff, hands: 200, startingStack: 2000 },
+      { seed: '0'.repeat(64), hands: 1, startingStack: 10 },
+      { seed: 'f'.repeat(64), hands: 200, startingStack: 2000 },
     ]) {
       expect(checkState(startMatch(config(overrides)))).toEqual([]);
     }
@@ -295,14 +322,19 @@ describe('checkState on legal play', () => {
 });
 
 describe('checkState reports broken states', () => {
-  // Seed 42, 40 chips: preflop raise 6 / call; flop seat 1 bets 2.
+  // Seed ...001a, 40 chips: preflop raise 6 / call; flop seat 1 bets 2.
   // bets [0, 2], contributed [6, 8], stacks [34, 32], seat 0 to act.
   const flopBet = () =>
-    stateAfter({ seed: 42 }, [
-      [0, raise(6)],
-      [1, CALL],
-      [1, raise(2)],
-    ]);
+    stateAfter(
+      {
+        seed: '000000000000000000000000000000000000000000000000000000000000001a',
+      },
+      [
+        [0, raise(6)],
+        [1, CALL],
+        [1, raise(2)],
+      ],
+    );
   // Fresh flop after limp/check: seat 1 (non-button) to act, no flop events.
   const freshFlop = () =>
     stateAfter({}, [
@@ -473,7 +505,10 @@ describe('checkState reports broken states', () => {
       'board too long for the flop',
       flopBet,
       s => {
-        s.board = dealHand(42, 1).board.slice(0, 4);
+        s.board = dealHand(
+          '000000000000000000000000000000000000000000000000000000000000001a',
+          1,
+        ).board.slice(0, 4);
       },
     ],
     [
@@ -487,14 +522,20 @@ describe('checkState reports broken states', () => {
       'a board card not from this hand',
       flopBet,
       s => {
-        s.board[0] = dealHand(42, 1).board[4];
+        s.board[0] = dealHand(
+          '000000000000000000000000000000000000000000000000000000000000001a',
+          1,
+        ).board[4];
       },
     ],
     [
       'board from another hand',
       freshFlop,
       s => {
-        s.board = dealHand(1, 2).board.slice(0, 3);
+        s.board = dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          2,
+        ).board.slice(0, 3);
       },
     ],
     [
@@ -508,14 +549,20 @@ describe('checkState reports broken states', () => {
       'hole cards from another hand',
       hand2,
       s => {
-        s.holeCards = dealHand(1, 1).holeCards;
+        s.holeCards = dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          1,
+        ).holeCards;
       },
     ],
     [
       'hole cards from another seed',
       freshFlop,
       s => {
-        s.holeCards = dealHand(2, 1).holeCards;
+        s.holeCards = dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000002',
+          1,
+        ).holeCards;
       },
     ],
     // 6. button and hand number
@@ -698,10 +745,10 @@ describe('checkHand on legal play', () => {
 });
 
 describe('checkHand reports broken records', () => {
-  // Seed 1 hand 1 checked down: seat 1 wins, pot 4, stacks [38, 42].
+  // Seed ...0005 hand 1 checked down: seat 1 wins, pot 4, stacks [38, 42].
   // events: blinds, call, check, then check/check on flop, turn, river.
   const showdown = () => trace({}, CHECK_DOWN_HAND_1).hands[0];
-  // Seed 1 hand 1: limp, check, seat 1 bets 6 on the flop, seat 0 folds.
+  // Seed ...0005 hand 1: limp, check, seat 1 bets 6 on the flop, seat 0 folds.
   const flopFold = () =>
     trace({}, [
       [0, CALL],
@@ -709,11 +756,15 @@ describe('checkHand reports broken records', () => {
       [1, raise(6)],
       [0, FOLD],
     ]).hands[0];
-  // Seed 6 hand 1: split pot.
+  // Seed ...0016 hand 1: split pot.
   const split = () =>
-    trace({ seed: 6 }, [[0, raise(6)], [1, CALL], ...checkPostflop(1)])
-      .hands[0];
-  // Seed 1, 10 chips, hand 3: blinds only, board runs out.
+    trace(
+      {
+        seed: '0000000000000000000000000000000000000000000000000000000000000016',
+      },
+      [[0, raise(6)], [1, CALL], ...checkPostflop(1)],
+    ).hands[0];
+  // Seed ...0005, 10 chips, hand 3: blinds only, board runs out.
   const runout = () =>
     trace({ startingStack: 10 }, BLIND_ALL_IN_SCRIPT).hands.find(
       h => h.hand_number === 3,
@@ -731,7 +782,14 @@ describe('checkHand reports broken records', () => {
   it('the base records themselves are fine', () => {
     expect(checkHand(showdown(), config())).toEqual([]);
     expect(checkHand(flopFold(), config())).toEqual([]);
-    expect(checkHand(split(), config({ seed: 6 }))).toEqual([]);
+    expect(
+      checkHand(
+        split(),
+        config({
+          seed: '0000000000000000000000000000000000000000000000000000000000000016',
+        }),
+      ),
+    ).toEqual([]);
     expect(checkHand(runout(), tenChips)).toEqual([]);
     expect(checkHand(hand2Fold(), twoHands)).toEqual([]);
     expect(showdown()).toMatchObject({ winner_seat: 1, ended_by: 'showdown' });
@@ -904,7 +962,10 @@ describe('checkHand reports broken records', () => {
       flopFold,
       config(),
       h => {
-        h.hole_cards = dealHand(1, 1).holeCards;
+        h.hole_cards = dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          1,
+        ).holeCards;
       },
     ],
     [
@@ -943,7 +1004,10 @@ describe('checkHand reports broken records', () => {
       showdown,
       config(),
       h => {
-        const cards = dealHand(1, 1).holeCards;
+        const cards = dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          1,
+        ).holeCards;
         h.hole_cards = [cards[1], cards[0]];
       },
     ],
@@ -951,7 +1015,7 @@ describe('checkHand reports broken records', () => {
       'a showdown board card not from this hand',
       showdown,
       config(),
-      // Kc is not among the 9 cards dealt in seed 1 hand 1.
+      // Kc is not among the 9 cards dealt in seed ...0005 hand 1.
       h => {
         h.board[4] = 'Kc';
       },
@@ -961,13 +1025,18 @@ describe('checkHand reports broken records', () => {
       flopFold,
       config(),
       h => {
-        h.board = dealHand(1, 1).board.slice(1, 4);
+        h.board = dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          1,
+        ).board.slice(1, 4);
       },
     ],
     [
       'the record checked against another seed',
       showdown,
-      config({ seed: 2 }),
+      config({
+        seed: '0000000000000000000000000000000000000000000000000000000000000002',
+      }),
       () => {},
     ],
     // 6. showdown winner
@@ -990,7 +1059,9 @@ describe('checkHand reports broken records', () => {
     [
       'a winner on a tie',
       split,
-      config({ seed: 6 }),
+      config({
+        seed: '0000000000000000000000000000000000000000000000000000000000000016',
+      }),
       h => {
         h.winner_seat = 0;
       },
@@ -1056,8 +1127,14 @@ describe('checkHand: pot matches the events', () => {
     trace({ startingStack: 10 }, BLIND_ALL_IN_SCRIPT).hands.find(
       h => h.hand_number === 3,
     ) as HandRecord;
-  // Raises on two streets, then a split (seed 42): pot 28.
-  const multiStreet = () => trace({ seed: 42 }, SCENARIOS[1][2]).hands[0];
+  // Raises on two streets, then a split (seed ...001a): pot 28.
+  const multiStreet = () =>
+    trace(
+      {
+        seed: '000000000000000000000000000000000000000000000000000000000000001a',
+      },
+      SCENARIOS[1][2],
+    ).hands[0];
 
   const bases: [string, () => HandRecord, MatchConfig, number, number][] = [
     ['check-down', showdown, config(), 4, 4],
@@ -1071,7 +1148,15 @@ describe('checkHand: pot matches the events', () => {
       2,
       3,
     ],
-    ['raises on two streets', multiStreet, config({ seed: 42 }), 28, 28],
+    [
+      'raises on two streets',
+      multiStreet,
+      config({
+        seed: '000000000000000000000000000000000000000000000000000000000000001a',
+      }),
+      28,
+      28,
+    ],
   ];
 
   it.each(bases)(
@@ -1135,7 +1220,7 @@ describe('order rules on their own', () => {
     expect(events.map(e => e.street)).toContain('turn');
   };
 
-  // Seed 1, checked down to the river: seat 1 (non-button) to act.
+  // Seed ...0005, checked down to the river: seat 1 (non-button) to act.
   const river = () => stateAfter({}, CHECK_DOWN_HAND_1.slice(0, -2));
   const showdown = () => trace({}, CHECK_DOWN_HAND_1).hands[0];
 
@@ -1200,21 +1285,33 @@ describe('bad numbers are reported, not thrown', () => {
       },
     ],
     [
-      'seed -1',
+      'uppercase seed',
       s => {
-        s.config.seed = -1;
+        s.config.seed = 'A'.repeat(64);
       },
     ],
     [
-      'seed 2^32',
+      '63-character seed',
       s => {
-        s.config.seed = 2 ** 32;
+        s.config.seed = '0'.repeat(63);
       },
     ],
     [
-      'seed 1.5',
+      '65-character seed',
       s => {
-        s.config.seed = 1.5;
+        s.config.seed = '0'.repeat(65);
+      },
+    ],
+    [
+      'non-hex seed',
+      s => {
+        s.config.seed = 'g'.repeat(64);
+      },
+    ],
+    [
+      'empty seed',
+      s => {
+        s.config.seed = '';
       },
     ],
   ])('checkState: %s', (_name, corrupt) => {
@@ -1256,9 +1353,11 @@ describe('bad numbers are reported, not thrown', () => {
       },
       config(),
     ],
-    ['seed -1', () => {}, config({ seed: -1 })],
-    ['seed 2^32', () => {}, config({ seed: 2 ** 32 })],
-    ['seed 1.5', () => {}, config({ seed: 1.5 })],
+    ['uppercase seed', () => {}, config({ seed: 'A'.repeat(64) })],
+    ['63-character seed', () => {}, config({ seed: '0'.repeat(63) })],
+    ['65-character seed', () => {}, config({ seed: '0'.repeat(65) })],
+    ['non-hex seed', () => {}, config({ seed: 'g'.repeat(64) })],
+    ['empty seed', () => {}, config({ seed: '' })],
   ])('checkHand: %s', (_name, corrupt, matchConfig) => {
     const hand = structuredClone(showdown());
     corrupt(hand);
