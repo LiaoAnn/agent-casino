@@ -12,7 +12,7 @@ import {
   TestSettings,
 } from '../contract/schemas';
 import type { Bindings } from '../routes/env';
-import { signRoomToken } from '../token/token';
+import { signRoomToken, signWatchToken } from '../token/token';
 import type { RoomApi } from './referee';
 import { newSeed } from './seed';
 
@@ -38,6 +38,8 @@ function randomString(alphabet: string, length: number): string {
 
 // Plain vars of this deployment that routes/env.ts doesn't type.
 type RoomVars = {
+  // Where the web runs; watch links point there (A16).
+  WEB_URL?: string;
   ALLOW_TEST_ROOMS?: string;
   DEFAULT_SETTINGS_JSON?: string;
   DEFAULT_TEST_JSON?: string;
@@ -166,10 +168,24 @@ export const callRoom = <T, C extends ApiError['code']>(
     ),
   );
 
+// The seat's room token and its owner's watch link (A16). The watch token
+// has no exp, so the same seat always gets the same link.
 const sign = (
   env: Bindings,
   claims: { room_id: string; seat: 0 | 1; name: string },
-) => Effect.promise(() => signRoomToken(claims, env.TOKEN_SECRET, Date.now()));
+) =>
+  Effect.gen(function* () {
+    const { WEB_URL } = vars(env);
+    if (!WEB_URL) return yield* Effect.die(new Error('WEB_URL is not set'));
+    const [token, watchToken] = yield* Effect.promise(() =>
+      Promise.all([
+        signRoomToken(claims, env.TOKEN_SECRET, Date.now()),
+        signWatchToken(claims, env.TOKEN_SECRET),
+      ]),
+    );
+    const watch_url = `${WEB_URL.replace(/\/+$/, '')}/watch/${claims.room_id}?token=${watchToken}`;
+    return { token, watch_url };
+  });
 
 // Opens a room with `name` in seat 0. Check the name with nameError first.
 export const openRoom = (
@@ -200,8 +216,8 @@ export const openRoom = (
         ...(input.opponent && { opponent: input.opponent }),
       }),
     );
-    const token = yield* sign(env, { room_id, seat: 0, name: input.name });
-    return { room_id, invite_code, seat: 0 as const, token };
+    const signed = yield* sign(env, { room_id, seat: 0, name: input.name });
+    return { room_id, invite_code, seat: 0 as const, ...signed, settings };
   });
 
 // Seats `name` in seat 1 of the room. Check the name with nameError first.
@@ -212,9 +228,13 @@ export const joinRoom = (
 ) =>
   Effect.gen(function* () {
     const stub = yield* roomStub(env, roomId);
-    const { seat } = yield* callRoom(() => stub.join(input));
-    const token = yield* sign(env, { room_id: roomId, seat, name: input.name });
-    return { room_id: roomId, seat, token };
+    const { seat, ...room } = yield* callRoom(() => stub.join(input));
+    const signed = yield* sign(env, {
+      room_id: roomId,
+      seat,
+      name: input.name,
+    });
+    return { room_id: roomId, seat, ...signed, ...room };
   });
 
 // A9: an admin calls the room's match off (void).

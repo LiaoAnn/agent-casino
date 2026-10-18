@@ -15,7 +15,7 @@ import {
 import { replay } from '../holdem/replay';
 import { dealHand } from '../holdem/shuffle';
 import { makeFakeData } from './fake';
-import { Leaderboard, MatchDetail, MatchList } from './schemas';
+import { Leaderboard, MatchDetail, MatchList, WatchResponse } from './schemas';
 
 const decodes = (schema: Schema.Top, value: unknown): boolean =>
   Exit.isSuccess(
@@ -382,4 +382,116 @@ describe('makeFakeData', () => {
     expect(deltas.some(d => d > 0)).toBe(true);
     expect(deltas.some(d => d < 0)).toBe(true);
   });
+});
+
+// --- watch fake data for the web page (A16, T24) ------------------------------
+
+describe('makeFakeData watch responses', () => {
+  const watch = () => makeFakeData().watch;
+  const decode = (value: unknown) =>
+    Schema.decodeUnknownSync(WatchResponse)(value);
+
+  const keysOf = (value: unknown): string[] =>
+    Array.isArray(value)
+      ? value.flatMap(keysOf)
+      : value !== null && typeof value === 'object'
+        ? Object.entries(value).flatMap(([key, inner]) => [
+            key,
+            ...keysOf(inner),
+          ])
+        : [];
+  const notesOf = (value: unknown): string[] =>
+    Array.isArray(value)
+      ? value.flatMap(notesOf)
+      : value !== null && typeof value === 'object'
+        ? Object.entries(value).flatMap(([key, inner]) =>
+            key === 'note' && typeof inner === 'string'
+              ? [inner]
+              : notesOf(inner),
+          )
+        : [];
+
+  it('has the two kinds the page needs, and both decode as WatchResponse', () => {
+    const { playing, finished } = watch();
+    expect(decodes(WatchResponse, playing)).toBe(true);
+    expect(decodes(WatchResponse, finished)).toBe(true);
+    // Decoding keeps the data as it is (no field is silently dropped).
+    expect(JSON.parse(JSON.stringify(decode(playing)))).toEqual(
+      JSON.parse(JSON.stringify(playing)),
+    );
+    expect(JSON.parse(JSON.stringify(decode(finished)))).toEqual(
+      JSON.parse(JSON.stringify(finished)),
+    );
+  });
+
+  it('playing: a room in play with a hand on, finished hands and notes', () => {
+    const { playing } = watch();
+    expect(playing.room_status).toBe('playing');
+    expect(playing.players[0]).toEqual(expect.any(String));
+    expect(playing.players[1]).toEqual(expect.any(String));
+    expect(playing.view).not.toBeNull();
+    expect(playing.hands.length).toBeGreaterThanOrEqual(1);
+    expect(playing.hand_number).toBe(playing.hands.length + 1);
+    expect(notesOf(playing).length).toBeGreaterThan(0);
+    // A note sits on a step of the watched seat only.
+    for (const hand of playing.hands) {
+      for (const event of hand.events) {
+        if (event.note !== undefined) expect(event.seat).toBe(playing.seat);
+      }
+    }
+    for (const event of playing.view?.history ?? []) {
+      if (event.note !== undefined) expect(event.seat).toBe(playing.seat);
+    }
+  });
+
+  it('playing: shows only what the seat knows (own cards, opponent cards at showdown only)', () => {
+    const { playing } = watch();
+    const opponent = playing.seat === 0 ? 1 : 0;
+    for (const hand of playing.hands) {
+      expect(hand.hole_cards[playing.seat]).not.toBeNull();
+      if (hand.ended_by === 'showdown') {
+        expect(hand.hole_cards[opponent]).not.toBeNull();
+      } else {
+        expect(hand.hole_cards[opponent]).toBeNull();
+      }
+    }
+    expect(playing.view?.my_seat).toBe(playing.seat);
+  });
+
+  it('playing: a deadline only when it is the watched seat to act', () => {
+    const { playing } = watch();
+    if (playing.to_act_seat === playing.seat) {
+      expect(playing.deadline).toEqual(expect.any(String));
+    } else {
+      expect(playing.deadline).toBeNull();
+    }
+  });
+
+  it('finished: a finished room with the result, every hand and both hole cards', () => {
+    const { finished } = watch();
+    expect(['finished', 'void']).toContain(finished.room_status);
+    if (finished.room_status !== 'finished') return;
+    expect(finished.hands.length).toBeGreaterThanOrEqual(1);
+    for (const hand of finished.hands) {
+      expect(hand.hole_cards[0]).toHaveLength(2);
+      expect(hand.hole_cards[1]).toHaveLength(2);
+    }
+    expect(finished.hands.map(hand => hand.hand_number)).toEqual(
+      finished.hands.map((_hand, index) => index + 1),
+    );
+    expect(finished.final_stacks).toHaveLength(2);
+    expect(finished.match_id).toEqual(expect.any(String));
+    expect(finished.deadline).toBeNull();
+    expect(finished.to_act_seat).toBeNull();
+  });
+
+  it.each(['playing', 'finished'] as const)(
+    '%s: never carries seed, turn_id or legal_actions',
+    kind => {
+      const keys = keysOf(watch()[kind]);
+      for (const key of ['seed', 'turn_id', 'legal_actions']) {
+        expect(keys).not.toContain(key);
+      }
+    },
+  );
 });

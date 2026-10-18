@@ -68,7 +68,7 @@ const joinedRoom = async () => {
     await room.join({ name: 'bob', invite_code: INPUT.invite_code }),
   ).toEqual({
     ok: true,
-    value: { seat: 1 },
+    value: { seat: 1, opponent_name: 'alice', settings: INPUT.settings },
   });
   return { room, storage, matchmaker, id, recordMatch, recorded };
 };

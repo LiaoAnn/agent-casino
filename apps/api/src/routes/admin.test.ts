@@ -31,6 +31,7 @@ const ADMIN_KEY = 'test-admin-key';
 const makeEnv = (db: unknown): Bindings =>
   ({
     TOKEN_SECRET: 'test-token-secret',
+    WEB_URL: 'https://web.test',
     ADMIN_KEY,
     DB: db,
     ROOM: {},

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomAction } from '../holdem/bot';
 import {
@@ -12,6 +13,7 @@ import {
 import { dealHand, mulberry32 } from '../holdem/shuffle';
 import { getMatch } from './queries';
 import { type MatchRecordInput, recordMatch } from './records';
+import { matchEvents } from './schema';
 import { startTestD1, type TestD1 } from './test-d1';
 
 let testD1: TestD1;
@@ -387,4 +389,85 @@ describe('recordMatch: long matches', () => {
       })),
     );
   }, 30_000);
+});
+
+describe('recordMatch: agent notes (A16)', () => {
+  const NOTES = [
+    { hand_number: 1, seq: 2, note: 'first note' },
+    { hand_number: 1, seq: 3, note: 'second note' },
+    { hand_number: 3, seq: 7, note: 'last step of the match' },
+  ];
+
+  const eventRows = async (matchId: string) =>
+    testD1.db
+      .select()
+      .from(matchEvents)
+      .where(eq(matchEvents.matchId, matchId));
+
+  it('stores each note on the match_events row of its hand and seq, and no other row has one', async () => {
+    const match = input({ notes: NOTES });
+    await recordMatch(testD1.db, match);
+    const rows = await eventRows(match.match_id);
+    expect(rows).toHaveLength(24);
+    expect(
+      rows
+        .filter(row => row.note !== null)
+        .map(row => ({
+          hand_number: row.handNumber,
+          seq: row.seq,
+          note: row.note,
+        }))
+        .sort((a, b) => a.hand_number - b.hand_number || a.seq - b.seq),
+    ).toEqual(NOTES);
+    // The note sits with the step it explains.
+    const second = rows.find(row => row.handNumber === 1 && row.seq === 3);
+    expect(second).toMatchObject({ seat: 1, type: 'check' });
+  });
+
+  it('stores null notes when the match has none, or an empty list', async () => {
+    const plain = input();
+    const empty = input({ notes: [] });
+    await recordMatch(testD1.db, plain);
+    await recordMatch(testD1.db, empty);
+    for (const match of [plain, empty]) {
+      const rows = await eventRows(match.match_id);
+      expect(rows).toHaveLength(24);
+      expect(rows.every(row => row.note === null)).toBe(true);
+    }
+  });
+
+  it('keeps a long note and non-ASCII text unchanged', async () => {
+    const note = `${'牌桌上的想法 '.repeat(70)}end`.slice(0, 500);
+    const match = input({ notes: [{ hand_number: 2, seq: 4, note }] });
+    await recordMatch(testD1.db, match);
+    const row = (await eventRows(match.match_id)).find(
+      entry => entry.handNumber === 2 && entry.seq === 4,
+    );
+    expect(row?.note).toBe(note);
+  });
+
+  it('getMatch gives the same record with or without notes: no note anywhere', async () => {
+    const withNotes = input({ notes: NOTES });
+    const without = input({ match_id: nextMatchId() });
+    await recordMatch(testD1.db, withNotes);
+    await recordMatch(testD1.db, without);
+    const stored = await getMatch(testD1.db, withNotes.match_id);
+    const plain = await getMatch(testD1.db, without.match_id);
+    expect(stored).not.toBeNull();
+    expect(stored?.hands).toStrictEqual(plain?.hands);
+    const text = JSON.stringify(stored);
+    for (const entry of NOTES) expect(text).not.toContain(entry.note);
+    for (const hand of stored?.hands ?? []) {
+      for (const event of hand.events) expect(event).not.toHaveProperty('note');
+    }
+  });
+
+  it('a retried recordMatch keeps the notes once', async () => {
+    const match = input({ notes: NOTES });
+    const first = await recordMatch(testD1.db, match);
+    expect(await recordMatch(testD1.db, match)).toEqual(first);
+    const rows = await eventRows(match.match_id);
+    expect(rows).toHaveLength(24);
+    expect(rows.filter(row => row.note !== null)).toHaveLength(NOTES.length);
+  });
 });

@@ -14,7 +14,11 @@ import {
   ERROR_STATUS,
   type ErrorCode,
 } from '../contract/errors';
-import { QueueResponse, RoomStatus } from '../contract/schemas';
+import {
+  QueueResponse,
+  RoomStatus,
+  SETTINGS_DEFAULTS,
+} from '../contract/schemas';
 import { banName } from '../db/bans';
 import { startTestD1, type TestD1 } from '../db/test-d1';
 import {
@@ -23,7 +27,7 @@ import {
   type QueueInput,
 } from '../matchmaker/pairing';
 import { RoomReferee, type RoomStorage } from '../room/referee';
-import { verifyRoomToken } from '../token/token';
+import { verifyRoomToken, verifyWatchToken } from '../token/token';
 import type { Bindings } from './env';
 
 const BASE = 'http://api.test';
@@ -75,6 +79,7 @@ const makeEnv = (
   const env = {
     ...defaults,
     TOKEN_SECRET,
+    WEB_URL: 'https://web.test',
     ADMIN_KEY: 'queue-test-admin-key',
     DB: testD1.d1,
     ROOM,
@@ -381,5 +386,99 @@ describe('POST /v1/queue (S1)', () => {
     expect(queueCall).toHaveBeenCalledTimes(2);
     for (const [, input] of queueCall.mock.calls)
       expect(input.test).toEqual(test);
+  });
+});
+
+describe('POST /v1/queue: opponent, settings and watch link (A16)', () => {
+  const tokenOf = (watchUrl: string) => {
+    const token = new URL(watchUrl).searchParams.get('token');
+    if (token === null) throw new Error('no token in watch_url');
+    return token;
+  };
+
+  it('matched carries opponent_name, settings and watch_url for each player', async () => {
+    const { env } = makeEnv();
+    const [alice, bob] = await pair(env);
+    for (const [name, player, opponent] of [
+      ['AlIce', alice, 'bOB'],
+      ['bOB', bob, 'AlIce'],
+    ] as const) {
+      expect(player.opponent_name).toBe(opponent);
+      expect(player.settings).toEqual(SETTINGS_DEFAULTS);
+      expect(
+        player.watch_url.startsWith(
+          `https://web.test/watch/${player.room_id}?token=`,
+        ),
+      ).toBe(true);
+      expect(
+        await verifyWatchToken(
+          tokenOf(player.watch_url),
+          TOKEN_SECRET,
+          player.room_id,
+        ),
+      ).toEqual({
+        ok: true,
+        claims: { room_id: player.room_id, seat: player.seat, name },
+      });
+    }
+    expect(alice.watch_url).not.toBe(bob.watch_url);
+  });
+
+  it('matched shows the settings the two players asked for', async () => {
+    const { env } = makeEnv();
+    const settings = { hands: 3, turn_seconds: 10, starting_stack: 100 };
+    const players = await pair(env, { settings });
+    for (const player of players) expect(player.settings).toEqual(settings);
+  });
+
+  it('wait and state of the room name the opponent and the same settings', async () => {
+    const { env } = makeEnv();
+    const settings = { hands: 3, turn_seconds: 10, starting_stack: 100 };
+    const players = await pair(env, { settings });
+    for (const player of players) {
+      for (const path of ['wait', 'state']) {
+        const response = await get(
+          env,
+          `/v1/rooms/${player.room_id}/${path}`,
+          player.token,
+        );
+        const status = Schema.decodeUnknownSync(RoomStatus)(
+          await response.json(),
+        );
+        expect(status.opponent_name).toBe(player.opponent_name);
+        expect(status.settings).toEqual(settings);
+      }
+    }
+  });
+
+  it('calling again after being matched answers the same matched, watch_url included', async () => {
+    const { env } = makeEnv();
+    const players = await pair(env);
+    for (const [index, name] of ['AlIce', 'bOB'].entries()) {
+      const again = await decodeQueue(await queue(env, name));
+      expect(again).toEqual(players[index]);
+      expect(players[index]?.watch_url).toEqual(expect.any(String));
+      expect(again.status === 'matched' && again.watch_url).toBe(
+        players[index]?.watch_url,
+      );
+    }
+  });
+
+  it('the waiter who is paired later gets the same watch_url on every call', async () => {
+    const { env } = makeEnv();
+    expect((await decodeQueue(await queue(env, 'Alice'))).status).toBe(
+      'waiting',
+    );
+    const bob = await decodeQueue(await queue(env, 'Bob'));
+    const first = await decodeQueue(await queue(env, 'Alice'));
+    const second = await decodeQueue(await queue(env, 'Alice'));
+    expect(bob.status).toBe('matched');
+    expect(first.status).toBe('matched');
+    expect(second).toEqual(first);
+    if (first.status !== 'matched' || bob.status !== 'matched')
+      throw new Error('Expected a pair');
+    expect(first.opponent_name).toBe('Bob');
+    expect(bob.opponent_name).toBe('Alice');
+    expect(first.watch_url).not.toBe(bob.watch_url);
   });
 });

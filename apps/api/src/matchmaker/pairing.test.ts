@@ -12,8 +12,22 @@ const WAIT_MS = 60;
 const HOLD_MS = 45_000;
 const ROOM = 'r_0123456789';
 const seats: [Seated, Seated] = [
-  { room_id: ROOM, seat: 0, token: 'alice-token' },
-  { room_id: ROOM, seat: 1, token: 'bob-token' },
+  {
+    room_id: ROOM,
+    seat: 0,
+    token: 'alice-token',
+    opponent_name: 'bob',
+    settings: SETTINGS_DEFAULTS,
+    watch_url: `https://web.test/watch/${ROOM}?token=alice-watch`,
+  },
+  {
+    room_id: ROOM,
+    seat: 1,
+    token: 'bob-token',
+    opponent_name: 'alice',
+    settings: SETTINGS_DEFAULTS,
+    watch_url: `https://web.test/watch/${ROOM}?token=bob-watch`,
+  },
 ];
 const opened = { ok: true as const, value: seats };
 const waiting = {
@@ -127,8 +141,22 @@ describe('MatchQueue (A2)', () => {
         .mockImplementation(async (first, second) => ({
           ok: true,
           value: [
-            { room_id: ROOM, seat: 0, token: `${first.name}-token` },
-            { room_id: ROOM, seat: 1, token: `${second.name}-token` },
+            {
+              room_id: ROOM,
+              seat: 0,
+              token: `${first.name}-token`,
+              opponent_name: second.name,
+              settings: SETTINGS_DEFAULTS,
+              watch_url: `https://web.test/watch/${ROOM}?token=${first.name}-watch`,
+            },
+            {
+              room_id: ROOM,
+              seat: 1,
+              token: `${second.name}-token`,
+              opponent_name: first.name,
+              settings: SETTINGS_DEFAULTS,
+              watch_url: `https://web.test/watch/${ROOM}?token=${second.name}-watch`,
+            },
           ],
         }));
       const queue = new MatchQueue(openMatch, { waitMs: WAIT_MS, isBanned });

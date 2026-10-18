@@ -3,7 +3,7 @@
 // the endpoint table, curl commands and error codes can't drift from the API.
 import { Exit, Schema } from 'effect';
 import { HttpApi } from 'effect/http-api';
-import { AdminAuth, CasinoApi, RoomAuth } from '../contract/api';
+import { AdminAuth, CasinoApi, RoomAuth, WatchAuth } from '../contract/api';
 import {
   apiError,
   ERROR_CODES,
@@ -16,7 +16,7 @@ import template from './template.md?raw' with { type: 'text' };
 interface Endpoint {
   readonly method: string;
   readonly path: string;
-  readonly auth: 'none' | 'room' | 'admin';
+  readonly auth: 'none' | 'room' | 'watch' | 'admin';
   readonly codes: ReadonlyArray<ErrorCode>;
 }
 
@@ -45,9 +45,11 @@ const reflectEndpoints = (): ReadonlyMap<string, Endpoint> => {
         path: endpoint.path,
         auth: keys.has(RoomAuth)
           ? 'room'
-          : keys.has(AdminAuth)
-            ? 'admin'
-            : 'none',
+          : keys.has(WatchAuth)
+            ? 'watch'
+            : keys.has(AdminAuth)
+              ? 'admin'
+              : 'none',
         codes: declaredCodes(errors),
       });
     },
@@ -66,6 +68,8 @@ const PURPOSE: Readonly<Record<string, string>> = {
   'room.state': 'See the table now, without waiting',
   'room.act': 'Send your action',
   'room.leave': 'Leave the match (counts as a loss)',
+  'watch.watch':
+    "Your owner's read-only view behind `watch_url`; not for players",
   'read.leaderboard': 'Top 100 by rating',
   'read.matches': 'Recent finished matches, 20 per page',
   'read.match': 'One match, hand by hand',
@@ -76,6 +80,7 @@ const PURPOSE: Readonly<Record<string, string>> = {
 const AUTH: Record<Endpoint['auth'], string> = {
   none: 'none',
   room: '`Authorization: Bearer $CASINO_TOKEN`',
+  watch: 'the token in `watch_url`',
   admin: 'admin key',
 };
 

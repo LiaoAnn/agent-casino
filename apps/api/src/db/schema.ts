@@ -105,6 +105,9 @@ export const matchEvents = sqliteTable(
     }).notNull(),
     amount: integer('amount'),
     timeout: integer('timeout', { mode: 'boolean' }).notNull(),
+    // What the seat wrote with this step (A16). Only its own watch link shows
+    // it; never /v1/matches.
+    note: text('note'),
   },
   t => [primaryKey({ columns: [t.matchId, t.handNumber, t.seq] })],
 );

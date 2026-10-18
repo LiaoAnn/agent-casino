@@ -8,6 +8,7 @@ import type {
   MatchOver,
   RoomStatus,
   TestSettings,
+  WatchResponse,
 } from '../contract/schemas';
 import { RESERVED_NAMES } from '../contract/schemas';
 import type { MatchRecordInput, RecordedMatch } from '../db/records';
@@ -24,6 +25,7 @@ import {
 } from '../holdem/match';
 import { replay } from '../holdem/replay';
 import { viewFor } from '../holdem/view';
+import { type HandNotes, watchView } from './watch';
 
 // What the referee needs from DurableObjectStorage.
 export interface RoomStorage {
@@ -76,7 +78,8 @@ interface Turn {
 
 // The room as one JSON value under KEY. Finished hands (the match record of
 // casino-api A15) are kept apart, one per key `hand:<hand_number>`, so this
-// value stays well under the DO's 128 KiB per value on 200-hand matches.
+// value stays well under the DO's 128 KiB per value on 200-hand matches; so
+// are each seat's notes of a hand (A16), under `notes:<hand_number>:<seat>`.
 interface RoomData {
   room_id: string;
   invite_code: string;
@@ -131,6 +134,7 @@ interface ActionInput {
   turn_id: string;
   type: Action['type'];
   amount?: number;
+  note?: string;
 }
 
 type ActionAcceptedBody = typeof ActionAccepted.Type;
@@ -140,7 +144,7 @@ type MatchOverBody = typeof MatchOver.Type;
 // call to its referee).
 export type RoomApi = Pick<
   RoomReferee,
-  'create' | 'join' | 'status' | 'act' | 'leave' | 'abort'
+  'create' | 'join' | 'status' | 'act' | 'leave' | 'abort' | 'watch'
 >;
 
 const KEY = 'room';
@@ -170,6 +174,8 @@ const fail = <C extends ApiError['code']>(error: ApiError<C>) => ({
 });
 
 const waitPath = (data: RoomData) => `GET /v1/rooms/${data.room_id}/wait`;
+
+const notesKey = (hand: number, seat: Seat) => `notes:${hand}:${seat}`;
 
 const accepted = (data: RoomData): ActionAcceptedBody => ({
   status: 'accepted',
@@ -238,7 +244,7 @@ export class RoomReferee {
     invite_code: string;
   }): Promise<
     Result<
-      { seat: 1 },
+      { seat: 1; opponent_name: string; settings: RoomSettings },
       | 'room_not_found'
       | 'wrong_invite_code'
       | 'room_full'
@@ -278,7 +284,11 @@ export class RoomReferee {
       );
     }
     await this.#save(this.#start(data, input.name, this.#now()));
-    return ok({ seat: 1 });
+    return ok({
+      seat: 1,
+      opponent_name: data.names[0],
+      settings: data.settings,
+    });
   }
 
   // Seats `name` in seat 1 and deals hand 1; `at` (epoch ms) is when.
@@ -426,7 +436,16 @@ export class RoomReferee {
         ),
       );
     }
-    await this.#save(done.data, done.finishedHands);
+    // A16: the note goes with the step this action becomes in the hand.
+    const notes: Record<string, HandNotes> = {};
+    if (input.note !== undefined) {
+      const key = notesKey(match.handNumber, seat);
+      notes[key] = {
+        ...(await this.#storage.get<HandNotes>(key)),
+        [match.history.length]: input.note,
+      };
+    }
+    await this.#save(done.data, done.finishedHands, notes);
     return ok(accepted(data));
   }
 
@@ -485,6 +504,53 @@ export class RoomReferee {
     return ok(null);
   }
 
+  // A16: the owner's view of `seat`. Answers at once, and still after the
+  // hour that ends the seats' tokens (A8); not a seat's request, so chaos
+  // leaves it alone.
+  async watch(
+    seat: Seat,
+  ): Promise<Result<WatchResponse, 'room_not_found' | 'unavailable'>> {
+    const loaded = await this.#load();
+    if (!loaded) return fail(roomNotFound());
+    const stored = await this.#stored(await this.#settle(loaded));
+    if (!stored.ok) return stored;
+    const data = stored.value;
+    const { match, ended } = data;
+    const notes: Record<number, HandNotes> = {};
+    for (let n = 1; n <= (match?.handNumber ?? 0); n++) {
+      const hand = await this.#storage.get<HandNotes>(notesKey(n, seat));
+      if (hand) notes[n] = hand;
+    }
+    return ok(
+      watchView({
+        room_id: data.room_id,
+        seat,
+        names: data.names,
+        settings: data.settings,
+        seed: data.seed,
+        match,
+        hands: match ? await this.#hands(match) : [],
+        notes,
+        deadline: data.turn?.seat === seat ? data.turn.deadline : null,
+        ended: ended && {
+          result: seatResult(ended),
+          final_stacks: ended.final_stacks,
+          ratings: data.recorded?.ratings ?? null,
+        },
+      }),
+    );
+  }
+
+  // The finished hands of the match, in order.
+  async #hands(match: MatchState): Promise<HandRecord[]> {
+    const hands: HandRecord[] = [];
+    for (let n = 1; n <= match.handNumber; n++) {
+      const hand = await this.#storage.get<HandRecord>(`hand:${n}`);
+      if (hand) hands.push(hand);
+    }
+    return hands;
+  }
+
   // A11 fail_request_every: counts the seat's requests and refuses every
   // Nth one before anything else. This 503 is made on purpose, unlike the one
   // client.ts answers when the DO can't be reached.
@@ -523,6 +589,8 @@ export class RoomReferee {
     return {
       status: 'waiting',
       room_status: turn.room_status,
+      opponent_name: turn.opponent_name,
+      settings: turn.settings,
       to_act_seat: turn.to_act_seat,
       hand_number: turn.hand_number,
       view: turn.view,
@@ -696,10 +764,17 @@ export class RoomReferee {
     const loaded = await this.#load();
     if (!loaded || !unrecorded(loaded)) return true;
     const { match, ended } = loaded;
-    const hands: HandRecord[] = [];
-    for (let n = 1; n <= match.handNumber; n++) {
-      const hand = await this.#storage.get<HandRecord>(`hand:${n}`);
-      if (hand) hands.push(hand);
+    const hands = await this.#hands(match);
+    const notes: NonNullable<MatchRecordInput['notes']> = [];
+    for (const { hand_number } of hands) {
+      for (const seat of [0, 1] as const) {
+        const hand = await this.#storage.get<HandNotes>(
+          notesKey(hand_number, seat),
+        );
+        for (const [seq, note] of Object.entries(hand ?? {})) {
+          notes.push({ hand_number, seq: Number(seq), note });
+        }
+      }
     }
     const final: Ended = replays(match, hands)
       ? ended
@@ -720,6 +795,7 @@ export class RoomReferee {
         ended_at: new Date(final.at).toISOString(),
         final_stacks: final.final_stacks,
         hands,
+        ...(notes.length > 0 && { notes }),
       });
     } catch (error) {
       console.error(`Room ${loaded.room_id}: storing the match failed`, error);
@@ -760,9 +836,11 @@ export class RoomReferee {
 
   // Every change goes through here, so a match that just ended is stored
   // here, before the caller answers (A10).
+  // `notes`: values to store under their keys in the same commit.
   async #save(
     unsettled: RoomData,
     unsettledHands: HandRecord[] = [],
+    notes: Record<string, HandNotes> = {},
   ): Promise<void> {
     // An absent seat may be next to act: it is played before anyone looks.
     const due = this.#due(unsettled);
@@ -777,6 +855,9 @@ export class RoomReferee {
     const writes = [
       ...finishedHands.map(hand =>
         this.#storage.put(`hand:${hand.hand_number}`, hand),
+      ),
+      ...Object.entries(notes).map(([key, value]) =>
+        this.#storage.put(key, value),
       ),
       this.#storage.put(KEY, data),
       alarm === null
@@ -921,6 +1002,12 @@ const roomNotFound = () =>
     'Check the room_id, or open a room with POST /v1/rooms',
   );
 
+// A16: who the seat plays, and with what settings.
+const seatFields = (data: RoomData, seat: Seat) => ({
+  opponent_name: data.names[otherSeat(seat)] ?? null,
+  settings: data.settings,
+});
+
 // What `state` and `wait` answer to `seat` (A15).
 function statusFor(data: RoomData, seat: Seat): RoomStatus {
   const { match, turn } = data;
@@ -929,6 +1016,7 @@ function statusFor(data: RoomData, seat: Seat): RoomStatus {
     return {
       status: 'waiting',
       room_status: 'waiting',
+      ...seatFields(data, seat),
       to_act_seat: null,
       hand_number: null,
       view: null,
@@ -938,6 +1026,7 @@ function statusFor(data: RoomData, seat: Seat): RoomStatus {
   const seen = viewFor(match, seat);
   const common = {
     room_status: 'playing' as const,
+    ...seatFields(data, seat),
     to_act_seat: seen.to_act_seat,
     hand_number: seen.hand_number,
     view: seen.view,
@@ -983,6 +1072,7 @@ function matchOver(data: RoomData, ended: Ended, seat: Seat): MatchOverBody {
   return {
     status: 'match_over',
     room_status: ended.reason === 'void' ? 'void' : 'finished',
+    ...seatFields(data, seat),
     to_act_seat: null,
     hand_number: seen?.hand_number ?? null,
     view: seen?.view ?? null,

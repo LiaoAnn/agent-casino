@@ -482,3 +482,80 @@ describe('T13 S1: replay, record, then match_over', () => {
     },
   );
 });
+
+describe('T23: notes go to record (A16)', () => {
+  type Noted = { hand_number: number; seq: number; note: string };
+
+  // Plays by hand: hand 1 checks and calls to the flop, then folds; hand 2
+  // folds at once. Every action carries a note naming its place; returns them.
+  const playWithNotes = async (t: Fixture, seats: readonly Seat[] = [0, 1]) => {
+    const expected: Noted[] = [];
+    for (let i = 0; i < 50; i++) {
+      let moved = false;
+      for (const seat of seats) {
+        const response = await t.referee.status(seat, { wait: false });
+        if (!response.ok) throw new Error(JSON.stringify(response));
+        const status = response.value;
+        if (status.status === 'match_over') return expected;
+        if (status.status !== 'your_turn' || status.view === null) continue;
+        const hand_number = status.hand_number as number;
+        const seq = status.view.history.length;
+        const note = `note h${hand_number} q${seq}`;
+        const fold = status.view.street === 'flop' || hand_number === 2;
+        const type = fold
+          ? 'fold'
+          : status.legal_actions.some(action => action.type === 'check')
+            ? 'check'
+            : 'call';
+        const accepted = await t.referee.act(seat, {
+          turn_id: status.turn_id,
+          type,
+          note,
+        });
+        expect(accepted).toMatchObject({ ok: true });
+        expected.push({ hand_number, seq, note });
+        moved = true;
+      }
+      if (!moved) break;
+    }
+    return expected;
+  };
+
+  it('hands the notes of both seats over, by hand and position in the hand (blinds count)', async () => {
+    const t = fixture(undefined, { ...SETTINGS, hands: 2 });
+    await t.open();
+    const expected = await playWithNotes(t);
+    // preflop call + check, a flop fold, then hand 2's opening fold.
+    expect(expected.length).toBeGreaterThanOrEqual(4);
+    expect(t.spy).toHaveBeenCalledTimes(1);
+    const { notes } = t.spy.mock.calls[0][0];
+    const sort = (list: Noted[]) =>
+      [...list].sort((a, b) => a.hand_number - b.hand_number || a.seq - b.seq);
+    expect(sort(notes ?? [])).toEqual(sort(expected));
+    // The first action of hand 1 is the third step, after the two blinds.
+    expect(notes).toContainEqual({
+      hand_number: 1,
+      seq: 2,
+      note: 'note h1 q2',
+    });
+  });
+
+  it('leaves out the note of a refused action and of a step sent without one', async () => {
+    const t = fixture(undefined, { ...SETTINGS, hands: 1 });
+    await t.open();
+    const current = await t.turn();
+    expect(
+      await t.referee.act(current.seat, {
+        turn_id: current.turn_id,
+        type: 'raise',
+        amount: 3,
+        note: 'refused note',
+      }),
+    ).toMatchObject({ ok: false });
+    await t.step({ type: 'call' });
+    await t.step({ type: 'fold' });
+    expect(t.spy).toHaveBeenCalledTimes(1);
+    const { notes } = t.spy.mock.calls[0][0];
+    expect(notes ?? []).toEqual([]);
+  });
+});

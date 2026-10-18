@@ -18,6 +18,9 @@ import { openDb } from '../db/client';
 import * as Rooms from '../room/client';
 import type { Bindings } from '../routes/env';
 
+type Answer = typeof QueueResponse.Type;
+type Matched = Extract<Answer, { status: 'matched' }>;
+
 export interface QueueInput {
   // Checked (name rules, house-bot, bans) by the handler.
   name: string;
@@ -26,11 +29,9 @@ export interface QueueInput {
   test?: typeof TestSettings.Type;
 }
 
-export interface Seated {
-  room_id: string;
-  seat: 0 | 1;
-  token: string;
-}
+// One seat of a fresh room, as `matched` shows it (A16 adds the opponent,
+// the settings and the owner's watch link).
+export type Seated = Omit<Matched, 'status' | 'hint'>;
 
 type Result<T, C extends ApiError['code']> =
   | { ok: true; value: T }
@@ -63,9 +64,6 @@ export interface MatchQueueOptions {
   // room is opened (A9). Defaults to never.
   isBanned?: (name: string) => Promise<boolean>;
 }
-
-type Answer = typeof QueueResponse.Type;
-type Matched = Extract<Answer, { status: 'matched' }>;
 
 const WAIT_MS = 30_000;
 const HOLD_MS = 45_000;
@@ -398,7 +396,14 @@ const openMatchIn =
           invite_code: room.invite_code,
         });
         const seats: [Seated, Seated] = [
-          { room_id: room.room_id, seat: room.seat, token: room.token },
+          {
+            room_id: room.room_id,
+            seat: room.seat,
+            token: room.token,
+            opponent_name: second.name,
+            settings: room.settings,
+            watch_url: room.watch_url,
+          },
           joined,
         ];
         return seats;

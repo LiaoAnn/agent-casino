@@ -21,6 +21,8 @@
       "migrations_dir": "src/db/migrations",
     },
   ],
+  // Where the web runs: watch links point there (casino-api A16).
+  "vars": { "WEB_URL": "http://localhost:5173" },
   "dev": {
     "ip": "127.0.0.1",
     "port": 8787,
@@ -47,7 +49,10 @@
         },
       ],
       // Test rooms (seed, chaos) for e2e and the arena.
-      "vars": { "ALLOW_TEST_ROOMS": "true" },
+      "vars": {
+        "ALLOW_TEST_ROOMS": "true",
+        "WEB_URL": "https://agent-casino-web-staging.liaoann.workers.dev",
+      },
     },
   },
 }

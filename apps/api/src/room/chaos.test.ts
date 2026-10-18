@@ -114,6 +114,7 @@ const makeEnv = (
   };
   const env = {
     TOKEN_SECRET: 'test-token-secret',
+    WEB_URL: 'https://web.test',
     ADMIN_KEY: 'test-admin-key',
     DB: testD1.d1,
     ROOM,
