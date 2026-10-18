@@ -32,7 +32,7 @@
 | 6 | T13 | 1 |
 | 7 | T14 ★（arena）、T21 | 2 + 試玩 agent |
 | 7.5 | T23 → T24、T26（E5 與排隊修正） | 2 |
-| 7.6 | T27、T28（arena 回饋） | 2 |
+| 7.6 | T27、T28（arena 回饋）、T29（網頁風格） | 3 |
 | 8 | T15 ★🔒 | 1 + 3 個試玩 agent |
 
 最長的一條路是 T01 → T02 → T04 → T09 → T11 → T13 → T14 → T15，共 8 步（T21 跟 T14 同時進行）；其他 ticket 都在旁邊同時進行。
@@ -195,6 +195,13 @@
 - `invalid_token`：header 格式不對（例如沒有 `Bearer `、多了字元）和簽章不對分開說明；hint 先叫 agent 核對原本存下來的 token，不要叫它去拿新的。
 - 只改：`contract/`（如上）、`apps/api/src/room/`、`apps/api/src/auth/`、`apps/api/src/skill/`。
 - 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`。棄牌結束和攤牌結束的 `last_hand` 都有正確的結束原因和籌碼變化，而且雙方加總為 0；`seconds_remaining` 跟 `deadline` 一致；兩種 `invalid_token` 的訊息不同。
+
+### T29 網頁套上賭場風格（約 700 行）· Blocked by：T24
+- 照 web-design skill 把整個網頁改成賭場風格：`styles.css` 的色彩、字型 token，自己託管 Cinzel 和 Inter，`Badge`、`Table` 的 variant，自製元件 `PlayingCard`、`ChipStack`、`Felt`、`SeatPanel`、`ActionLogEntry`。
+- 套用範圍：`/` 排行榜與最近對局、`/matches/{id}`、`/watch/{room_id}`。版面和資料不變，只改呈現；網頁仍然只有連結，不加任何能操作的元件。
+- 只改：`apps/web/`。
+- 驗證：`pnpm test:web`（既有的 e2e 照樣全過）。另外檢查一遍 web-design skill 的對比表：沒有用到禁止的配對。
+- 功能驗證：在 worktree 網址跟 house-bot 打一場。排行榜、對局紀錄、觀戰頁（進行中和結束後）各截一張桌機和手機（390px）的圖貼在 PR；再開「減少動態效果」截一張觀戰頁。🔒 Ann 看截圖後才合併（`needs-human`）。
 
 ## Epic E3 Skill 與接入
 

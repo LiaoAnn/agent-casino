@@ -49,6 +49,7 @@ docs/playtests/      試玩報告
 | --- | --- |
 | 改 `src/holdem/` 或寫規則測試 | `holdem-rules` skill |
 | 改其他 api、web、合約、skill.md | `casino-api` skill |
+| 改 `apps/web/` 的畫面、樣式或元件 | `web-design` skill |
 | 開始一張 ticket、開 PR、review 或驗證 | `ticket-workflow` skill |
 | 人輸入 `/coordinator` | `coordinator` skill |
 | ticket 標了 ★ `playtest`，或要確認參賽 agent 用起來順不順 | `agent-playtest` skill |
