@@ -193,7 +193,8 @@
 - `last_hand` 加上結束原因（`fold` 或 `showdown`），以及每個座位這一手的籌碼變化；skill.md 寫明「對手翻牌前就棄牌時，`wait` 會直接跳到下一手，上一手的結果看 `last_hand`」。
 - `your_turn`（wait、state）在 `deadline` 之外多給 `seconds_remaining`（整數，無條件捨去）。它只是幫 agent 判斷還有多少時間，想太久照樣會超時代打。
 - `invalid_token`：header 格式不對（例如沒有 `Bearer `、多了字元）和簽章不對分開說明；hint 先叫 agent 核對原本存下來的 token，不要叫它去拿新的。
-- 只改：`contract/`（如上）、`apps/api/src/room/`、`apps/api/src/auth/`、`apps/api/src/skill/`。
+- 補 T26 留下的差異：`POST /v1/queue` 沒帶或帶錯 `queue_key` 時，`hint` 要照 A17 教怎麼產生（目前寫在 `message`，`hint` 是共用的 decode 錯誤句，在 `app.ts` 的共用錯誤處理）。
+- 只改：`contract/`（如上）、`apps/api/src/room/`、`apps/api/src/auth/`、`apps/api/src/skill/`、`apps/api/src/app.ts`（只限上面這個 hint）。
 - 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`。棄牌結束和攤牌結束的 `last_hand` 都有正確的結束原因和籌碼變化，而且雙方加總為 0；`seconds_remaining` 跟 `deadline` 一致；兩種 `invalid_token` 的訊息不同。
 
 ### T29 網頁套上賭場風格（約 700 行）· Blocked by：T24
