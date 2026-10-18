@@ -1,6 +1,7 @@
 // The referee of one room (casino-api skill: 房間狀態, wait, state, actions,
 // A3, A8, A9, A15). Kept free of `cloudflare:workers` so it runs in Node
 // tests; the Room DO hands it its storage and forwards its RPC calls here.
+import { isDeepStrictEqual } from 'node:util';
 import { type ApiError, apiError } from '../contract/errors';
 import type {
   ActionAccepted,
@@ -8,6 +9,9 @@ import type {
   RoomStatus,
   TestSettings,
 } from '../contract/schemas';
+import { RESERVED_NAMES } from '../contract/schemas';
+import type { MatchRecordInput, RecordedMatch } from '../db/records';
+import { randomAction } from '../holdem/bot';
 import {
   type Action,
   applyAction,
@@ -18,6 +22,7 @@ import {
   type Seat,
   startMatch,
 } from '../holdem/match';
+import { replay } from '../holdem/replay';
 import { viewFor } from '../holdem/view';
 
 // What the referee needs from DurableObjectStorage.
@@ -33,6 +38,11 @@ export interface RefereeOptions {
   // How long `wait` holds a request before answering `waiting`.
   waitMs?: number;
   now?: () => number;
+  // Stores a finished match and its Elo (the Room DO passes the Matchmaker's
+  // recordMatch, A10). Without it a match counts as stored and unrated.
+  record?: (input: MatchRecordInput) => Promise<RecordedMatch>;
+  // Where house-bot draws its random but legal actions from (A1).
+  random?: () => number;
 }
 
 interface RoomSettings {
@@ -49,6 +59,8 @@ export interface CreateInput {
   seed: string;
   // Only where ALLOW_TEST_ROOMS=true; `chaos` is for T11.
   test: typeof TestSettings.Type | null;
+  // A1: house-bot takes seat 1 and the match starts at once.
+  opponent?: 'bot';
 }
 
 type Result<T, C extends ApiError['code']> =
@@ -90,6 +102,8 @@ interface RoomData {
   absent: [boolean, boolean];
   // What test.chaos (A11) has done so far.
   chaos_done: ChaosDone;
+  // Set once a played match is stored (A10); match_over shows its ratings.
+  recorded: { ratings: RecordedMatch['ratings'] } | null;
 }
 
 interface ChaosDone {
@@ -130,11 +144,15 @@ export type RoomApi = Pick<
 >;
 
 const KEY = 'room';
+// A1: the built-in bot, always in seat 1 of the rooms opened with it.
+const HOUSE_BOT = RESERVED_NAMES[0];
 const WAIT_MS = 30_000;
 // 狀況處理: three timeouts in a row and the seat is absent.
 const ABSENT_AFTER_TIMEOUTS = 3;
 // 狀況處理: a room nobody joins in 5 minutes is dissolved.
 const DISSOLVE_AFTER_MS = 5 * 60 * 1000;
+// How soon a failed write of a finished match is tried again.
+const RECORD_RETRY_MS = 10_000;
 // A8: an hour after the room ended, its tokens stop working.
 const EXPIRES_AFTER_END_MS = 60 * 60 * 1000;
 const PLAY_AGAIN =
@@ -157,7 +175,11 @@ export class RoomReferee {
   readonly #storage: RoomStorage;
   readonly #waitMs: number;
   readonly #now: () => number;
+  readonly #recordMatch: (input: MatchRecordInput) => Promise<RecordedMatch>;
+  readonly #random: () => number;
   #data: Promise<RoomData | undefined> | undefined;
+  // The write of the finished match in flight, so it runs once at a time.
+  #recording: Promise<boolean> | undefined;
   // Resolved, then cleared, whenever the room changes; `wait` listens here.
   readonly #listeners = new Set<() => void>();
 
@@ -165,6 +187,9 @@ export class RoomReferee {
     this.#storage = storage;
     this.#waitMs = options.waitMs ?? WAIT_MS;
     this.#now = options.now ?? Date.now;
+    this.#recordMatch =
+      options.record ?? (async () => ({ rated: false, ratings: null }));
+    this.#random = options.random ?? Math.random;
   }
 
   // Fails only when the room id is already taken.
@@ -178,8 +203,9 @@ export class RoomReferee {
         ),
       );
     }
-    await this.#save({
-      ...input,
+    const { opponent, ...room } = input;
+    const data: RoomData = {
+      ...room,
       names: [input.name, null],
       match: null,
       turn: null,
@@ -194,7 +220,11 @@ export class RoomReferee {
         fake_waits: null,
         requests: [0, 0],
       },
-    });
+      recorded: null,
+    };
+    await this.#save(
+      opponent === 'bot' ? this.#start(data, HOUSE_BOT, this.#now()) : data,
+    );
     return ok(null);
   }
 
@@ -242,18 +272,18 @@ export class RoomReferee {
         ),
       );
     }
+    await this.#save(this.#start(data, input.name, this.#now()));
+    return ok({ seat: 1 });
+  }
+
+  // Seats `name` in seat 1 and deals hand 1; `at` (epoch ms) is when.
+  #start(data: RoomData, name: string, at: number): RoomData {
     const match = startMatch({
       seed: data.seed,
       hands: data.settings.hands,
       startingStack: data.settings.starting_stack,
     });
-    await this.#save(
-      this.#nextTurn(
-        { ...data, names: [data.names[0], input.name], match },
-        this.#now(),
-      ),
-    );
-    return ok({ seat: 1 });
+    return this.#nextTurn({ ...data, names: [data.names[0], name], match }, at);
   }
 
   // `wait: true` holds the request until it is the seat's turn, the match is
@@ -313,13 +343,17 @@ export class RoomReferee {
   > {
     const dropped = await this.#dropRequest(seat);
     if (dropped) return fail(dropped);
-    const opened = await this.#open();
+    // A3 first: the resend of an accepted action answers the same even
+    // while the finished match can't be stored.
+    const opened = await this.#open({ record: false });
     if (!opened.ok) return opened;
-    const data = opened.value;
-    const used = data.used_turns[input.turn_id];
+    const used = opened.value.used_turns[input.turn_id];
     if (used?.seat === seat && !used.timeout) {
-      return ok({ ...accepted(data), duplicate: true });
+      return ok({ ...accepted(opened.value), duplicate: true });
     }
+    const stored = await this.#stored(opened.value);
+    if (!stored.ok) return stored;
+    const data = stored.value;
     const state = statusFor(data, seat);
     if (data.ended) return fail(matchOverError(state));
     const { match, turn } = data;
@@ -415,7 +449,9 @@ export class RoomReferee {
         : { reason: 'cancelled', final_stacks: calledOff(data) },
     );
     await this.#save(next);
-    return ok(matchOver(next, next.ended, seat));
+    const saved = await this.#load();
+    if (!saved?.ended || unrecorded(saved)) return fail(recordFailed());
+    return ok(matchOver(saved, saved.ended, seat));
   }
 
   // A9: an admin calls the match off; it is void and never rated. Unlike the
@@ -491,7 +527,13 @@ export class RoomReferee {
 
   // Loads the room, refusing a missing one or one that ended over an hour
   // ago (A8).
-  async #open(): Promise<Result<RoomData, 'room_not_found' | 'invalid_token'>> {
+  // A10: no match_over before a played match is stored, unless `record` is
+  // false; then the caller calls #stored itself.
+  async #open(
+    options: { record: boolean } = { record: true },
+  ): Promise<
+    Result<RoomData, 'room_not_found' | 'invalid_token' | 'unavailable'>
+  > {
     const loaded = await this.#load();
     if (!loaded) return fail(roomNotFound());
     const data = await this.#settle(loaded);
@@ -504,7 +546,15 @@ export class RoomReferee {
         ),
       );
     }
-    return ok(data);
+    return options.record ? this.#stored(data) : ok(data);
+  }
+
+  // The room once a match that ended is stored; `unavailable` if it can't
+  // be yet.
+  async #stored(data: RoomData): Promise<Result<RoomData, 'unavailable'>> {
+    if (!unrecorded(data)) return ok(data);
+    if (!(await this.#record())) return fail(recordFailed());
+    return ok((await this.#load()) ?? data);
   }
 
   // The one way an action is applied: by a player now, by the server on a
@@ -552,7 +602,8 @@ export class RoomReferee {
   // Plays everything due by now, each at the time it fell due, so a late
   // alarm or a request ends up where an alarm on time would have: a turn past
   // its deadline, and an absent seat's turn the moment it starts, get the
-  // timeout action (holdem-rules 超時動作: check if it can, else fold).
+  // timeout action (holdem-rules 超時動作: check if it can, else fold);
+  // house-bot plays its turn the moment it starts (A1).
   #due(data: RoomData) {
     let next = data;
     const finishedHands: HandRecord[] = [];
@@ -569,23 +620,34 @@ export class RoomReferee {
         break;
       }
       if (!turn) break;
-      const at = next.absent[turn.seat]
+      const bot = turn.seat === 1 && next.names[1] === HOUSE_BOT;
+      const atOnce = bot || next.absent[turn.seat];
+      const at = atOnce
         ? turn.deadline - next.settings.turn_seconds * 1000
         : turn.deadline;
-      if (!next.absent[turn.seat] && this.#now() < turn.deadline) break;
-      const canCheck = legalActions(match).some(a => a.type === 'check');
-      const done = this.#perform(
-        next,
-        match,
-        turn,
-        { type: canCheck ? 'check' : 'fold' },
-        at,
-        { timeout: true },
-      );
+      if (!atOnce && this.#now() < turn.deadline) break;
+      const legal = legalActions(match);
+      const canCheck = legal.some(a => a.type === 'check');
+      const done = bot
+        ? this.#perform(
+            next,
+            match,
+            turn,
+            randomAction(legal, this.#random),
+            at,
+          )
+        : this.#perform(
+            next,
+            match,
+            turn,
+            { type: canCheck ? 'check' : 'fold' },
+            at,
+            { timeout: true },
+          );
       if (!done.ok) {
-        // A timeout action the engine refuses is a bug of ours: the match is
-        // void (狀況處理: 平台出錯) rather than stuck.
-        console.error(`Room ${next.room_id}: timeout refused: ${done.message}`);
+        // An action of the server's own the engine refuses is a bug of ours:
+        // the match is void (狀況處理: 平台出錯) rather than stuck.
+        console.error(`Room ${next.room_id}: action refused: ${done.message}`);
         next = this.#finish(next, at, {
           reason: 'void',
           final_stacks: calledOff(next),
@@ -608,7 +670,65 @@ export class RoomReferee {
   // The Room DO's alarm: play what is due and set the next alarm.
   async alarm(): Promise<void> {
     const data = await this.#load();
-    if (data) await this.#settle(data);
+    if (!data) return;
+    const settled = await this.#settle(data);
+    // A save already tried to store a match that just ended.
+    if (settled === data && unrecorded(data)) await this.#record();
+  }
+
+  // A10: replays the match from its seed and actions, then stores it; a
+  // replay that differs from what was played makes the match void. True once
+  // stored; false if storing failed, to be tried again by the next request
+  // or the alarm.
+  #record(): Promise<boolean> {
+    this.#recording ??= this.#writeRecord().finally(() => {
+      this.#recording = undefined;
+    });
+    return this.#recording;
+  }
+
+  async #writeRecord(): Promise<boolean> {
+    const loaded = await this.#load();
+    if (!loaded || !unrecorded(loaded)) return true;
+    const { match, ended } = loaded;
+    const hands: HandRecord[] = [];
+    for (let n = 1; n <= match.handNumber; n++) {
+      const hand = await this.#storage.get<HandRecord>(`hand:${n}`);
+      if (hand) hands.push(hand);
+    }
+    const final: Ended = replays(match, hands)
+      ? ended
+      : { reason: 'void', final_stacks: ended.final_stacks, at: ended.at };
+    if (final !== ended) {
+      console.error(
+        `Room ${loaded.room_id}: replay differs; the match is void`,
+      );
+    }
+    let recorded: RecordedMatch;
+    try {
+      recorded = await this.#recordMatch({
+        match_id: loaded.room_id,
+        players: [loaded.names[0], loaded.names[1] ?? ''],
+        settings: loaded.settings,
+        seed: loaded.seed,
+        result: seatResult(final),
+        ended_at: new Date(final.at).toISOString(),
+        final_stacks: final.final_stacks,
+        hands,
+      });
+    } catch (error) {
+      console.error(`Room ${loaded.room_id}: storing the match failed`, error);
+      await this.#storage.setAlarm(this.#now() + RECORD_RETRY_MS);
+      return false;
+    }
+    // Reloaded: other requests may have saved while D1 was busy.
+    const latest = (await this.#load()) ?? loaded;
+    await this.#save({
+      ...latest,
+      ended: final,
+      recorded: { ratings: recorded.ratings },
+    });
+    return true;
   }
 
   // Where every match ends; `at` is when (epoch ms).
@@ -625,8 +745,8 @@ export class RoomReferee {
     return this.#data;
   }
 
-  // Every change goes through here, so this is where recording a match that
-  // just ended (T13: replay, D1) belongs, before the caller answers.
+  // Every change goes through here, so a match that just ended is stored
+  // here, before the caller answers (A10).
   async #save(
     unsettled: RoomData,
     unsettledHands: HandRecord[] = [],
@@ -640,7 +760,7 @@ export class RoomReferee {
     this.#listeners.clear();
     for (const listener of listeners) listener();
     // Started together, the DO commits these writes as one.
-    const alarm = alarmAt(data);
+    const alarm = alarmAt(data, this.#now());
     const writes = [
       ...finishedHands.map(hand =>
         this.#storage.put(`hand:${hand.hand_number}`, hand),
@@ -657,6 +777,8 @@ export class RoomReferee {
       this.#data = undefined;
       throw error;
     }
+    // A failure is retried by the next request or the alarm.
+    if (unrecorded(data)) await this.#record();
   }
 
   #nextChange() {
@@ -686,10 +808,19 @@ export class RoomReferee {
   }
 }
 
+// A played match that ended but is not stored yet. Rooms nobody joined are
+// never stored (A9).
+const unrecorded = (
+  data: RoomData,
+): data is RoomData & { match: MatchState; ended: Ended } =>
+  data.ended !== null && data.match !== null && !data.recorded;
+
 // When the room next has something due (epoch ms), or null for nothing.
-const alarmAt = (data: RoomData): number | null =>
+const alarmAt = (data: RoomData, now: number): number | null =>
   data.ended
-    ? null
+    ? unrecorded(data)
+      ? now + RECORD_RETRY_MS
+      : null
     : data.match
       ? (data.turn?.deadline ?? null)
       : data.created_at + DISSOLVE_AFTER_MS;
@@ -718,6 +849,47 @@ const matchOverError = (state?: RoomStatus) =>
     `Read the result in state. ${PLAY_AGAIN}`,
     state ? { state } : {},
   );
+
+const recordFailed = () =>
+  apiError(
+    'unavailable',
+    'The match is over, but its result could not be saved yet',
+    'Resend the same request in a few seconds',
+  );
+
+// The finished hands and the hand in progress, played again from the seed,
+// must end up exactly where the match did (資料與積分: 賽後重播).
+function replays(match: MatchState, hands: HandRecord[]): boolean {
+  const events = [
+    ...hands.flatMap(hand => hand.events),
+    ...(match.over ? [] : match.history),
+  ];
+  try {
+    const result = replay(match.config, events);
+    // Through JSON, as storage keeps it: absent and undefined are the same.
+    const plain = (value: unknown): unknown =>
+      JSON.parse(JSON.stringify(value));
+    return (
+      result.ok &&
+      isDeepStrictEqual(plain(result.state), plain(match)) &&
+      isDeepStrictEqual(plain(result.hands), plain(hands))
+    );
+  } catch {
+    return false;
+  }
+}
+
+// The result from the seats' point of view (matches, A15).
+function seatResult(ended: Ended): MatchRecordInput['result'] {
+  if (ended.reason === 'void' || ended.reason === 'cancelled') {
+    return ended.reason;
+  }
+  if (ended.reason === 'left') {
+    return ended.loser === 0 ? 'seat1_win' : 'seat0_win';
+  }
+  const [a, b] = ended.final_stacks;
+  return a > b ? 'seat0_win' : a < b ? 'seat1_win' : 'draw';
+}
 
 const roomNotFound = () =>
   apiError(
@@ -794,7 +966,7 @@ function matchOver(data: RoomData, ended: Ended, seat: Seat): MatchOverBody {
     match_id: data.room_id,
     result,
     final_stacks: ended.final_stacks,
-    ratings: null,
+    ratings: data.recorded?.ratings ?? null,
     last_hand: seen?.last_hand ?? null,
     hint: matchOverHint(ended, result),
   };

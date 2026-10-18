@@ -1,0 +1,288 @@
+// T13 S2: casino-api A1/A3/A9/A15 and holdem-rules timeout actions.
+// Only public referee methods and the pure holdem engine are exercised.
+import { describe, expect, it, vi } from 'vitest';
+import type { RoomStatus } from '../contract/schemas';
+import type { MatchRecordInput, RecordedMatch } from '../db/records';
+import { randomAction } from '../holdem/bot';
+import {
+  type Action,
+  applyAction,
+  type HandRecord,
+  legalActions,
+  startMatch,
+} from '../holdem/match';
+import { viewFor } from '../holdem/view';
+import { RoomReferee, type RoomStorage } from './referee';
+
+const SETTINGS = { hands: 4, turn_seconds: 5, starting_stack: 40 };
+const INPUT = {
+  room_id: 'r_bottest001',
+  invite_code: 'ABC234',
+  name: 'Alice',
+  settings: SETTINGS,
+  seed: '0'.repeat(64),
+  test: null,
+};
+
+class MemoryStorage implements RoomStorage {
+  readonly data = new Map<string, unknown>();
+  alarm: number | null = null;
+
+  async get<T>(key: string): Promise<T | undefined> {
+    return structuredClone(this.data.get(key)) as T | undefined;
+  }
+
+  async put<T>(key: string, value: T): Promise<void> {
+    this.data.set(key, structuredClone(value));
+  }
+
+  async setAlarm(time: number): Promise<void> {
+    this.alarm = time;
+  }
+
+  async deleteAlarm(): Promise<void> {
+    this.alarm = null;
+  }
+}
+
+const sequence = (values: readonly number[]) => {
+  let index = 0;
+  return vi.fn(() => values[index++ % values.length] ?? 0.6);
+};
+
+function fixture(values: readonly number[] = [0.6], settings = SETTINGS) {
+  const storage = new MemoryStorage();
+  const clock = { ms: Date.parse('2026-10-18T00:00:00Z') };
+  const random = sequence(values);
+  const recorded: RecordedMatch = { rated: false, ratings: null };
+  const record = vi.fn(async (_input: MatchRecordInput) => recorded);
+  // Variables permit testing the proposed optional interface before S2 exists.
+  const options = { now: () => clock.ms, waitMs: 1, random, record };
+  const referee = new RoomReferee(storage, options);
+  const create = async (bot = true) => {
+    const input = {
+      ...INPUT,
+      settings,
+      ...(bot ? { opponent: 'bot' as const } : {}),
+    };
+    expect(await referee.create(input)).toEqual({ ok: true, value: null });
+  };
+  const status = async (wait = false): Promise<typeof RoomStatus.Type> => {
+    const response = await referee.status(0, { wait });
+    if (!response.ok) throw new Error(JSON.stringify(response.error));
+    return response.value;
+  };
+  const turn = async () => {
+    const current = await status();
+    expect(current.status).toBe('your_turn');
+    if (current.status !== 'your_turn') throw new Error('Expected human turn');
+    return current;
+  };
+  const act = async (action: Action) => {
+    const current = await turn();
+    expect(
+      await referee.act(0, { turn_id: current.turn_id, ...action }),
+    ).toMatchObject({
+      ok: true,
+      value: { status: 'accepted' },
+    });
+  };
+  return {
+    referee,
+    storage,
+    clock,
+    random,
+    record,
+    recorded,
+    create,
+    status,
+    turn,
+    act,
+  };
+}
+
+describe('T13 S2: house-bot in RoomReferee', () => {
+  it('starts immediately with seat 1 occupied and rejects an invite-code join as room_full', async () => {
+    const t = fixture();
+    await t.create();
+    expect(await t.status()).toMatchObject({
+      status: 'your_turn',
+      room_status: 'playing',
+      to_act_seat: 0,
+      view: { my_seat: 0, opponent_stack: 38 },
+    });
+    expect(
+      await t.referee.join({ name: 'Bob', invite_code: INPUT.invite_code }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: 'room_full' },
+    });
+  });
+
+  it('acts before the human action returns, including when the bot opens the next hand', async () => {
+    const t = fixture();
+    await t.create();
+    const now = t.clock.ms;
+    await t.act({ type: 'call' });
+    // Big blind checks preflop, then acts first on the flop.
+    expect(t.random).toHaveBeenCalledTimes(2);
+    const afterCall = await t.status(true);
+    expect(afterCall).toMatchObject({ status: 'your_turn', to_act_seat: 0 });
+    expect(
+      afterCall.view?.history.filter(
+        event => event.seat === 1 && event.type !== 'post_blind',
+      ),
+    ).toEqual([
+      { seat: 1, street: 'preflop', type: 'check' },
+      { seat: 1, street: 'flop', type: 'check' },
+    ]);
+    await t.act({ type: 'fold' });
+    // Seat 1 is the small blind in hand 2 and must call before act returns.
+    expect(t.random).toHaveBeenCalledTimes(3);
+    expect(await t.status(true)).toMatchObject({
+      status: 'your_turn',
+      hand_number: 2,
+      to_act_seat: 0,
+      view: {
+        history: [
+          { seat: 1, street: 'preflop', type: 'post_blind', amount: 1 },
+          { seat: 0, street: 'preflop', type: 'post_blind', amount: 2 },
+          { seat: 1, street: 'preflop', type: 'call', amount: 1 },
+        ],
+      },
+    });
+    expect(t.clock.ms).toBe(now);
+  });
+
+  it.each([
+    { label: 'check/call', values: [0.6] },
+    { label: 'minimum raises and folds', values: [0.1, 0.2, 0.9, 0.6] },
+    {
+      label: 'all-in and intermediate raises',
+      values: [0.1, 0.4, 0.1, 0.7, 0.5, 0.9, 0.6],
+    },
+  ])(
+    'matches randomAction for $label, persists legal non-timeout bot events and records house-bot',
+    async ({ values }) => {
+      // Running twice also pins down the same-stream/same-actions guarantee.
+      const runs: HandRecord[][] = [];
+      for (let run = 0; run < 2; run++) {
+        const t = fixture(values);
+        const oracleRandom = sequence(values);
+        let engine = startMatch({
+          seed: INPUT.seed,
+          hands: SETTINGS.hands,
+          startingStack: SETTINGS.starting_stack,
+        });
+        const hands: HandRecord[] = [];
+        const step = (action: Action) => {
+          if (engine.toAct === null) throw new Error('Expected engine turn');
+          const applied = applyAction(engine, engine.toAct, action);
+          if (!applied.ok) throw new Error(applied.message);
+          engine = applied.state;
+          hands.push(...applied.finishedHands);
+        };
+        await t.create();
+        for (let n = 0; !engine.over; n++) {
+          expect(n).toBeLessThan(500);
+          const turn = await t.turn();
+          expect(turn).toMatchObject(viewFor(engine, 0));
+          expect(turn.legal_actions).toEqual(legalActions(engine));
+          const action: Action = legalActions(engine).some(
+            a => a.type === 'check',
+          )
+            ? { type: 'check' }
+            : { type: 'call' };
+          step(action);
+          while (!engine.over && engine.toAct === 1) {
+            step(randomAction(legalActions(engine), oracleRandom));
+          }
+          expect(
+            await t.referee.act(0, { turn_id: turn.turn_id, ...action }),
+          ).toMatchObject({
+            ok: true,
+            value: { status: 'accepted' },
+          });
+          // Check before status()/wait() can trigger any deferred bot action.
+          expect(t.random.mock.calls.length).toBe(
+            oracleRandom.mock.calls.length,
+          );
+          const actual = await t.status(true);
+          expect(actual).toMatchObject(viewFor(engine, 0));
+          expect(actual.status).toBe(engine.over ? 'match_over' : 'your_turn');
+        }
+        expect(t.record).toHaveBeenCalledTimes(1);
+        expect(t.record.mock.calls[0][0]).toMatchObject({
+          match_id: INPUT.room_id,
+          players: [INPUT.name, 'house-bot'],
+          hands,
+          final_stacks: engine.stacks,
+        });
+        const botEvents = hands
+          .flatMap(hand => hand.events)
+          .filter(event => event.seat === 1 && event.type !== 'post_blind');
+        expect(botEvents.length).toBeGreaterThan(0);
+        expect(botEvents.every(event => event.timeout !== true)).toBe(true);
+        expect(await t.status()).toMatchObject({
+          status: 'match_over',
+          room_status: 'finished',
+          ratings: t.recorded.ratings,
+        });
+        expect(t.storage.alarm).toBeNull();
+        runs.push(hands);
+      }
+      expect(runs[0]).toEqual(runs[1]);
+    },
+  );
+
+  it('times out only the human, checks when possible, and finishes automatically after three consecutive timeouts', async () => {
+    const t = fixture([0.6], { ...SETTINGS, hands: 10 });
+    await t.create();
+    let thirdDeadline = 0;
+    for (let n = 0; n < 3; n++) {
+      const turn = await t.turn();
+      expect(t.storage.alarm).toBe(Date.parse(turn.deadline));
+      t.clock.ms = Date.parse(turn.deadline);
+      thirdDeadline = t.clock.ms;
+      await t.referee.alarm();
+      if (n < 2) expect((await t.status()).room_status).toBe('playing');
+    }
+    expect(await t.status(true)).toMatchObject({
+      status: 'match_over',
+      room_status: 'finished',
+      ratings: null,
+    });
+    expect(t.clock.ms).toBe(thirdDeadline);
+    expect(t.record).toHaveBeenCalledTimes(1);
+    const input = t.record.mock.calls[0][0];
+    expect(input.players).toEqual([INPUT.name, 'house-bot']);
+    const events = input.hands.flatMap(hand => hand.events);
+    const timeouts = events.filter(event => event.timeout);
+    expect(timeouts.length).toBeGreaterThan(3);
+    expect(timeouts.every(event => event.seat === 0)).toBe(true);
+    expect(timeouts[0]).toMatchObject({ type: 'fold', timeout: true });
+    expect(timeouts[1]).toMatchObject({ type: 'check', timeout: true });
+    expect(t.storage.alarm).toBeNull();
+  });
+
+  it('without opponent keeps waiting for a human join and never draws bot randomness', async () => {
+    const t = fixture();
+    await t.create(false);
+    expect(await t.status()).toMatchObject({
+      status: 'waiting',
+      room_status: 'waiting',
+      view: null,
+    });
+    expect(
+      await t.referee.join({ name: 'Bob', invite_code: INPUT.invite_code }),
+    ).toMatchObject({ ok: true, value: { seat: 1 } });
+    await t.act({ type: 'call' });
+    expect(await t.status()).toMatchObject({
+      status: 'waiting',
+      room_status: 'playing',
+      to_act_seat: 1,
+    });
+    expect(t.random).not.toHaveBeenCalled();
+    expect(t.record).not.toHaveBeenCalled();
+  });
+});

@@ -178,6 +178,7 @@ export const openRoom = (
     name: string;
     settings?: typeof Settings.Type;
     test?: typeof TestSettings.Type;
+    opponent?: 'bot';
   },
 ) =>
   Effect.gen(function* () {
@@ -196,6 +197,7 @@ export const openRoom = (
         settings,
         seed: newSeed(test),
         test,
+        ...(input.opponent && { opponent: input.opponent }),
       }),
     );
     const token = yield* sign(env, { room_id, seat: 0, name: input.name });

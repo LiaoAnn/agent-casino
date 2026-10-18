@@ -4,7 +4,6 @@
 import { Effect } from 'effect';
 import { HttpApiBuilder } from 'effect/http-api';
 import { CasinoApi, RoomSession } from '../contract/api';
-import { apiError } from '../contract/errors';
 import * as Rooms from '../room/client';
 import type { RoomApi } from '../room/referee';
 import { WorkerEnv } from './env';
@@ -20,19 +19,14 @@ export const createRoom = HttpApiBuilder.handler(
       const badName = Rooms.nameError(payload.name, 'POST /v1/rooms');
       if (badName) return yield* Effect.fail(badName);
       yield* refuseBanned(env, payload.name, 'POST /v1/rooms');
-      if (payload.opponent === 'bot') {
-        return yield* Effect.fail(
-          apiError(
-            'invalid_request',
-            'Playing against the house bot is not available yet',
-            'Leave out "opponent" and give room_id and invite_code to another player',
-          ),
-        );
-      }
       const room = yield* Rooms.openRoom(env, payload);
+      const wait = `GET /v1/rooms/${room.room_id}/wait`;
       return {
         ...room,
-        hint: `Give room_id and invite_code to your opponent, then call GET /v1/rooms/${room.room_id}/wait`,
+        hint:
+          payload.opponent === 'bot'
+            ? `You play house-bot and the match has started. Call ${wait} for your first turn`
+            : `Give room_id and invite_code to your opponent, then call ${wait}`,
       };
     }),
 );

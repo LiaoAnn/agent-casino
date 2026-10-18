@@ -395,20 +395,82 @@ describe('POST /v1/rooms', () => {
     );
   });
 
-  // The house bot comes with T13; until then the request is refused instead
-  // of silently opening a room that waits for a human.
-  it('opponent "bot" is not available yet: 400 invalid_request in English', async () => {
-    const { env } = makeEnv();
-    const body = await expectError(
-      await post(env, '/v1/rooms', {
+  it('opponent "bot" creates a room and wait/actions play it through match_over without a join', async () => {
+    const t = makeEnv({ allowTestRooms: true, waitMs: 1 });
+    const room = await createRoom(t.env, {
+      opponent: 'bot',
+      settings: { hands: 2, turn_seconds: 5, starting_stack: 40 },
+      test: { seed: SEED },
+    });
+    expect(room.room_id).toMatch(/^r_[a-z0-9]{10}$/);
+    expect(room.invite_code).toMatch(/^[A-HJ-NP-Z2-9]{6}$/);
+    expect(room.seat).toBe(0);
+    expect(room.token.length).toBeGreaterThan(0);
+    expect(room.hint).toContain(`GET /v1/rooms/${room.room_id}/wait`);
+    expect(
+      (await state(t.env, room.room_id, room.token)).status.room_status,
+    ).toBe('playing');
+    await expectError(
+      await post(t.env, `/v1/rooms/${room.room_id}/join`, {
+        name: 'bob',
+        invite_code: room.invite_code,
+      }),
+      'room_full',
+    );
+    const startedAt = t.clock.ms;
+    let finished = false;
+    for (let step = 0; step < 100; step++) {
+      const { status } = await wait(t.env, room.room_id, room.token);
+      if (status.status === 'match_over') {
+        expect(status).toMatchObject({
+          room_status: 'finished',
+          match_id: room.room_id,
+          ratings: null,
+        });
+        expect(['win', 'loss', 'draw']).toContain(status.result);
+        expect(status.final_stacks[0] + status.final_stacks[1]).toBe(80);
+        finished = true;
+        break;
+      }
+      expect(status.status).toBe('your_turn');
+      if (status.status !== 'your_turn')
+        throw new Error('Bot left the human waiting');
+      expect(status.to_act_seat).toBe(0);
+      expect(status.view?.history.some(event => event.timeout)).toBe(false);
+      await act(t.env, room.room_id, room.token, {
+        turn_id: status.turn_id,
+        type: status.legal_actions.some(action => action.type === 'check')
+          ? 'check'
+          : 'call',
+      });
+    }
+    expect(finished).toBe(true);
+    expect(t.clock.ms).toBe(startedAt);
+  });
+
+  it.each(['house-bot', 'House-Bot'])(
+    'opponent "bot" still rejects the reserved player name %s',
+    async name => {
+      const { env } = makeEnv();
+      await expectError(
+        await post(env, '/v1/rooms', { game: 'holdem', name, opponent: 'bot' }),
+        'name_invalid',
+      );
+    },
+  );
+
+  it('opponent "bot" still rejects a banned player name before creating the room', async () => {
+    const t = makeEnv();
+    await banName(testD1.db, 'Alice');
+    await expectError(
+      await post(t.env, '/v1/rooms', {
         game: 'holdem',
-        name: 'alice',
+        name: 'ALICE',
         opponent: 'bot',
       }),
-      'invalid_request',
+      'name_banned',
     );
-    expect(`${body.message} ${body.hint}`).not.toMatch(/[\u3000-\u9fff]/);
-    expect(`${body.message} ${body.hint}`).toMatch(/[A-Za-z]{3}/);
+    expect(t.puts).toHaveLength(0);
   });
 
   it.each(['house-bot', 'House-Bot'])(

@@ -7,4 +7,6 @@
   "observability": {
     "enabled": true,
   },
+  // The api Worker, which the server functions of src/data.ts read from.
+  "services": [{ "binding": "API", "service": "agent-casino-api" }],
 }
