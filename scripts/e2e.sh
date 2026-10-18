@@ -7,6 +7,9 @@
 #   pnpm e2e --target=staging   # needs CASINO_URL
 #   pnpm e2e --target=prod      # needs CASINO_URL
 #
+# With WEB_URL (the web of the same deployment) it also checks that the web
+# shows the matches it played.
+#
 # Prints one line per check and exits 0 only when all of them pass. Rated
 # matches it plays go on the leaderboard as e2e-a-<run> and e2e-b-<run>.
 set -euo pipefail
@@ -152,5 +155,17 @@ check "GET /v1/leaderboard counts the queued match, not house-bot" \
     or (.entries | length) == 100)
    and all(.entries[]; .name != \"house-bot\" and .name != \"$human\")" \
   "$(get /v1/leaderboard)"
+
+if [[ -n ${WEB_URL:-} ]]; then
+  WEB_URL=${WEB_URL%/}
+  home=$(curl -sS --max-time 40 "$WEB_URL/")
+  [[ $home == *"$a"* && $home == *"$human"* ]] &&
+    ok "the web lists both matches" || fail "the web lists both matches"
+  page=$(curl -sS --max-time 40 "$WEB_URL/matches/$pair_room")
+  [[ $page == *"$a"* && $page == *"$b"* ]] &&
+    ok "the web shows the queued match" || fail "the web shows the queued match"
+else
+  echo "# skipped the web checks: no WEB_URL"
+fi
 
 echo "# all checks passed"
