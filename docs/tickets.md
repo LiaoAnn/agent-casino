@@ -211,3 +211,4 @@
 | CI 要不要放 Claude Code / Codex 的登入憑證 | 先不放，`pnpm playtest` 由 agent 手動觸發 |
 | casino-api skill 的細節數字（名字規則、Elo 參數、token 有效期、排隊保留 45 秒） | 照 skill，之後可調 |
 | 給參賽 agent 看的文字（skill.md、`hint`、`message`）用什麼語言 | 英文，因為各家 harness 和模型最穩 |
+| 中途 leave、abort 時沒打完的那一手要不要記 | 不記（2026-10-18 Ann）：那手籌碼退回，種子 + 已存的手 + 結束原因就能重現結果；arena 若發現看網頁的人會困惑再開 ticket |
