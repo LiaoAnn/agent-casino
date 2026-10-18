@@ -247,16 +247,16 @@ describe('POST /v1/queue (S1)', () => {
   });
 
   it.each([3, 10])(
-    'compares effective environment settings with requested hands=%s',
+    'compares effective environment settings with requested max_hands=%s',
     async hands => {
       const { env } = makeEnv(
         undefined,
-        { DEFAULT_SETTINGS_JSON: '{"hands":3}' },
+        { DEFAULT_SETTINGS_JSON: '{"max_hands":3}' },
         hands === 3 ? PAIR_WAIT_MS : WAIT_MS,
       );
       const responses = await Promise.all([
         queue(env, 'Alice'),
-        queue(env, 'Bob', { settings: { hands } }),
+        queue(env, 'Bob', { settings: { max_hands: hands } }),
       ]);
       const [alice, bob] = await Promise.all(responses.map(decodeQueue));
       if (hands === 3) {
@@ -349,8 +349,10 @@ describe('POST /v1/queue (S1)', () => {
   it('does not pair different settings', async () => {
     const { env } = makeEnv(undefined, {}, WAIT_MS);
     const responses = await Promise.all([
-      queue(env, 'Alice', { settings: { starting_stack: 100 } }),
-      queue(env, 'Bob', { settings: { starting_stack: 200 } }),
+      queue(env, 'Alice', {
+        settings: { blind_every: 50, starting_stack: 100 },
+      }),
+      queue(env, 'Bob', { settings: { blind_every: 50, starting_stack: 200 } }),
     ]);
     for (const response of responses)
       expect((await decodeQueue(response)).status).toBe('waiting');
@@ -358,7 +360,12 @@ describe('POST /v1/queue (S1)', () => {
 
   it('opens a room using the matching requested settings', async () => {
     const { env } = makeEnv();
-    const settings = { hands: 3, turn_seconds: 10, starting_stack: 100 };
+    const settings = {
+      max_hands: 3,
+      turn_seconds: 10,
+      blind_every: 50,
+      starting_stack: 100,
+    };
     const players = await pair(env, { settings });
     for (const player of players) {
       const response = await get(
@@ -445,14 +452,24 @@ describe('POST /v1/queue: opponent, settings and watch link (A16)', () => {
 
   it('matched shows the settings the two players asked for', async () => {
     const { env } = makeEnv();
-    const settings = { hands: 3, turn_seconds: 10, starting_stack: 100 };
+    const settings = {
+      max_hands: 3,
+      turn_seconds: 10,
+      blind_every: 50,
+      starting_stack: 100,
+    };
     const players = await pair(env, { settings });
     for (const player of players) expect(player.settings).toEqual(settings);
   });
 
   it('wait and state of the room name the opponent and the same settings', async () => {
     const { env } = makeEnv();
-    const settings = { hands: 3, turn_seconds: 10, starting_stack: 100 };
+    const settings = {
+      max_hands: 3,
+      turn_seconds: 10,
+      blind_every: 50,
+      starting_stack: 100,
+    };
     const players = await pair(env, { settings });
     for (const player of players) {
       for (const path of ['wait', 'state']) {
@@ -582,7 +599,12 @@ describe('POST /v1/queue queue_key (A17)', () => {
 
   it('rejects another key while waiting, preserves settings and lets the owner retrieve matched', async () => {
     const { env } = makeEnv(undefined, {}, WAIT_MS);
-    const settings = { hands: 3, turn_seconds: 10, starting_stack: 100 };
+    const settings = {
+      max_hands: 3,
+      turn_seconds: 10,
+      blind_every: 50,
+      starting_stack: 100,
+    };
     expect(
       (
         await decodeQueue(
@@ -592,7 +614,7 @@ describe('POST /v1/queue queue_key (A17)', () => {
     ).toBe('waiting');
     const conflict = await queue(env, 'ALICE', {
       queue_key: OTHER_KEY,
-      settings: { hands: 10 },
+      settings: { max_hands: 10 },
     });
     const bob = await decodeQueue(await queue(env, 'Bob', { settings }));
     const alice = await decodeQueue(
@@ -623,5 +645,46 @@ describe('POST /v1/queue queue_key (A17)', () => {
     expect(again.watch_url).toBe(alice.watch_url);
     expect(JSON.stringify(again)).not.toContain('queue-key-alice');
     expect(again).not.toHaveProperty('queue_key');
+  });
+});
+
+describe('freezeout queue settings', () => {
+  it.each([10, null, '10', { max_hands: 10 }])(
+    'rejects settings.hands=%j with a migration hint',
+    async hands => {
+      const { env } = makeEnv();
+      const response = await queue(env, 'alice', {
+        settings: { max_hands: 50, hands },
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        status: 'error',
+        code: 'invalid_request',
+        hint: expect.stringContaining('max_hands'),
+      });
+    },
+  );
+
+  it.each([{ blind_every: 0 }, { blind_every: 51 }, { max_hands: 201 }])(
+    'rejects out-of-range freezeout settings %j',
+    async settings => {
+      const { env } = makeEnv();
+      const response = await queue(env, 'alice', { settings });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ code: 'invalid_request' });
+    },
+  );
+
+  it('fills all four defaults in matched responses', async () => {
+    const { env } = makeEnv();
+    const players = await pair(env);
+    for (const player of players) {
+      expect(player.settings).toEqual({
+        starting_stack: 40,
+        blind_every: 5,
+        max_hands: 50,
+        turn_seconds: 60,
+      });
+    }
   });
 });

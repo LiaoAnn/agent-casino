@@ -273,7 +273,7 @@ const startRoom = async (t: TestEnv, body: Record<string, unknown> = {}) => {
 const chaosRoom = (
   t: TestEnv,
   chaos: Record<string, unknown>,
-  settings: Record<string, unknown> = { hands: 2, turn_seconds: 10 },
+  settings: Record<string, unknown> = { max_hands: 2, turn_seconds: 10 },
 ) => startRoom(t, { settings, test: { seed: SEED, chaos } });
 
 // --- More helpers -----------------------------------------------------------
@@ -301,7 +301,7 @@ const waitPath = (roomId: string) => `/v1/rooms/${roomId}/wait`;
 
 // Hand 1 position right after the join.
 const opening = () =>
-  startMatch({ seed: SEED, hands: 2, startingStack: STACK });
+  startMatch({ seed: SEED, maxHands: 2, blindEvery: 50, startingStack: STACK });
 
 // --- reject_first_action --------------------------------------------------------
 
@@ -666,7 +666,7 @@ describe('A11 DEFAULT_SETTINGS_JSON: the default settings of every room on the d
         vars: {
           ALLOW_TEST_ROOMS: allow,
           DEFAULT_SETTINGS_JSON:
-            '{"turn_seconds":5,"hands":3,"starting_stack":100}',
+            '{"turn_seconds":5,"max_hands":3,"starting_stack":100}',
         },
       });
       const { roomId, tokens, joinedAt } = await startRoom(t);
@@ -799,7 +799,11 @@ describe('A11 misconfigured defaults are loud: POST /v1/rooms answers 500 intern
       value: '{"turn_seconds":1}',
       allow: undefined,
     },
-    { var: 'DEFAULT_SETTINGS_JSON', value: '{"hands":"many"}', allow: 'true' },
+    {
+      var: 'DEFAULT_SETTINGS_JSON',
+      value: '{"max_hands":"many"}',
+      allow: 'true',
+    },
     { var: 'DEFAULT_SETTINGS_JSON', value: '[]', allow: 'true' },
     { var: 'DEFAULT_TEST_JSON', value: '{not json', allow: 'true' },
     {

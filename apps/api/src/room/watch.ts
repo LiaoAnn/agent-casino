@@ -59,6 +59,7 @@ export function watchView(input: WatchInput): WatchResponse {
     if (!ended && hand.ended_by !== 'showdown') hole_cards[opponent] = null;
     return {
       hand_number: hand.hand_number,
+      blinds: hand.blinds,
       button_seat: hand.button_seat,
       board: hand.board,
       hole_cards,
@@ -77,6 +78,8 @@ export function watchView(input: WatchInput): WatchResponse {
     hand_number: seen?.hand_number ?? null,
     view: seen && {
       ...seen.view,
+      // A match that is over never raises the blinds again (A19).
+      ...(ended && { next_blinds_at_hand: null }),
       history: withNotes(seen.view.history, notes[seen.hand_number]),
     },
     hands,

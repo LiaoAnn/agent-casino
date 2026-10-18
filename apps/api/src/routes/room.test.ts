@@ -439,7 +439,7 @@ describe('POST /v1/rooms', () => {
       await post(env, '/v1/rooms', {
         game: 'holdem',
         name: 'alice',
-        settings: { hands: 0 },
+        settings: { max_hands: 0 },
       }),
       'invalid_request',
     );
@@ -461,7 +461,12 @@ describe('POST /v1/rooms', () => {
     const t = makeEnv({ allowTestRooms: true, waitMs: 1 });
     const room = await createRoom(t.env, {
       opponent: 'bot',
-      settings: { hands: 2, turn_seconds: 5, starting_stack: 40 },
+      settings: {
+        max_hands: 2,
+        turn_seconds: 5,
+        blind_every: 50,
+        starting_stack: 40,
+      },
       test: { seed: SEED },
     });
     expect(room.room_id).toMatch(/^r_[a-z0-9]{10}$/);
@@ -578,7 +583,12 @@ describe('room settings', () => {
   it('given settings are used (starting_stack 100, turn_seconds 30)', async () => {
     const t = makeEnv();
     const room = await createRoom(t.env, {
-      settings: { hands: 3, turn_seconds: 30, starting_stack: 100 },
+      settings: {
+        max_hands: 3,
+        turn_seconds: 30,
+        blind_every: 50,
+        starting_stack: 100,
+      },
     });
     const joinedAt = t.clock.ms;
     await joinRoom(t.env, room);
@@ -1031,12 +1041,13 @@ const errorState = (body: ErrorBody): Status => {
 
 // Replays `actions` (seat, action) in the engine from hand 1.
 const engineAfter = (
-  config: { seed: string; hands: number; startingStack?: number },
+  config: { seed: string; max_hands: number; startingStack?: number },
   actions: ReadonlyArray<readonly [Seat, Action]>,
 ): MatchState => {
   let match = startMatch({
     seed: config.seed,
-    hands: config.hands,
+    maxHands: config.max_hands,
+    blindEvery: 50,
     startingStack: config.startingStack ?? 40,
   });
   for (const [seat, action] of actions) {
@@ -1053,7 +1064,7 @@ const seededRoom = async (
   settings: Record<string, unknown> = {},
 ) => {
   const { room, joined } = await startedRoom(t, {
-    settings,
+    settings: { blind_every: 50, ...settings },
     test: { seed: SEED },
   });
   return { roomId: room.room_id, tokens: [room.token, joined.token] as const };
@@ -1090,7 +1101,7 @@ describe('POST /v1/rooms/{room_id}/actions: accepted', () => {
     expect(bob.turn_id).not.toBe(first.turn_id);
     expect(bob.to_act_seat).toBe(1);
     const expected = viewFor(
-      engineAfter({ seed: SEED, hands: 10 }, [[0, { type: 'call' }]]),
+      engineAfter({ seed: SEED, max_hands: 10 }, [[0, { type: 'call' }]]),
       1,
     );
     expect(bob.view).toEqual(expected.view);
@@ -1133,7 +1144,7 @@ describe('POST /v1/rooms/{room_id}/actions: accepted', () => {
     });
     const bob = await yourTurn(t.env, roomId, tokens[1]);
     const expected = viewFor(
-      engineAfter({ seed: SEED, hands: 10 }, [
+      engineAfter({ seed: SEED, max_hands: 10 }, [
         [0, { type: 'raise', amount: 6 }],
       ]),
       1,
@@ -1197,7 +1208,7 @@ describe('POST /v1/rooms/{room_id}/actions: the same turn_id twice (A3)', () => 
 
   it('after the match ended, the last accepted turn_id still answers accepted + duplicate:true', async () => {
     const t = makeEnv({ allowTestRooms: true });
-    const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 1 });
     const first = await yourTurn(t.env, roomId, tokens[0]);
     const accepted = await act(t.env, roomId, tokens[0], {
       turn_id: first.turn_id,
@@ -1385,7 +1396,7 @@ describe('POST /v1/rooms/{room_id}/actions: stale_turn', () => {
 describe('POST /v1/rooms/{room_id}/actions: finishing a 1-hand match by a fold', () => {
   const foldedMatch = async (waitMs = 300) => {
     const t = makeEnv({ allowTestRooms: true, waitMs });
-    const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 1 });
     const turn = await yourTurn(t.env, roomId, tokens[0]);
     return { t, roomId, tokens, turn };
   };
@@ -1423,7 +1434,7 @@ describe('POST /v1/rooms/{room_id}/actions: finishing a 1-hand match by a fold',
       turn_id: turn.turn_id,
       type: 'fold',
     });
-    const expectedEnd = engineAfter({ seed: SEED, hands: 1 }, [
+    const expectedEnd = engineAfter({ seed: SEED, max_hands: 1 }, [
       [0, { type: 'fold' }],
     ]);
     const results = ['loss', 'win'] as const;
@@ -1442,6 +1453,7 @@ describe('POST /v1/rooms/{room_id}/actions: finishing a 1-hand match by a fold',
         last_hand: {
           hand_number: 1,
           ended_by: 'fold',
+          blinds: [1, 2],
           winner_seat: 1,
           hole_cards: null,
           board: [],
@@ -1529,12 +1541,12 @@ describe('POST /v1/rooms/{room_id}/actions: a 1-hand match to showdown', () => {
 
   it('ends by showdown with both hole cards, engine stacks and the matching result', async () => {
     const t = makeEnv({ allowTestRooms: true });
-    const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 1 });
     const { actions, statuses } = await playPassive(t, roomId, tokens);
 
     // call, check, then check-check on flop, turn and river.
     expect(actions).toHaveLength(8);
-    const expected = engineAfter({ seed: SEED, hands: 1 }, actions);
+    const expected = engineAfter({ seed: SEED, max_hands: 1 }, actions);
     expect(expected.over).toBe(true);
     const deal = dealHand(SEED, 1);
     const [s0, s1] = expected.stacks;
@@ -1567,13 +1579,13 @@ describe('POST /v1/rooms/{room_id}/actions: a 1-hand match to showdown', () => {
 describe('POST /v1/rooms/{room_id}/actions: the next hand', () => {
   it('after seat 0 folds hand 1 of 2, seat 1 (button) acts first in hand 2', async () => {
     const t = makeEnv({ allowTestRooms: true });
-    const { roomId, tokens } = await seededRoom(t, { hands: 2 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 2 });
     const turn = await yourTurn(t.env, roomId, tokens[0]);
     await act(t.env, roomId, tokens[0], {
       turn_id: turn.turn_id,
       type: 'fold',
     });
-    const expected = engineAfter({ seed: SEED, hands: 2 }, [
+    const expected = engineAfter({ seed: SEED, max_hands: 2 }, [
       [0, { type: 'fold' }],
     ]);
 
@@ -1592,6 +1604,7 @@ describe('POST /v1/rooms/{room_id}/actions: the next hand', () => {
     expect(bob.last_hand).toMatchObject({
       hand_number: 1,
       ended_by: 'fold',
+      blinds: [1, 2],
       winner_seat: 1,
     });
     expect(bob.legal_actions).toEqual(legalActions(expected));
@@ -1608,7 +1621,7 @@ describe('POST /v1/rooms/{room_id}/actions: the next hand', () => {
 
   it("a pending wait of seat 1 answers your_turn for hand 2 right after seat 0's fold", async () => {
     const t = makeEnv({ allowTestRooms: true, waitMs: 2000 });
-    const { roomId, tokens } = await seededRoom(t, { hands: 2 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 2 });
     const turn = await yourTurn(t.env, roomId, tokens[0]);
     const pending = wait(t.env, roomId, tokens[1]);
     await sleep(50);
@@ -1714,13 +1727,13 @@ describe('POST /v1/rooms/{room_id}/leave while playing', () => {
 
   it('after a finished hand, final_stacks are the stacks before the abandoned hand and last_hand is the finished one', async () => {
     const t = makeEnv({ allowTestRooms: true });
-    const { roomId, tokens } = await seededRoom(t, { hands: 3 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 3 });
     const turn = await yourTurn(t.env, roomId, tokens[0]);
     await act(t.env, roomId, tokens[0], {
       turn_id: turn.turn_id,
       type: 'fold',
     });
-    const expected = engineAfter({ seed: SEED, hands: 3 }, [
+    const expected = engineAfter({ seed: SEED, max_hands: 3 }, [
       [0, { type: 'fold' }],
     ]);
     // Hand 2: seat 1 is to act; seat 1 raises, then seat 0 leaves.
@@ -1764,7 +1777,7 @@ describe('POST /v1/rooms/{room_id}/leave while playing', () => {
 
   it('the opponent wins even with fewer chips', async () => {
     const t = makeEnv({ allowTestRooms: true });
-    const { roomId, tokens } = await seededRoom(t, { hands: 3 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 3 });
     const turn = await yourTurn(t.env, roomId, tokens[0]);
     await act(t.env, roomId, tokens[0], {
       turn_id: turn.turn_id,
@@ -1852,7 +1865,7 @@ describe('POST /v1/rooms/{room_id}/leave while waiting for an opponent', () => {
   it('final_stacks use the room starting_stack', async () => {
     const t = makeEnv();
     const room = await createRoom(t.env, {
-      settings: { starting_stack: 100 },
+      settings: { blind_every: 50, starting_stack: 100 },
     });
     const over = await leave(t.env, room.room_id, room.token);
     expect(over.final_stacks).toEqual([100, 100]);
@@ -1916,7 +1929,7 @@ describe('POST /v1/rooms/{room_id}/leave while waiting for an opponent', () => {
 describe('POST /v1/rooms/{room_id}/leave after the match finished', () => {
   it('answers 409 match_over and the real result is unchanged', async () => {
     const t = makeEnv({ allowTestRooms: true });
-    const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 1 });
     const turn = await yourTurn(t.env, roomId, tokens[0]);
     await act(t.env, roomId, tokens[0], {
       turn_id: turn.turn_id,
@@ -1954,7 +1967,7 @@ describe('a room that ended over an hour ago answers invalid_token (A8)', () => 
     {
       case: 'a normal finish',
       end: async (t: TestEnv) => {
-        const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+        const { roomId, tokens } = await seededRoom(t, { max_hands: 1 });
         const turn = await yourTurn(t.env, roomId, tokens[0]);
         await act(t.env, roomId, tokens[0], {
           turn_id: turn.turn_id,
@@ -2062,7 +2075,7 @@ describe('a room that ended over an hour ago answers invalid_token (A8)', () => 
 
   it('after a normal finish, the duplicate of the accepted turn_id still answers accepted at end + 59 min', async () => {
     const t = makeEnv({ allowTestRooms: true });
-    const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 1 });
     const turn = await yourTurn(t.env, roomId, tokens[0]);
     const accepted = await act(t.env, roomId, tokens[0], {
       turn_id: turn.turn_id,
@@ -2102,7 +2115,7 @@ describe('a room that ended over an hour ago answers invalid_token (A8)', () => 
     // out, so the players act every 200 s (under turn_seconds 300) until the
     // 2-hand match ends normally, at least 50 minutes after it started.
     const { roomId, tokens } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 300,
     });
     const startedAt = t.clock.ms;
@@ -2124,7 +2137,7 @@ describe('a room that ended over an hour ago answers invalid_token (A8)', () => 
     // spec requires timeouts: a room left idle for 2 hours would be played
     // out, so the players act every 240 s (under turn_seconds 300) for 2 hours.
     const { roomId, tokens } = await seededRoom(t, {
-      hands: 200,
+      max_hands: 200,
       turn_seconds: 300,
     });
     const startedAt = t.clock.ms;
@@ -2147,7 +2160,7 @@ describe('a room that ended over an hour ago answers invalid_token (A8)', () => 
 describe('the one-hour limit is exact (A8 "超過 1 小時")', () => {
   it('at end + 60 min the room answers normally; at end + 60 min + 1 ms it answers 401 invalid_token', async () => {
     const t = makeEnv({ allowTestRooms: true });
-    const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 1 });
     const turn = await yourTurn(t.env, roomId, tokens[0]);
     await act(t.env, roomId, tokens[0], {
       turn_id: turn.turn_id,
@@ -2182,7 +2195,7 @@ describe('joining a room that ended checks the invite code first', () => {
       case: 'a finished match',
       end: async (t: TestEnv) => {
         const room = await createRoom(t.env, {
-          settings: { hands: 1 },
+          settings: { max_hands: 1 },
           test: { seed: SEED },
         });
         await joinRoom(t.env, room);
@@ -2308,7 +2321,8 @@ describe('Durable Object storage stays under the per-value limit', () => {
   it(`a full ${HANDS}-hand match with starting_stack ${STACK} never puts a value over 128 KiB`, async () => {
     const t = makeEnv({ allowTestRooms: true, waitMs: 10 });
     const { roomId, tokens } = await seededRoom(t, {
-      hands: HANDS,
+      max_hands: HANDS,
+      blind_every: 50,
       starting_stack: STACK,
     });
     const actions: Array<readonly [Seat, Action]> = [];
@@ -2354,7 +2368,7 @@ describe('Durable Object storage stays under the per-value limit', () => {
     expect(over.room_status).toBe('finished');
     expect(over.final_stacks[0] + over.final_stacks[1]).toBe(2 * STACK);
     const expected = engineAfter(
-      { seed: SEED, hands: HANDS, startingStack: STACK },
+      { seed: SEED, max_hands: HANDS, startingStack: STACK },
       actions,
     );
     expect(over.final_stacks).toEqual(expected.stacks);
@@ -2444,7 +2458,7 @@ describe('the seed stays secret during the match', () => {
       await post(t.env, '/v1/rooms', {
         game: 'holdem',
         name: 'alice',
-        settings: { hands: 2 },
+        settings: { max_hands: 2 },
         test: { seed: SECRET_SEED },
       }),
     );
@@ -2637,17 +2651,27 @@ describe('the seed stays secret during the match', () => {
 // --- T23: opponent_name, settings and watch_url (A16) --------------------------
 
 describe('opponent_name and settings in room responses (A16)', () => {
-  const SETTINGS = { hands: 3, turn_seconds: 30, starting_stack: 100 };
+  const SETTINGS = {
+    max_hands: 3,
+    turn_seconds: 30,
+    blind_every: 50,
+    starting_stack: 100,
+  };
 
   it('POST /v1/rooms answers the settings in use: the given ones, or the defaults', async () => {
     const { env } = makeEnv();
     expect((await createRoom(env, { settings: SETTINGS })).settings).toEqual(
       SETTINGS,
     );
-    expect((await createRoom(env)).settings).toEqual(SETTINGS_DEFAULTS);
+    expect((await createRoom(env)).settings).toEqual({
+      starting_stack: 40,
+      blind_every: 5,
+      max_hands: 50,
+      turn_seconds: 60,
+    });
     expect(
-      (await createRoom(env, { settings: { hands: 5 } })).settings,
-    ).toEqual({ ...SETTINGS_DEFAULTS, hands: 5 });
+      (await createRoom(env, { settings: { max_hands: 5 } })).settings,
+    ).toEqual({ ...SETTINGS_DEFAULTS, max_hands: 5 });
   });
 
   it('join answers opponent_name (the creator) and the room settings', async () => {
@@ -2759,4 +2783,39 @@ describe('opponent_name and settings in room responses (A16)', () => {
       );
     }
   });
+});
+
+// T34 A19: the removed key must be rejected even alongside valid settings.
+describe('freezeout settings requests', () => {
+  it.each([10, null, '10', { max_hands: 10 }])(
+    'rejects settings.hands=%j with a migration hint',
+    async hands => {
+      const { env } = makeEnv();
+      const response = await post(env, '/v1/rooms', {
+        game: 'holdem',
+        name: 'alice',
+        settings: { max_hands: 50, hands },
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        status: 'error',
+        code: 'invalid_request',
+        hint: expect.stringContaining('max_hands'),
+      });
+    },
+  );
+
+  it.each([{ blind_every: 0 }, { blind_every: 51 }, { max_hands: 201 }])(
+    'rejects out-of-range freezeout settings %j',
+    async settings => {
+      const { env } = makeEnv();
+      const response = await post(env, '/v1/rooms', {
+        game: 'holdem',
+        name: 'alice',
+        settings,
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ code: 'invalid_request' });
+    },
+  );
 });

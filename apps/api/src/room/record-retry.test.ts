@@ -50,7 +50,12 @@ async function fixture(
       room_id: 'r_retry00001',
       invite_code: 'ABC234',
       name: 'Alice',
-      settings: { hands: 2, turn_seconds: 10, starting_stack: 40 },
+      settings: {
+        max_hands: 2,
+        turn_seconds: 10,
+        blind_every: 50,
+        starting_stack: 40,
+      },
       seed: '0'.repeat(64),
       test: null,
     }),

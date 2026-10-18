@@ -30,6 +30,10 @@ const READ_THE_SKILL = 'Read GET /skill.md for the endpoints and examples';
 const QUEUE_KEY_HINT =
   'Make one queue_key once with `openssl rand -hex 16`, save it, and send the same one on every POST /v1/queue';
 
+// A19: `settings.hands` from before the freezeout format.
+const HANDS_HINT =
+  'Remove settings.hands: a match now runs until one player has no chips, with blinds doubling every blind_every hands. To cap its length, send settings.max_hands instead';
+
 const formatIssue = SchemaIssue.makeFormatterStandardSchemaV1();
 
 const INPUT_KINDS: Record<string, string> = {
@@ -72,7 +76,11 @@ const contractError = (cause: Cause.Cause<unknown>, route: string) => {
         `Invalid ${kind} for ${route}: ${lines.join('; ')}`,
         issues.some(({ path }) => path?.[0] === 'queue_key')
           ? QUEUE_KEY_HINT
-          : `Fix the ${kind} and resend. ${READ_THE_SKILL}`,
+          : issues.some(
+                ({ path }) => path?.[0] === 'settings' && path[1] === 'hands',
+              )
+            ? HANDS_HINT
+            : `Fix the ${kind} and resend. ${READ_THE_SKILL}`,
       ),
     );
   }

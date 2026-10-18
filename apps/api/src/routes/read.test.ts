@@ -93,6 +93,7 @@ function hand(
   return {
     hand_number: handNumber,
     button_seat: handNumber % 2 === 1 ? 0 : 1,
+    blinds: [1, 2],
     winner_seat: 0,
     pot: 8,
     ended_by: 'showdown',
@@ -124,7 +125,12 @@ function input(overrides: Partial<MatchRecordInput> = {}): MatchRecordInput {
   return {
     match_id: nextMatchId(),
     players: ['Alice', 'Bob'],
-    settings: { hands: 2, turn_seconds: 30, starting_stack: 200 },
+    settings: {
+      max_hands: 2,
+      turn_seconds: 30,
+      blind_every: 50,
+      starting_stack: 200,
+    },
     seed: RECORDED_SEED,
     result: 'seat0_win',
     ended_at: '2026-10-18T10:00:00.000Z',
@@ -146,7 +152,8 @@ function playedMatch(seed: number, hands: number): MatchRecordInput {
   const hexed = hexSeed(`played-${seed}`);
   let state: MatchState = startMatch({
     seed: hexed,
-    hands,
+    maxHands: hands,
+    blindEvery: 50,
     startingStack: 200,
   });
   const finished: HandRecord[] = [];
@@ -165,7 +172,12 @@ function playedMatch(seed: number, hands: number): MatchRecordInput {
   const [s0, s1] = state.stacks;
   return input({
     seed: hexed,
-    settings: { hands, turn_seconds: 30, starting_stack: 200 },
+    settings: {
+      max_hands: hands,
+      turn_seconds: 30,
+      blind_every: 50,
+      starting_stack: 200,
+    },
     result: s0 > s1 ? 'seat0_win' : s1 > s0 ? 'seat1_win' : 'draw',
     final_stacks: [s0, s1],
     hands: finished,
@@ -462,13 +474,23 @@ describe('GET /v1/matches/{match_id}', () => {
   it('returns the whole record of a rated match', async () => {
     const match = await record({
       players: ['Alice', 'bob'],
-      settings: { hands: 2, turn_seconds: 45, starting_stack: 200 },
+      settings: {
+        max_hands: 2,
+        turn_seconds: 45,
+        blind_every: 50,
+        starting_stack: 200,
+      },
       ended_at: '2026-10-18T10:31:07.250Z',
     });
     expect(await matchDetail(match.match_id)).toStrictEqual({
       match_id: match.match_id,
       players: ['Alice', 'bob'],
-      settings: { hands: 2, turn_seconds: 45, starting_stack: 200 },
+      settings: {
+        max_hands: 2,
+        turn_seconds: 45,
+        blind_every: 50,
+        starting_stack: 200,
+      },
       seed: RECORDED_SEED,
       result: 'seat0_win',
       rated: true,
@@ -499,6 +521,7 @@ describe('GET /v1/matches/{match_id}', () => {
     const folded = hand(2, {
       ended_by: 'fold',
       board: [],
+      blinds: [1, 2],
       winner_seat: 1,
       pot: 2,
       stacks: [199, 201],
@@ -614,5 +637,69 @@ describe('a D1 network error answers 503 unavailable', () => {
       'unavailable',
     );
     expect(body.retryable).toBe(true);
+  });
+});
+
+describe('T34 freezeout match records', () => {
+  it('returns blinds for every new hand from its hand number and blind interval', async () => {
+    const match = await record({
+      settings: {
+        starting_stack: 200,
+        blind_every: 2,
+        max_hands: 4,
+        turn_seconds: 30,
+      },
+      hands: [
+        hand(1),
+        hand(2),
+        hand(3, { blinds: [2, 4] }),
+        hand(4, { blinds: [2, 4] }),
+      ],
+    });
+    const detail = await matchDetail(match.match_id);
+    expect(detail.settings).toEqual(match.settings);
+    expect(detail.hands.map(h => h.blinds)).toEqual([
+      [1, 2],
+      [1, 2],
+      [2, 4],
+      [2, 4],
+    ]);
+  });
+
+  it('decodes an old D1 record with hands settings as fixed 1/2 blinds', async () => {
+    // Persist the same tables/hand rows as production, then replace the match
+    // row directly through D1 so the writer cannot normalize the old JSON.
+    const match = await record();
+    const stored = await testD1.d1
+      .prepare('SELECT * FROM matches')
+      .first<Record<string, unknown>>();
+    if (stored === null) throw new Error('Expected a stored match row');
+    const legacy = {
+      ...stored,
+      settings: JSON.stringify({
+        hands: 2,
+        turn_seconds: 30,
+        starting_stack: 200,
+      }),
+    };
+    const columns = Object.keys(legacy);
+    await testD1.d1
+      .prepare(
+        `INSERT OR REPLACE INTO matches (${columns.map(c => `"${c}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+      )
+      .bind(...columns.map(c => legacy[c as keyof typeof legacy]))
+      .run();
+    const response = await get(`/v1/matches/${match.match_id}`);
+    expect(response.status).toBe(200);
+    const raw = await response.json();
+    const detail = Schema.decodeUnknownSync(MatchDetail)(raw);
+    expect(detail.settings).toEqual({
+      starting_stack: 200,
+      blind_every: null,
+      max_hands: 2,
+      turn_seconds: 30,
+    });
+    expect(detail.hands).toHaveLength(2);
+    for (const hand of detail.hands) expect(hand.blinds).toEqual([1, 2]);
   });
 });

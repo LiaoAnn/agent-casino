@@ -251,7 +251,7 @@ const seededRoom = async (t: TestEnv, settings: Record<string, unknown>) => {
   const created = await post(t.env, '/v1/rooms', {
     game: 'holdem',
     name: 'alice',
-    settings,
+    settings: { blind_every: 50, ...settings },
     test: { seed: SEED },
   });
   expect(created.status).toBe(200);
@@ -272,7 +272,12 @@ const seededRoom = async (t: TestEnv, settings: Record<string, unknown>) => {
 // --- Engine oracle ----------------------------------------------------------
 
 const engineStart = (hands: number): MatchState =>
-  startMatch({ seed: SEED, hands, startingStack: STACK });
+  startMatch({
+    seed: SEED,
+    maxHands: hands,
+    blindEvery: 50,
+    startingStack: STACK,
+  });
 
 const applyOk = (
   match: MatchState,
@@ -320,7 +325,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
   it('超時動作 check: the big blind with check legal is checked for at the deadline by alarm(), history timeout:true', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     let match = engineStart(2);
@@ -356,7 +361,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
   it('超時動作 fold: preflop the small blind facing the big blind (no check) is folded at the deadline; the hand record has timeout:true', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     let match = engineStart(2);
@@ -373,6 +378,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
     expect(bob.hand_number).toBe(2);
     expect(bob.status === 'your_turn' && bob.last_hand).toMatchObject({
       hand_number: 1,
+      blinds: [1, 2],
       winner_seat: 1,
       ended_by: 'fold',
     });
@@ -391,7 +397,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
   it('超時 (alarm): after the join the alarm is scheduled at the first deadline; after an action, at the next deadline', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     expect(t.storage(roomId).alarm).toBe(joinedAt + 10_000);
@@ -420,7 +426,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
   it('超時 (alarm): alarm() 1 ms before the deadline plays nothing; the turn and the alarm stay', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     const before = await yourTurn(t, roomId, tokens[0]);
@@ -437,7 +443,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
   it('超時 (alarm): after a timeout the alarm moves to the next deadline = previous deadline + turn_seconds, even when alarm() runs late', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     // The alarm fires 4 s late.
@@ -451,7 +457,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
   it("超時 + 斷線: the opponent's pending wait answers your_turn as soon as alarm() plays the timeout", async () => {
     const t = makeEnv({ waitMs: 3_000 });
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     const pending = wait(t, roomId, tokens[1]);
@@ -472,7 +478,7 @@ describe('狀況處理 超時 (catch-up): any request first plays what is alread
   it('state after the deadline (no alarm call) shows the timed-out position with the deterministic next deadline', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     t.clock.ms = joinedAt + 10_000 + 3_000;
@@ -488,7 +494,7 @@ describe('狀況處理 超時 (catch-up): any request first plays what is alread
   it('wait after the deadline answers your_turn to the opponent at once', async () => {
     const t = makeEnv({ waitMs: 3_000 });
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     t.clock.ms = joinedAt + 10_000;
@@ -500,7 +506,7 @@ describe('狀況處理 超時 (catch-up): any request first plays what is alread
   it('an action after the deadline is judged against the caught-up position (the opponent now to act gets stale_turn for an unknown turn_id, not not_your_turn)', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     t.clock.ms = joinedAt + 10_000;
@@ -516,7 +522,7 @@ describe('狀況處理 超時 (catch-up): any request first plays what is alread
   it('leave after the deadline first plays the timeout: final_stacks include the timed-out hand', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     t.clock.ms = joinedAt + 10_000;
@@ -544,7 +550,7 @@ describe('狀況處理 超時 (catch-up): any request first plays what is alread
     ] as const) {
       const t = makeEnv();
       const { roomId, tokens, joinedAt } = await seededRoom(t, {
-        hands: 10,
+        max_hands: 10,
         turn_seconds: 10,
       });
       let match = engineStart(10);
@@ -567,7 +573,7 @@ describe('A3 + 狀況處理 太晚: a timeout uses up the turn_id', () => {
   it('A3: after a timeout the old turn_id answers 409 stale_turn with the state of the new position (opponent to act)', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
@@ -588,7 +594,7 @@ describe('A3 + 狀況處理 太晚: a timeout uses up the turn_id', () => {
   it('A3: after a timeout the old turn_id answers 409 stale_turn even when the same seat is to act again (flop after a timed-out check)', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
@@ -618,7 +624,7 @@ describe('A3 + 狀況處理 太晚: a timeout uses up the turn_id', () => {
   it('太晚: an action arriving exactly at the deadline is late: 409 stale_turn, and the turn was played by timeout', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
@@ -639,7 +645,7 @@ describe('A3 + 狀況處理 太晚: a timeout uses up the turn_id', () => {
   it('太晚 (boundary): an action 1 ms before the deadline is accepted', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
@@ -657,7 +663,7 @@ describe('狀況處理 連續 3 次超時 / A9: a seat with 3 consecutive timeou
     const t = makeEnv();
     const HANDS = 10;
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: HANDS,
+      max_hands: HANDS,
       turn_seconds: 10,
     });
     let match = engineStart(HANDS);
@@ -715,7 +721,7 @@ describe('狀況處理 連續 3 次超時 / A9: a seat with 3 consecutive timeou
   it('an absent seat cannot recover: its later state/wait never show your_turn and its actions are refused (not_your_turn or stale_turn)', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 10,
+      max_hands: 10,
       turn_seconds: 10,
     });
     // Same opening as above: seat 0 times out 3 times in a row.
@@ -762,7 +768,7 @@ describe('狀況處理 連續 3 次超時 / A9: a seat with 3 consecutive timeou
   it('only consecutive timeouts count: timed out twice, then acts, then times out once more is NOT absent (still gets your_turn with a full deadline)', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 10,
+      max_hands: 10,
       turn_seconds: 10,
     });
     let match = engineStart(10);
@@ -822,7 +828,7 @@ describe('狀況處理 連續 3 次超時 / A9: a seat with 3 consecutive timeou
 
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: HANDS,
+      max_hands: HANDS,
       turn_seconds: 10,
     });
     t.clock.ms = joinedAt + endsAt - 1;
@@ -855,7 +861,7 @@ describe('超時 (alarm): nothing is due after the match ends, so the alarm is d
   it('a 1-hand match ended by a timeout fold: alarm set before, null after', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 1,
+      max_hands: 1,
       turn_seconds: 10,
     });
     expect(t.storage(roomId).alarm).toBe(joinedAt + 10_000);
@@ -869,7 +875,7 @@ describe('超時 (alarm): nothing is due after the match ends, so the alarm is d
   it('a match ended by an accepted fold: alarm set before, null after', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 1,
+      max_hands: 1,
       turn_seconds: 10,
     });
     expect(t.storage(roomId).alarm).toBe(joinedAt + 10_000);
@@ -881,7 +887,7 @@ describe('超時 (alarm): nothing is due after the match ends, so the alarm is d
   it('a match ended by leave: alarm set before, null after; a later alarm() changes nothing', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     expect(t.storage(roomId).alarm).toBe(joinedAt + 10_000);
@@ -900,7 +906,7 @@ describe('狀況處理 斷線: the match goes on; state or wait picks it up', ()
   it('a seat that went silent through a timeout comes back with state and wait, sees the current position and acts with the new turn_id', async () => {
     const t = makeEnv({ waitMs: 3_000 });
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     let match = engineStart(2);
@@ -937,7 +943,7 @@ describe('收到什麼就做什麼 (error 且太晚或沒輪到 → 不重交，
   it('stale_turn for an unknown turn_id while it IS the seat’s turn', async () => {
     const t = makeEnv();
     const { roomId, tokens } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     await yourTurn(t, roomId, tokens[0]);
@@ -951,7 +957,7 @@ describe('收到什麼就做什麼 (error 且太晚或沒輪到 → 不重交，
   it('stale_turn for a timed-out turn_id when the same seat is to act again (A3)', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
@@ -972,7 +978,7 @@ describe('收到什麼就做什麼 (error 且太晚或沒輪到 → 不重交，
   it('stale_turn for a timed-out turn_id when the opponent is to act (A3)', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
@@ -991,7 +997,7 @@ describe('收到什麼就做什麼 (error 且太晚或沒輪到 → 不重交，
   it("stale_turn for the other seat's accepted turn_id", async () => {
     const t = makeEnv();
     const { roomId, tokens } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
@@ -1010,7 +1016,7 @@ describe('收到什麼就做什麼 (error 且太晚或沒輪到 → 不重交，
   it('not_your_turn for the seat not to act, and for seat 0 before anyone joined', async () => {
     const t = makeEnv();
     const { roomId, tokens } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);

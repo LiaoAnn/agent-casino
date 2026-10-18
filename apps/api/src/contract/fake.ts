@@ -56,7 +56,7 @@ function splitSeed(random: Random): string {
 
 // How a hand goes, so the data shows every case the match page renders:
 // - fold: the button folds the small blind;
-// - steal: the button raises to 6 and the big blind folds;
+// - steal: the button raises to 6 (or the minimum) and the big blind folds;
 // - bet_fold: checked to `street`, where the big blind bets and the button
 //   folds, leaving part of the board shown;
 // - show: checked or called down to a showdown;
@@ -196,8 +196,9 @@ function fakeWatch(seed: number): {
     for (;;) {
       const config = {
         seed: matchSeed(random),
-        hands: settings.hands,
         startingStack: settings.starting_stack,
+        blindEvery: settings.blind_every,
+        maxHands: settings.max_hands,
       };
       let state = startMatch(config);
       const hands: HandRecord[] = [];
@@ -325,12 +326,17 @@ export function makeFakeData(
     // Fixed slots, so every seed has each result the match page shows.
     const cancelled = i % 15 === 3;
     const voided = i % 15 === 8;
-    // Every hand a button fold over an even number of hands: a draw.
+    // Every hand a button fold, two hands a blind level: a draw.
     const quiet = i % 10 === 6;
     const split = i % 10 === 1;
+    // From before T34: a fixed number of hands at blinds 1/2 (A19).
+    const legacy = i % 15 === 12;
+    const maxHands = quiet ? 10 : random.pick([10, 50]);
+    const blindEvery = quiet ? 2 : legacy ? maxHands : random.pick([2, 5]);
     const settings = {
       ...SETTINGS_DEFAULTS,
-      hands: quiet ? 10 : random.pick([3, 5, 10]),
+      blind_every: legacy ? null : blindEvery,
+      max_hands: maxHands,
     };
     const seed = split ? splitSeed(random) : matchSeed(random);
     const hands = cancelled
@@ -339,8 +345,9 @@ export function makeFakeData(
           random,
           {
             seed,
-            hands: settings.hands,
             startingStack: settings.starting_stack,
+            blindEvery,
+            maxHands,
           },
           quiet ? 'quiet' : split ? 'split' : 'mixed',
         );

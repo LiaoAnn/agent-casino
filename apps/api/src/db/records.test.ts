@@ -40,9 +40,10 @@ let matchCounter = 0;
 const nextMatchId = () => `r_${String(++matchCounter).padStart(10, '0')}`;
 
 function hand(handNumber: number, eventCount = 8): HandRecord {
+  const small = 2 ** Math.floor((handNumber - 1) / 50);
   const events: HistoryEvent[] = [
-    { seat: 0, street: 'preflop', type: 'post_blind', amount: 1 },
-    { seat: 1, street: 'preflop', type: 'post_blind', amount: 2 },
+    { seat: 0, street: 'preflop', type: 'post_blind', amount: small },
+    { seat: 1, street: 'preflop', type: 'post_blind', amount: small * 2 },
   ];
   while (events.length < eventCount) {
     events.push({
@@ -54,6 +55,7 @@ function hand(handNumber: number, eventCount = 8): HandRecord {
   return {
     hand_number: handNumber,
     button_seat: handNumber % 2 === 1 ? 0 : 1,
+    blinds: [small, small * 2],
     winner_seat: null,
     pot: 4,
     ended_by: 'showdown',
@@ -71,7 +73,12 @@ function input(overrides: Partial<MatchRecordInput> = {}): MatchRecordInput {
   return {
     match_id: nextMatchId(),
     players: ['Alice', 'Bob'],
-    settings: { hands: 3, turn_seconds: 30, starting_stack: 200 },
+    settings: {
+      max_hands: 3,
+      turn_seconds: 30,
+      blind_every: 50,
+      starting_stack: 200,
+    },
     seed: '9f3c2a7e5b1d4f60c8a2e7b3d9f1c5a04e6b8d2f7a3c9e1b5d0f4a8c2e6b7d39',
     result: 'seat0_win',
     ended_at: '2026-10-18T10:00:00.000Z',
@@ -87,7 +94,8 @@ function playedHands(seed: number, hands: number): MatchRecordInput {
   const hexed = createHash('sha256').update(`played-${seed}`).digest('hex');
   let state: MatchState = startMatch({
     seed: hexed,
-    hands,
+    maxHands: hands,
+    blindEvery: 50,
     startingStack: 200,
   });
   const finished: HandRecord[] = [];
@@ -106,7 +114,12 @@ function playedHands(seed: number, hands: number): MatchRecordInput {
   const [s0, s1] = state.stacks;
   return input({
     seed: hexed,
-    settings: { hands, turn_seconds: 30, starting_stack: 200 },
+    settings: {
+      max_hands: hands,
+      turn_seconds: 30,
+      blind_every: 50,
+      starting_stack: 200,
+    },
     result: s0 > s1 ? 'seat0_win' : s1 > s0 ? 'seat1_win' : 'draw',
     final_stacks: [s0, s1],
     hands: finished,
@@ -339,7 +352,12 @@ describe('recordMatch: long matches', () => {
     });
     const match = input({
       seed: '2a'.repeat(32),
-      settings: { hands: 200, turn_seconds: 30, starting_stack: 200 },
+      settings: {
+        max_hands: 200,
+        turn_seconds: 30,
+        blind_every: 50,
+        starting_stack: 200,
+      },
       hands,
     });
     const expected = hands.map(h => ({
@@ -363,7 +381,12 @@ describe('recordMatch: long matches', () => {
   it('stores 200 hands with 8 events each', async () => {
     const hands = Array.from({ length: 200 }, (_, i) => hand(i + 1, 8));
     const match = input({
-      settings: { hands: 200, turn_seconds: 30, starting_stack: 200 },
+      settings: {
+        max_hands: 200,
+        turn_seconds: 30,
+        blind_every: 50,
+        starting_stack: 200,
+      },
       hands,
     });
     const result = await recordMatch(testD1.db, match);

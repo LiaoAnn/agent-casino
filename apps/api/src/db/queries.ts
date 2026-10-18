@@ -6,9 +6,18 @@ import type {
   MatchHand,
   MatchList,
 } from '../contract/schemas';
+import { blindsAt } from '../holdem/match';
 import { dealHand } from '../holdem/shuffle';
 import type { Db } from './client';
-import { bans, matchEvents, matches, matchHands, ratings } from './schema';
+import {
+  bans,
+  type LegacySettings,
+  matchEvents,
+  matches,
+  matchHands,
+  type RoomSettings,
+  ratings,
+} from './schema';
 
 const LEADERBOARD_SIZE = 100;
 const PAGE_SIZE = 20;
@@ -79,6 +88,20 @@ export async function listMatches(
   };
 }
 
+// A19: a match from before T34 had a fixed number of hands and blinds 1/2,
+// which `blind_every: null` stands for.
+const matchSettings = (
+  stored: RoomSettings | LegacySettings,
+): MatchDetail['settings'] =>
+  'hands' in stored
+    ? {
+        starting_stack: stored.starting_stack,
+        blind_every: null,
+        max_hands: stored.hands,
+        turn_seconds: stored.turn_seconds,
+      }
+    : stored;
+
 export async function getMatch(
   db: Db,
   matchId: string,
@@ -111,10 +134,11 @@ export async function getMatch(
     });
     eventsByHand.set(e.handNumber, list);
   }
+  const settings = matchSettings(row.settings);
   return {
     match_id: row.matchId,
     players: [row.player0, row.player1],
-    settings: row.settings,
+    settings,
     seed: row.seed,
     result: row.result,
     rated: row.rated,
@@ -123,6 +147,10 @@ export async function getMatch(
     rating_changes: row.ratingChanges,
     hands: hands.map(hand => ({
       hand_number: hand.handNumber,
+      blinds:
+        settings.blind_every === null
+          ? [1, 2]
+          : blindsAt(hand.handNumber, settings.blind_every),
       button_seat: hand.buttonSeat,
       board: hand.board,
       // recordMatch stores none for folded hands; the public seed deals them

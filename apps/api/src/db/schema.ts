@@ -21,6 +21,14 @@ export const SEAT_RESULTS = [
 export type SeatResult = (typeof SEAT_RESULTS)[number];
 
 export interface RoomSettings {
+  starting_stack: number;
+  blind_every: number;
+  max_hands: number;
+  turn_seconds: number;
+}
+
+/** What rows written before T34 hold: a fixed number of hands, blinds 1/2. */
+export interface LegacySettings {
   hands: number;
   turn_seconds: number;
   starting_stack: number;
@@ -43,7 +51,7 @@ export const matches = sqliteTable(
     player0: text('player0').notNull(),
     player1: text('player1').notNull(),
     settings: text('settings', { mode: 'json' })
-      .$type<RoomSettings>()
+      .$type<RoomSettings | LegacySettings>()
       .notNull(),
     // Opaque: a 64-hex-character secret once T20 lands (holdem-rules 種子與洗牌).
     seed: text('seed').notNull(),
