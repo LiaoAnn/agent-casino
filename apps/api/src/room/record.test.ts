@@ -559,3 +559,120 @@ describe('T23: notes go to record (A16)', () => {
     expect(notes ?? []).toEqual([]);
   });
 });
+
+// T28 A6/A15: results survive the immediate transition to the next hand.
+describe('T28 S2 last_hand.stack_changes', () => {
+  it.each([
+    { ending: 'fold', hands: 1 },
+    { ending: 'fold', hands: 3 },
+    { ending: 'showdown', hands: 1 },
+    { ending: 'showdown', hands: 3 },
+  ] as const)(
+    '$ending across $hands hands in wait and state',
+    async ({ ending, hands }) => {
+      const t = fixture(undefined, { ...SETTINGS, hands });
+      await t.open();
+      let before: readonly [number, number] = [40, 40];
+      for (let handNumber = 1; handNumber <= hands; handNumber++) {
+        // Keep checking/calling to reach showdown without risking an early bust.
+        for (let step = 0; t.hands.length < handNumber && step < 20; step++) {
+          const turn = await t.turn();
+          const type =
+            ending === 'fold'
+              ? 'fold'
+              : turn.legal_actions.some(action => action.type === 'call')
+                ? 'call'
+                : 'check';
+          expect(await t.step({ type })).toMatchObject({
+            ok: true,
+            value: { status: 'accepted' },
+          });
+        }
+        const hand = t.hands[handNumber - 1];
+        if (!hand) throw new Error('Expected a completed hand');
+        expect(hand.ended_by).toBe(ending);
+        if (handNumber === 2) expect(before).not.toEqual([40, 40]);
+        const changes: [number, number] = [
+          hand.stacks[0] - before[0],
+          hand.stacks[1] - before[1],
+        ];
+        expect(changes[0] + changes[1]).toBe(0);
+        const seat = handNumber === hands ? 0 : (await t.turn()).seat;
+        for (const wait of [false, true]) {
+          const result = await t.referee.status(seat, { wait });
+          expect(result).toMatchObject({
+            ok: true,
+            value: {
+              status: handNumber === hands ? 'match_over' : 'your_turn',
+              last_hand: {
+                hand_number: handNumber,
+                ended_by: ending,
+                stacks: hand.stacks,
+                hole_cards: ending === 'showdown' ? hand.hole_cards : null,
+              },
+            },
+          });
+          // Soft assertions let later hands prove their own per-hand baseline.
+          expect.soft(result).toMatchObject({
+            ok: true,
+            value: {
+              last_hand: { stack_changes: changes },
+            },
+          });
+        }
+        before = hand.stacks;
+      }
+    },
+  );
+});
+
+describe('T28 S3 seconds_remaining', () => {
+  it.each([false, true])(
+    'uses the injected clock for wait=%s and floors partial seconds',
+    async wait => {
+      const t = fixture(undefined, { ...SETTINGS, turn_seconds: 30 });
+      await t.open();
+      const first = await t.turn();
+      const deadline = Date.parse(first.deadline);
+      for (const elapsed of [0, 600, 1_001, 29_999]) {
+        t.clock.ms = deadline - 30_000 + elapsed;
+        const seconds = Math.max(0, Math.floor((deadline - t.clock.ms) / 1000));
+        const result = await t.referee.status(first.seat, { wait });
+        expect.soft(result).toMatchObject({
+          ok: true,
+          value: {
+            status: 'your_turn',
+            turn_id: first.turn_id,
+            deadline: first.deadline,
+            seconds_remaining: seconds,
+          },
+        });
+      }
+    },
+  );
+
+  it('includes the same countdown in an invalid_action your_turn state', async () => {
+    const t = fixture(undefined, { ...SETTINGS, turn_seconds: 30 });
+    await t.open();
+    const first = await t.turn();
+    t.clock.ms += 600;
+    const result = await t.referee.act(first.seat, {
+      turn_id: first.turn_id,
+      type: 'check',
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_action' },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        state: {
+          status: 'your_turn',
+          deadline: first.deadline,
+          seconds_remaining: 29,
+        },
+      },
+    });
+  });
+});

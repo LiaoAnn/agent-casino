@@ -17,6 +17,7 @@ import {
   type Action,
   applyAction,
   type HandRecord,
+  type LastHand,
   legalActions,
   type MatchState,
   otherSeat,
@@ -139,6 +140,7 @@ interface ActionInput {
 
 type ActionAcceptedBody = typeof ActionAccepted.Type;
 type MatchOverBody = typeof MatchOver.Type;
+type LastHandBody = NonNullable<MatchOverBody['last_hand']>;
 
 // What routes/room.ts calls on a room's DO stub (the Room DO forwards each
 // call to its referee).
@@ -324,7 +326,11 @@ export class RoomReferee {
       for (;;) {
         const opened = await this.#open();
         if (!opened.ok) return opened;
-        const status = statusFor(opened.value, seat);
+        const status = statusFor(
+          opened.value,
+          seat,
+          await this.#answering(opened.value),
+        );
         if (options.wait && status.status === 'your_turn') {
           const fake = await this.#fakeWaiting(opened.value, status);
           if (fake) return ok(fake);
@@ -369,7 +375,7 @@ export class RoomReferee {
     const stored = await this.#stored(opened.value);
     if (!stored.ok) return stored;
     const data = stored.value;
-    const state = statusFor(data, seat);
+    const state = statusFor(data, seat, await this.#answering(data));
     if (data.ended) return fail(matchOverError(state));
     const { match, turn } = data;
     // A3: the server already played this turn when it timed out.
@@ -464,7 +470,11 @@ export class RoomReferee {
     const opened = await this.#open();
     if (!opened.ok) return opened;
     const data = opened.value;
-    if (data.ended) return fail(matchOverError(statusFor(data, seat)));
+    if (data.ended) {
+      return fail(
+        matchOverError(statusFor(data, seat, await this.#answering(data))),
+      );
+    }
     const next = this.#finish(
       data,
       this.#now(),
@@ -475,7 +485,9 @@ export class RoomReferee {
     await this.#save(next);
     const saved = await this.#load();
     if (!saved?.ended || unrecorded(saved)) return fail(recordFailed());
-    return ok(matchOver(saved, saved.ended, seat));
+    return ok(
+      matchOver(saved, saved.ended, seat, await this.#answering(saved)),
+    );
   }
 
   // A9: an admin calls the match off; it is void and never rated. Unlike the
@@ -539,6 +551,18 @@ export class RoomReferee {
         },
       }),
     );
+  }
+
+  // What an answer to a seat needs besides the room (A15).
+  async #answering(data: RoomData): Promise<Answering> {
+    const n = data.match?.lastHand?.hand_number ?? 1;
+    const before =
+      n === 1
+        ? undefined
+        : await this.#storage.get<HandRecord>(`hand:${n - 1}`);
+    if (n > 1 && !before) throw new Error(`Room has no hand ${n - 1} stored`);
+    const start = data.settings.starting_stack;
+    return { now: this.#now(), stacksBefore: before?.stacks ?? [start, start] };
   }
 
   // The finished hands of the match, in order.
@@ -1008,10 +1032,34 @@ const seatFields = (data: RoomData, seat: Seat) => ({
   settings: data.settings,
 });
 
+// `now`: when the answer is made (epoch ms). `stacksBefore`: the stacks the
+// last finished hand started from.
+interface Answering {
+  now: number;
+  stacksBefore: [number, number];
+}
+
+// The last finished hand with what each seat won or lost in it (A15).
+const lastHandOut = (
+  hand: LastHand | null,
+  { stacksBefore }: Answering,
+): LastHandBody | null =>
+  hand && {
+    ...hand,
+    stack_changes: [
+      hand.stacks[0] - stacksBefore[0],
+      hand.stacks[1] - stacksBefore[1],
+    ],
+  };
+
 // What `state` and `wait` answer to `seat` (A15).
-function statusFor(data: RoomData, seat: Seat): RoomStatus {
+function statusFor(
+  data: RoomData,
+  seat: Seat,
+  answering: Answering,
+): RoomStatus {
   const { match, turn } = data;
-  if (data.ended) return matchOver(data, data.ended, seat);
+  if (data.ended) return matchOver(data, data.ended, seat, answering);
   if (!match) {
     return {
       status: 'waiting',
@@ -1038,8 +1086,12 @@ function statusFor(data: RoomData, seat: Seat): RoomStatus {
       ...common,
       turn_id: turn.id,
       deadline: new Date(turn.deadline).toISOString(),
+      seconds_remaining: Math.max(
+        0,
+        Math.floor((turn.deadline - answering.now) / 1000),
+      ),
       legal_actions: [first, ...rest],
-      last_hand: seen.last_hand,
+      last_hand: lastHandOut(seen.last_hand, answering),
       hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to POST /v1/rooms/${data.room_id}/actions`,
     };
   }
@@ -1050,7 +1102,12 @@ function statusFor(data: RoomData, seat: Seat): RoomStatus {
   };
 }
 
-function matchOver(data: RoomData, ended: Ended, seat: Seat): MatchOverBody {
+function matchOver(
+  data: RoomData,
+  ended: Ended,
+  seat: Seat,
+  answering: Answering,
+): MatchOverBody {
   const { match } = data;
   const seen = match ? viewFor(match, seat) : null;
   const [mine, theirs] = [
@@ -1080,7 +1137,7 @@ function matchOver(data: RoomData, ended: Ended, seat: Seat): MatchOverBody {
     result,
     final_stacks: ended.final_stacks,
     ratings: data.recorded?.ratings ?? null,
-    last_hand: seen?.last_hand ?? null,
+    last_hand: lastHandOut(seen?.last_hand ?? null, answering),
     hint: matchOverHint(ended, result),
   };
 }

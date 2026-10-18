@@ -208,6 +208,9 @@ const LastHand = Schema.Struct({
   board: Board,
   hole_cards: ShownCards,
   stacks: Stacks,
+  // Each seat's chips after this hand minus before it, blinds included;
+  // the two add up to 0.
+  stack_changes: Schema.Tuple([Schema.Int, Schema.Int]),
 });
 
 const roomFields = {
@@ -228,6 +231,9 @@ const YourTurn = Schema.Struct({
   ...roomFields,
   turn_id: Schema.String,
   deadline: IsoTime,
+  // Whole seconds to the deadline when the server answered, rounded down. A
+  // hint only: the deadline is what counts.
+  seconds_remaining: NonNegativeInt,
   legal_actions: Schema.NonEmptyArray(LegalAction),
   last_hand: Schema.NullOr(LastHand),
 });

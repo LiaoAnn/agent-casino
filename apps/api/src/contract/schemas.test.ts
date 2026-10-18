@@ -81,6 +81,7 @@ const yourTurn = {
   to_act_seat: 0,
   turn_id: 't_41',
   deadline: '2026-10-16T12:50:30Z',
+  seconds_remaining: 30,
   hand_number: 3,
   view,
   legal_actions: [
@@ -99,6 +100,7 @@ const yourTurn = {
       ['9h', '9d'],
     ],
     stacks: [36, 44],
+    stack_changes: [-4, 4],
   },
   hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to POST /v1/rooms/${ROOM}/actions`,
 };
@@ -793,5 +795,53 @@ describe('queue_key contract (A17)', () => {
     `${'a'.repeat(16)}中`,
   ])('rejects invalid queue key %j', queue_key => {
     expect(QUEUE_KEY_PATTERN?.test(queue_key)).toBe(false);
+  });
+});
+
+// T28 A6/A15: exercise both envelopes so match_over cannot omit the field.
+describe('T28 S2 last_hand.stack_changes contract', () => {
+  it.each(['your_turn', 'match_over'] as const)(
+    '%s requires signed integer changes for both seats',
+    status => {
+      const envelope = status === 'your_turn' ? yourTurn : matchOver;
+      const last = { ...yourTurn.last_hand, stack_changes: [-4, 4] };
+      const complete = { ...envelope, seconds_remaining: 30, last_hand: last };
+      expect(decodes(RoomStatus, complete)).toBe(true);
+      const { stack_changes: _changes, ...without } = last;
+      expect(decodes(RoomStatus, { ...complete, last_hand: without })).toBe(
+        false,
+      );
+    },
+  );
+
+  it.each([
+    { stack_changes: [1.5, -1.5] },
+    { stack_changes: [1] },
+    { stack_changes: [1, -1, 0] },
+    { stack_changes: ['-4', 4] },
+  ])('rejects malformed seat changes $stack_changes', ({ stack_changes }) => {
+    expect(
+      decodes(RoomStatus, {
+        ...yourTurn,
+        seconds_remaining: 30,
+        last_hand: { ...yourTurn.last_hand, stack_changes },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('T28 S3 seconds_remaining contract', () => {
+  it('requires seconds_remaining on your_turn', () => {
+    expect(decodes(RoomStatus, yourTurn)).toBe(true);
+    const { seconds_remaining: _seconds, ...without } = yourTurn;
+    expect(decodes(RoomStatus, without)).toBe(false);
+  });
+
+  it.each([0, 1, 29, 30])('accepts %s whole seconds', seconds_remaining => {
+    expect(decodes(RoomStatus, { ...yourTurn, seconds_remaining })).toBe(true);
+  });
+
+  it.each([-1, 29.4, '30', null])('rejects %j seconds', seconds_remaining => {
+    expect(decodes(RoomStatus, { ...yourTurn, seconds_remaining })).toBe(false);
   });
 });

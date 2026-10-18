@@ -1390,7 +1390,11 @@ describe('POST /v1/rooms/{room_id}/actions: finishing a 1-hand match by a fold',
           board: [],
         },
       });
-      expect(over.last_hand).toEqual(expectedEnd.lastHand);
+      // Seat 0 loses its small blind; seat 1's uncalled blind is returned.
+      expect(over.last_hand).toEqual({
+        ...expectedEnd.lastHand,
+        stack_changes: [-1, 1],
+      });
       expect(over.hint.length).toBeGreaterThan(0);
       expect(over.view?.pot).toBe(0);
     }
@@ -1494,7 +1498,10 @@ describe('POST /v1/rooms/{room_id}/actions: a 1-hand match to showdown', () => {
           board: deal.board,
         },
       });
-      expect(over.last_hand).toEqual(expected.lastHand);
+      expect(over.last_hand).toEqual({
+        ...expected.lastHand,
+        stack_changes: [s0 - 40, s1 - 40],
+      });
       expect(over.view?.pot).toBe(0);
     }
   });
@@ -1521,7 +1528,10 @@ describe('POST /v1/rooms/{room_id}/actions: the next hand', () => {
       view: { button_seat: 1, street: 'preflop' },
     });
     expect(bob.view).toEqual(viewFor(expected, 1).view);
-    expect(bob.last_hand).toEqual(expected.lastHand);
+    expect(bob.last_hand).toEqual({
+      ...expected.lastHand,
+      stack_changes: [-1, 1],
+    });
     expect(bob.last_hand).toMatchObject({
       hand_number: 1,
       ended_by: 'fold',
@@ -1665,7 +1675,10 @@ describe('POST /v1/rooms/{room_id}/leave while playing', () => {
     });
     const over = await leave(t.env, roomId, tokens[0]);
     expect(over.final_stacks).toEqual([39, 41]);
-    expect(over.last_hand).toEqual(expected.lastHand);
+    expect(over.last_hand).toEqual({
+      ...expected.lastHand,
+      stack_changes: [-1, 1],
+    });
     expect(over.last_hand).toMatchObject({ hand_number: 1, ended_by: 'fold' });
     expect(over.result).toBe('loss');
   });

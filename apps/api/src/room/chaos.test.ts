@@ -430,6 +430,7 @@ describe('A11 chaos extra_waiting: the first N waits of the seat to act answer w
       extra_waiting: 2,
     });
     const fromState = await yourTurn(t, roomId, tokens[0]);
+    expect(fromState.seconds_remaining).toBe(10);
     for (let i = 0; i < 2; i++) {
       t.clock.ms += 1_000;
       const { status, elapsedMs } = await wait(t, roomId, tokens[0]);
@@ -439,10 +440,13 @@ describe('A11 chaos extra_waiting: the first N waits of the seat to act answer w
         to_act_seat: 0,
       });
       expect(elapsedMs).toBeLessThan(1_000);
-      expect(await yourTurn(t, roomId, tokens[0])).toEqual(fromState);
+      const current = await yourTurn(t, roomId, tokens[0]);
+      expect(current.seconds_remaining).toBe(9 - i);
+      expect(current).toEqual({ ...fromState, seconds_remaining: 9 - i });
     }
     const { status } = await wait(t, roomId, tokens[0]);
-    expect(status).toEqual(fromState);
+    expect(status.status === 'your_turn' && status.seconds_remaining).toBe(8);
+    expect(status).toEqual({ ...fromState, seconds_remaining: 8 });
     expect(status.status === 'your_turn' && status.deadline).toBe(
       iso(joinedAt + 10_000),
     );
