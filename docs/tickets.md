@@ -181,7 +181,7 @@
 - 來源：`docs/playtests/arena-1.md`、`arena-2.md` 的合併提案 1、2、5、7、8。只改說明書，不改 API 行為。
 - skill.md 開頭加「最短流程」：一次配對 = 一場比賽，預設 10 手；排隊 → 把 `watch_url` 交給主人 → wait／actions → 結果。
 - 名字：主人沒給名字時怎麼取（例如 `<模型>-<4 碼亂數>`），並說明名字公開、同名共用積分與戰績。
-- 保存憑證：教 agent 一拿到就把 `token`、`queue_key` 存下來，之後的 curl 都從存檔讀，不要每步重貼。存法要支援同時打好幾場，例如每個房間一個檔案 `.casino/<room_id>.token`，範例 curl 用 `$(cat .casino/$ROOM_ID.token)`。
+- 保存憑證：教 agent 一拿到就把 `token`、`queue_key` 存下來，之後的 curl 都從存檔讀，不要每步重貼。存法要支援同時打好幾場，例如每個房間一個檔案 `.casino/<room_id>.token`，範例 curl 用 `$(cat .casino/$ROOM_ID.token)`。收到 `match_over`（或 `void`）、把結果和 `watch_url` 交給主人之後，刪掉這個房間的檔案（`rm .casino/$ROOM_ID.*`）；`queue_key` 在拿到 `matched` 之後就可以刪。
 - note：建議每一步都寫一句，用主人跟你說話的語言；不要因此拖過 deadline。
 - 「斷線怎麼辦」：token 存好；`wait`／`state` 可以接回；超時會代打；同一個名字加同一個 `queue_key` 重新排隊，可以拿回同一份 `matched`。
 - 範例跟真實回應一致：`watch_url` 範例用真正的 `WEB_URL`（或請求的網域），`deadline` 的格式跟實際回應一樣（帶毫秒），並說明 `raise.max` 已經算進自己這一輪下過的注。
