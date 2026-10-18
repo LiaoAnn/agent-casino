@@ -34,6 +34,7 @@
 | 7.5 | T23 → T24、T26（E5 與排隊修正） | 2 |
 | 7.6 | T27、T28（arena 回饋）、T29（網頁風格） | 3 |
 | 7.7 | T30（arena 第 3 輪回饋） | 1 |
+| 7.8 | T32（arena 第 4 輪回饋）、T14 收尾 | 2 |
 | 8 | T15 ★🔒 | 1 + 3 個試玩 agent |
 
 最長的一條路是 T01 → T02 → T04 → T09 → T11 → T13 → T14 → T15，共 8 步（T21 跟 T14 同時進行）；其他 ticket 都在旁邊同時進行。
@@ -230,6 +231,18 @@
 - 先找出原因再修。可以用的做法：減少灌入的資料量（只要足以證明索引被用到）、用測試專用的 timeout、改用可控時鐘、修掉造成唯一鍵衝突的資料產生方式。不可以刪測試或放寬斷言。
 - 只改這兩個測試檔，以及它們用到的測試工具。
 - 驗證：在容器裡連跑 `pnpm check` 5 次都要過；另外把這兩個檔單獨連跑 20 次（用 shell 迴圈）也全過。
+
+### T32 arena 第 4 輪的說明書與 hint 修正（約 300 行）· Blocked by：T30
+- 來源：`docs/playtests/arena-4.md` 的「新發現」1～6。
+- 名字範例改成用指令產生，例如 `name="<model>-$(openssl rand -hex 2)"`，不要再放一個可以直接照抄的名字。
+- `watch_url` 跟 token 一起存檔（`.casino/$ROOM_ID.watch_url`），打完一起刪；斷線接回後，要再把 `watch_url` 交給主人一次。
+- `matched`、`join`、開房回應的 hint 都先說「把 `watch_url` 交給主人」，再說下一步 call wait。
+- 「Save as a skill」列出專案層級的路徑：Claude Code 是 `.claude/skills/agent-casino/`，Codex 和 pi 是 `.agents/skills/agent-casino/`。並說明 pi 要用 `/skill:agent-casino` 叫用，第一次會被問要不要信任這個資料夾。
+- 說明 `last_hand.stack_changes` 是那一手的結算，下一手的 `stacks` 已經扣了盲注。
+- 開房段落寫明：5 分鐘內沒人加入，房間會變成 `cancelled`。
+- `match_over` 的 hint 附上網頁的對局頁連結 `<WEB_URL>/matches/{match_id}`（沒設定 `WEB_URL` 就不附）。
+- 只改：`apps/api/src/skill/`、`apps/api/src/routes/room.ts`、`apps/api/src/routes/queue.ts`、`apps/api/src/room/`（只限 hint 文字）。不改合約形狀。
+- 驗證：`pnpm check`、`pnpm test:skill`、`pnpm test:api`。hint 的新文字要有測試。verifier 照產生出來的 skill.md 打一場 house-bot，打到一半假裝當掉，再用存下來的檔案接回，交出 `watch_url`。
 
 ## Epic E3 Skill 與接入
 
