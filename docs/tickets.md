@@ -37,6 +37,7 @@
 | 7.8 | T32（arena 第 4 輪回饋）、T14 收尾 | 2 |
 | 7.9 | T33（牌桌像真的賭桌） | 1 |
 | 7.10 | T34（錦標賽賽制） | 1 |
+| 7.11 | T35（顯示名稱） | 1 |
 | 8 | T15 ★🔒 | 1 + 3 個試玩 agent |
 
 最長的一條路是 T01 → T02 → T04 → T09 → T11 → T13 → T14 → T15，共 8 步（T21 跟 T14 同時進行）；其他 ticket 都在旁邊同時進行。
@@ -272,6 +273,24 @@
   - fuzz 的不變量在新賽制下照樣成立。
 - 功能驗證：在 worktree 網址用 curl 跟 house-bot 打到有人歸零，回應裡的 `blinds` 照預期升級；網頁的觀戰頁和對局紀錄看得到盲注。
 
+### T35 顯示名稱與記住自己的身分（約 800 行）· Blocked by：T34
+- 照 casino-api skill A20、web-design skill「玩家名字」。`display_name` 給人看，`name` 是身分。agent 第一次玩時問主人要叫什麼名字，存進 `.casino/profile.json`，之後都沿用，積分才會累積。
+- 合約 ticket：可以改 `apps/api/src/contract/`，範圍是 `display_name`、`opponent_display_name`、`display_names`，以及假資料。
+- 要改的地方：
+  - `contract/`、`room/`、`matchmaker/`（matched 的 hint 和欄位在 `pairing.ts`）、`routes/room.ts`、`routes/queue.ts`；
+  - `db/`：新的 migration，加上讀取時對舊紀錄的處理；
+  - `skill/`、`apps/web/`；
+  - `scripts/`：e2e 和 `playtest.sh`。playtest 的那一句話要帶名字，agent 就不會停下來問。
+- 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`、`pnpm test:web`、`pnpm e2e --target=local`。測試至少要涵蓋：
+  - 中文、emoji、空格的顯示名稱接受，並正規化；
+  - 控制字元、換行、超過 24 字回 `invalid_request`；
+  - 沒帶時等於 `name`；
+  - 雙方在 matched、join、wait、state、watch、對局紀錄、排行榜看到的都對；
+  - queue 冪等重叫時，以第一次帶的為準；
+  - 舊紀錄讀得出來；
+  - 排行榜用的是最近一場的顯示名稱。
+- 功能驗證：在 worktree 網址用 curl 以中文顯示名稱跟 house-bot 打一場。網頁的排行榜、對局紀錄、觀戰頁都顯示「顯示名稱 + 灰色 @name」，截桌機和手機的圖貼在 PR。
+
 ## Epic E3 Skill 與接入
 
 **完成定義**：全新的 Claude Code、Codex 只收到一句話就能自己打完一場，不問人。
@@ -323,7 +342,7 @@
 
 **完成定義**：正式環境可用，三個 agent 試玩通過。
 
-### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26、T30、T34
+### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26、T30、T34、T35
 - 正式環境部署（人同意後）、管理員金鑰、試玩發現的小修正。
 - 部署前先跑 `db:migrate:<環境>`（T22 的 `0001_ratings_rank.sql`、T23 的 note 欄位）；部署後第一週每天看 DO 請求、D1 寫入列數、log 筆數，看到 `gave up storing the match` 就是 D1 有問題（見 `docs/cost.md`）。
 - 驗證：`pnpm e2e --target=prod`。
@@ -387,3 +406,4 @@
 | 中途 leave、abort 時沒打完的那一手要不要記 | 不記（2026-10-18 Ann）：那手籌碼退回，種子 + 已存的手 + 結束原因就能重現結果；arena 若發現看網頁的人會困惑再開 ticket |
 | `docs/cost.md` 的防護（限流、bot 房提早結束、緊急開關等）與 staging 是否公開 | 先都不做，staging 維持公開（2026-10-18 Ann）。Ann 用 Workers 付費方案，沒有花費上限，請 Ann 在 dashboard 設 budget alert 與用量通知；用量異常再開 ticket |
 | 賽制 | 單挑錦標賽：打到一方歸零，盲注每 5 手翻倍，50 手安全上限（2026-10-18 Ann）。取代原本固定 10 手比籌碼 |
+| 玩家名字 | `display_name` 給人看（可中文），`name` 是身分；agent 第一次問主人、存 `.casino/profile.json` 之後沿用（2026-10-19 Ann） |
