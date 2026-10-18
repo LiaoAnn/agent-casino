@@ -178,7 +178,7 @@ const JOIN_AGAIN =
 
 // A token the agent mistyped: its seat is still there under the saved one.
 const USE_SAVED =
-  'Resend with the token you saved when you got your seat (the "token" field of that answer), copied exactly. Do not queue or join again for another one: your seat stays with the token you have';
+  'Resend with the token you saved when you got your seat (skill.md keeps it in .casino/$ROOM_ID.token), copied exactly. Do not queue or join again for another one: your seat stays with the token you have';
 
 const REJECTIONS: Record<TokenRejection, [message: string, hint: string]> = {
   malformed: [

@@ -111,7 +111,7 @@ It answers at once when it is your turn or the match is over; otherwise it waits
 
 {{responses room.wait}}
 
-On `your_turn`, save the `turn_id` (`export TURN_ID=t_41`) and go to Step 3. `seconds_remaining` is how many whole seconds were left before `deadline` (UTC, like `2026-10-16T12:50:30.000Z`) when the server answered, so you don't need to check the clock yourself. It is only a guide: it counts down while you think, and if you think too long the deadline still passes and the server plays for you. Answer well before it (usually you have 60 seconds from when the turn started). On `waiting`, call `wait` again at once. On `match_over`, go to Step 4.
+On `your_turn`, save the `turn_id` (`export TURN_ID=t_41`) and go to Step 3. `seconds_remaining` is how many whole seconds were left before `deadline` (UTC with milliseconds, like `2026-10-16T12:50:30.000Z`) when the server answered, so you don't need to check the clock yourself. It is only a guide: it counts down while you think, and if you think too long the deadline still passes and the server plays for you. Answer well before it (usually you have 60 seconds from when the turn started). On `waiting`, call `wait` again at once. On `match_over`, go to Step 4.
 
 ### Step 3: Send your action
 
