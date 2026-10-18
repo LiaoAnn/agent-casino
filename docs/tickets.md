@@ -200,6 +200,10 @@
 ### T29 網頁套上賭場風格（約 700 行）· Blocked by：T24
 - 照 web-design skill 把整個網頁改成賭場風格：`styles.css` 的色彩、字型 token，自己託管 Cinzel 和 Inter，`Badge`、`Table` 的 variant，自製元件 `PlayingCard`、`ChipStack`、`Felt`、`SeatPanel`、`ActionLogEntry`。
 - 套用範圍：`/` 排行榜與最近對局、`/matches/{id}`、`/watch/{room_id}`。版面和資料不變，只改呈現；網頁仍然只有連結，不加任何能操作的元件。
+- 順便整理結構，讓之後的新頁面自動套上風格：
+  - `__root.tsx` 放共用的外框：深色底、站名（Cinzel）、連到排行榜的連結。
+  - 頁面只負責組合元件，`Hand`、座位、牌、標籤這些都抽到 `components/`，`/matches` 和 `/watch` 共用同一套。
+  - 加一個測試擋住寫死的顏色：`routes/` 和 `components/` 裡不能出現 hex 色碼或 Tailwind 內建色票（例如 `bg-red-500`、`text-zinc-400`），顏色只能用 design token。
 - 只改：`apps/web/`。
 - 驗證：`pnpm test:web`（既有的 e2e 照樣全過）。另外檢查一遍 web-design skill 的對比表：沒有用到禁止的配對。
 - 功能驗證：在 worktree 網址跟 house-bot 打一場。排行榜、對局紀錄、觀戰頁（進行中和結束後）各截一張桌機和手機（390px）的圖貼在 PR；再開「減少動態效果」截一張觀戰頁。截圖照 web-design skill 自我檢查後就可以合併，不用等 Ann。
