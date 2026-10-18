@@ -21,7 +21,7 @@ Ann 在 2026-10-17 同意，ticket thread 不用每次問就可以：
 - 計畫不用等人核准就開始實作（計畫裡出現新的設計決策時除外，見「什麼時候停下來」）。
 - 沒有 `needs-human` 的 PR，在下面「合併」的條件都滿足時自己合併。
 
-仍然每次都要先問人：部署正式環境、呼叫外部服務（見 Dev VM 的 CLAUDE.md 第 6 節，包括部署 Cloudflare 測試環境）、碰別的 ticket 的 branch 或 worktree。
+仍然每次都要先問人：部署正式環境、呼叫外部服務（見 Dev VM 規則的「External services」，包括部署 Cloudflare 測試環境）、碰別的 ticket 的 branch 或 worktree。
 
 ## 1. 開工
 1. 讀 `AGENTS.md`、`docs/tickets.md` 裡你那張 ticket（範圍、Blocked by、只改哪些資料夾、驗證指令、功能驗證），再讀 ticket 指到的 skill（`holdem-rules`、`casino-api`…）。
@@ -87,17 +87,17 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 - 不回報：合約或 schema 已經擋掉的輸入、需要攻擊者控制伺服器或環境的情況、DO 單執行緒下不可能發生的競態、單挑不會出現的牌局、只有理論上可能的事。
 - 屬於別張 ticket 的問題只寫一行（哪張 ticket、什麼問題），不要求這張修。
 - 每個 lens 的 Hardening 最多 3 個，挑最重要的。
-- 用 t3 的 `delegate_task`，不要用 Claude 內建的 subagent。先呼叫 `orchestrator_capabilities` 找 Codex 的 `providerInstanceId`（目前是 `codex`），`target` 填 `{"providerInstanceId":"codex","model":"gpt-6.1-sol","options":{"reasoningEffort":"medium"}}`，`role` 填 `test`、`review` 或 `general`。
+- 用 t3 的 `delegate_task`，不要用 Claude 內建的 subagent。先呼叫 `orchestrator_capabilities` 找 Codex 的 `providerInstanceId`（目前是 `codex`），`target` 填 `{"providerInstanceId":"codex","model":"gpt-6.1-sol","options":{"reasoningEffort":"medium","serviceTier":"priority"}}`（`priority` 就是 Fast），`role` 填 `test`、`review` 或 `general`。
+- **Codex 不能用時改用 Sonnet**：`orchestrator_capabilities` 裡 Codex 有 constraints 或沒有 `gpt-6.1-sol`，或同一個任務實際跑了兩次都失敗，就用同一份任務說明再呼叫一次 `delegate_task`，`target` 換成 `{"providerInstanceId":"claudeAgent","model":"claude-sonnet-5-5","options":{"effort":"high"}}`，`clientRequestId` 換新的（例如加 `-sonnet`）。PR 裡寫明哪些任務改用 Sonnet、為什麼。
 - `isolation` 用預設的 `shared`：子任務直接在你的 worktree 裡跑，看得到還沒 commit 的改動。不要用 `worktree`，那會從上一個 commit 開新的 checkout，看不到你正在改的東西。子任務在跑的時候，你不要改檔案。
 - 每個任務一個 `clientRequestId`（例如 `t09-s2-test-author-1`）。同一個任務重送時用同一個 id，不然會開出重複的子任務；新的一輪才換新 id。記下每個回傳的 `taskId`。
 - 要等結果才能往下走時用 `mode:"wait"`、`timeoutMs: 1800000`。幾個 lens 可以各用 `mode:"async"` 同時開，等它們做完的通知。回傳 `waitTimedOut` 或收到通知後，用 `task_status` 拿最後的報告再往下走。
-- Codex **不會讀** `~/.claude/CLAUDE.md`，也沒有 `/tdd`、`/verification-evidence` 這些斜線指令。任務說明要自己寫完整：
-  - worktree 路徑；指令用 `T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "..."` 在容器裡跑，git 只能 `git -C <path>` 在 VM 上跑。
-  - 不准碰別的 worktree、容器和 tmux；不准 commit、push、開 PR；不准呼叫外部服務。
-  - 可以改哪些檔案：test-author 只寫測試檔；reviewer 不改任何檔案；verifier 不改程式，只能開關自己的 dev server。
+- 子任務只拿到你寫的任務說明，看不到你的對話。VM 規則它會自己讀（Codex 讀 `~/.codex/AGENTS.md`，跟 Claude 的 `~/.claude/CLAUDE.md` 是同一份），但它沒有 `/tdd`、`/verification-evidence` 這些斜線指令。任務說明要寫：
+  - worktree 路徑（指令用 `T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "..."`，git 用 `git -C <path>`）。
+  - 這個任務的限制：不准 commit、push、開 PR；test-author 只寫測試檔；reviewer 不改任何檔案；verifier 不改程式，只能開關自己的 dev server。
   - `pnpm check` 要跟 export 在同一個容器 shell 裡跑：`T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "export KNIP_DISABLE_RAW_TRANSFER=1; pnpm check"`；開過的 dev server 用完要關（見開工訊息的 VM 注意事項）。
   - 要它讀的規格檔：相關的 repo skill（`.claude/skills/<名字>/SKILL.md`），以及使用者層級的 `/home/dev/.claude/skills/review-change/lenses.md`、`/home/dev/.claude/skills/verification-evidence/SKILL.md`。
-- Codex 不能用時（`orchestrator_capabilities` 裡 Codex 有 constraints、沒有 `gpt-6.1-sol`，或同一個任務實際跑了兩次都失敗），改用 Claude 內建的 subagent，並在 PR 裡寫明。
+  - 上面「不要鑽牛角尖」那段。
 - PR 的「驗證」和「Review」段寫明每個角色用了哪個 provider 和模型。
 
 ## 4. 獨立驗證

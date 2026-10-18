@@ -71,7 +71,7 @@ disable-model-invocation: true
 
 ## 流程與授權
 /plan-it → /implement-plan → 整體 /review-change → 獨立 verifier → PR → 合併，細節見 ticket-workflow skill。
-test-author、review lens、verifier 用 t3 的 delegate_task 交給 Codex（gpt-6.1-sol、medium），任務說明要寫完整的 VM 規則，見 ticket-workflow skill「subagent 用 Codex」。
+test-author、review lens、verifier 用 t3 的 delegate_task 交給 Codex（gpt-6.1-sol、medium、Fast）；Codex 不能用就改 Sonnet 5.5（high）。見 ticket-workflow skill「subagent 用 Codex」。
 授權：可以 commit、push 這個 branch、開 PR；沒有 needs-human 的 PR 條件滿足就自己合併。部署正式環境、呼叫外部服務仍要先問人。
 
 ## 回報
