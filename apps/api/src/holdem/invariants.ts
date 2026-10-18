@@ -10,7 +10,7 @@ import {
   type Seat,
   type Street,
 } from './match';
-import { type Deal, dealHand, isSeed } from './shuffle';
+import { type Deal, dealHand } from './shuffle';
 
 // Restated here, not imported, so a wrong table in the engine can't hide.
 const STREETS: Street[] = ['preflop', 'flop', 'turn', 'river'];
@@ -183,7 +183,7 @@ function checkLegal(state: MatchState, seat: Seat): string[] {
 }
 
 function checkConfig({ seed }: MatchConfig): string[] {
-  return isSeed(seed)
+  return /^[0-9a-f]{64}$/.test(seed)
     ? []
     : [`Seed must be 64 lowercase hex characters: ${seed}`];
 }
