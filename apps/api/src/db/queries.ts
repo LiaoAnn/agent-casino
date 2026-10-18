@@ -1,10 +1,11 @@
 // What the read endpoints answer (A13, A15), in the contract's shapes.
 import { and, asc, desc, eq, isNull, lt, or } from 'drizzle-orm';
-import type {
-  Leaderboard,
-  MatchDetail,
-  MatchHand,
-  MatchList,
+import {
+  defaultDisplayName,
+  type Leaderboard,
+  type MatchDetail,
+  type MatchHand,
+  type MatchList,
 } from '../contract/schemas';
 import { blindsAt } from '../holdem/match';
 import { dealHand } from '../holdem/shuffle';
@@ -26,6 +27,7 @@ export async function getLeaderboard(db: Db): Promise<Leaderboard> {
   const rows = await db
     .select({
       name: ratings.name,
+      displayName: ratings.displayName,
       rating: ratings.rating,
       games: ratings.games,
       wins: ratings.wins,
@@ -38,8 +40,10 @@ export async function getLeaderboard(db: Db): Promise<Leaderboard> {
     .orderBy(desc(ratings.rating), asc(ratings.nameKey))
     .limit(LEADERBOARD_SIZE);
   return {
-    entries: rows.map((row, i) => ({
+    entries: rows.map(({ displayName, ...row }, i) => ({
       ...row,
+      // Null until the name plays a match after T35 (A20).
+      display_name: displayName ?? row.name,
       rank: i + 1,
       rating: Math.round(row.rating),
     })),
@@ -69,6 +73,8 @@ export async function listMatches(
       match_id: matches.matchId,
       player0: matches.player0,
       player1: matches.player1,
+      display0: matches.display0,
+      display1: matches.display1,
       result: matches.result,
       endedAt: matches.endedAt,
       rated: matches.rated,
@@ -79,14 +85,28 @@ export async function listMatches(
     .limit(PAGE_SIZE + 1);
   const page = rows.slice(0, PAGE_SIZE);
   return {
-    matches: page.map(({ player0, player1, endedAt, ...row }) => ({
-      ...row,
-      players: [player0, player1],
-      ended_at: endedAt.toISOString(),
-    })),
+    matches: page.map(
+      ({ player0, player1, display0, display1, endedAt, ...rest }) => ({
+        ...rest,
+        players: [player0, player1],
+        display_names: displayNames({ player0, player1, display0, display1 }),
+        ended_at: endedAt.toISOString(),
+      }),
+    ),
     next: rows.length > PAGE_SIZE ? (page.at(-1)?.match_id ?? null) : null,
   };
 }
+
+// A20: a match from before T35 stored no display names.
+const displayNames = (row: {
+  player0: string;
+  player1: string;
+  display0: string | null;
+  display1: string | null;
+}): [string, string] => [
+  row.display0 ?? defaultDisplayName(row.player0),
+  row.display1 ?? defaultDisplayName(row.player1),
+];
 
 // A19: a match from before T34 had a fixed number of hands and blinds 1/2,
 // which `blind_every: null` stands for.
@@ -138,6 +158,7 @@ export async function getMatch(
   return {
     match_id: row.matchId,
     players: [row.player0, row.player1],
+    display_names: displayNames(row),
     settings,
     seed: row.seed,
     result: row.result,

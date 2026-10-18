@@ -6,9 +6,28 @@ import { Schema } from 'effect';
 
 export const NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 export const RESERVED_NAMES = ['house-bot'] as const;
+// What people see of house-bot (A20).
+export const HOUSE_BOT_DISPLAY_NAME = 'House Bot';
+// The display name of someone who gave none (A20).
+export const defaultDisplayName = (name: string) =>
+  name.toLowerCase() === RESERVED_NAMES[0] ? HOUSE_BOT_DISPLAY_NAME : name;
 // What an agent makes up once per match and sends on every POST /v1/queue
 // (A17); checked by the handler, like names.
 export const QUEUE_KEY_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
+
+// A20: the name people see, apart from `name`, the identity. Any text, but
+// no control characters or line breaks.
+export const DISPLAY_NAME_MAX = 24;
+const FORBIDDEN_IN_DISPLAY_NAME = /[\p{Cc}\u2028\u2029]/u;
+
+// What a display name is stored as: NFC, trimmed, each run of whitespace one
+// space, 1-24 code points. `null` when the name can't be used.
+export function normalizeDisplayName(raw: string): string | null {
+  if (FORBIDDEN_IN_DISPLAY_NAME.test(raw)) return null;
+  const name = raw.normalize('NFC').trim().replace(/\s+/g, ' ');
+  const length = [...name].length;
+  return length >= 1 && length <= DISPLAY_NAME_MAX ? name : null;
+}
 
 // A freezeout: blinds double every `blind_every` hands and the match ends
 // when a stack is empty, or after `max_hands` (holdem-rules 賽制, A19).
@@ -45,6 +64,8 @@ export const IsoTime = pattern(
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/,
 );
 const Hint = Schema.String;
+// In responses: `name` when none was given, which can be up to 32 characters.
+const DisplayName = Schema.String.check(Schema.isMinLength(1));
 const Token = Schema.String;
 const HoleCards = Schema.Tuple([Card, Card]);
 const Board = Schema.Array(Card).check(Schema.isMaxLength(5));
@@ -91,9 +112,19 @@ export const TestSettings = Schema.Struct({
 
 const Game = Schema.Literal('holdem');
 
+// Checked here; the handler stores normalizeDisplayName's result (A20).
+export const DisplayNameInput = Schema.String.check(
+  Schema.makeFilter((raw: string) =>
+    normalizeDisplayName(raw) === null
+      ? `display_name must be 1-${DISPLAY_NAME_MAX} characters after trimming, with no control characters or line breaks; leave it out to show your name`
+      : true,
+  ),
+);
+
 export const QueueRequest = Schema.Struct({
   game: Game,
   name: Schema.String,
+  display_name: Schema.optionalKey(DisplayNameInput),
   queue_key: Schema.String.annotateKey({
     messageMissingKey:
       'Missing queue_key: make one once with `openssl rand -hex 16`, save it, and send it on every POST /v1/queue',
@@ -105,6 +136,7 @@ export const QueueRequest = Schema.Struct({
 export const CreateRoomRequest = Schema.Struct({
   game: Game,
   name: Schema.String,
+  display_name: Schema.optionalKey(DisplayNameInput),
   settings: Schema.optionalKey(Settings),
   opponent: Schema.optionalKey(Schema.Literal('bot')),
   test: Schema.optionalKey(TestSettings),
@@ -112,6 +144,7 @@ export const CreateRoomRequest = Schema.Struct({
 
 export const JoinRequest = Schema.Struct({
   name: Schema.String,
+  display_name: Schema.optionalKey(DisplayNameInput),
   invite_code: Schema.String,
 });
 
@@ -148,6 +181,8 @@ export const QueueResponse = Schema.Union([
     seat: Seat,
     token: Token,
     opponent_name: Name,
+    display_name: DisplayName,
+    opponent_display_name: DisplayName,
     settings: RoomSettings,
     watch_url: WatchUrl,
     hint: Hint,
@@ -169,6 +204,9 @@ export const CreateRoomResponse = Schema.Struct({
   invite_code: InviteCode,
   seat: Seat,
   token: Token,
+  display_name: DisplayName,
+  // `null` until someone joins; "House Bot" against the bot.
+  opponent_display_name: Schema.NullOr(DisplayName),
   settings: RoomSettings,
   watch_url: WatchUrl,
   hint: Hint,
@@ -179,6 +217,8 @@ export const JoinResponse = Schema.Struct({
   seat: Seat,
   token: Token,
   opponent_name: Name,
+  display_name: DisplayName,
+  opponent_display_name: DisplayName,
   settings: RoomSettings,
   watch_url: WatchUrl,
   hint: Hint,
@@ -247,6 +287,9 @@ const roomFields = {
   room_status: Schema.Literals(['waiting', 'playing', 'finished', 'void']),
   // `null` until the opponent joins; "house-bot" against the bot.
   opponent_name: Schema.NullOr(Name),
+  display_name: DisplayName,
+  // `null` until the opponent joins; "House Bot" against the bot.
+  opponent_display_name: Schema.NullOr(DisplayName),
   settings: RoomSettings,
   to_act_seat: Schema.NullOr(Seat),
   hand_number: Schema.NullOr(
@@ -309,6 +352,8 @@ export const Leaderboard = Schema.Struct({
     Schema.Struct({
       rank: Schema.Int,
       name: Name,
+      // From the name's latest match.
+      display_name: DisplayName,
       rating: Rating,
       games: NonNegativeInt,
       wins: NonNegativeInt,
@@ -320,6 +365,8 @@ export const Leaderboard = Schema.Struct({
 export type Leaderboard = typeof Leaderboard.Type;
 
 const Players = Schema.Tuple([Name, Name]);
+// As the players were shown in that match, by seat.
+const DisplayNames = Schema.Tuple([DisplayName, DisplayName]);
 const SeatResult = Schema.Literals([
   'seat0_win',
   'seat1_win',
@@ -331,6 +378,7 @@ const SeatResult = Schema.Literals([
 export const MatchSummary = Schema.Struct({
   match_id: MatchId,
   players: Players,
+  display_names: DisplayNames,
   result: SeatResult,
   ended_at: IsoTime,
   rated: Schema.Boolean,
@@ -367,6 +415,7 @@ const RatingChange = Schema.Struct({
 export const MatchDetail = Schema.Struct({
   match_id: MatchId,
   players: Players,
+  display_names: DisplayNames,
   // `blind_every` is `null` for a match from before T34: fixed 1/2 blinds.
   settings: Schema.Struct({
     ...RoomSettings.fields,
@@ -425,6 +474,7 @@ const watchFields = {
   // The watched seat.
   seat: Seat,
   players: Schema.Tuple([Name, Schema.NullOr(Name)]),
+  display_names: Schema.Tuple([DisplayName, Schema.NullOr(DisplayName)]),
   settings: RoomSettings,
   hand_number: roomFields.hand_number,
   to_act_seat: roomFields.to_act_seat,

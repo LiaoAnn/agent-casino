@@ -494,3 +494,46 @@ describe('recordMatch: agent notes (A16)', () => {
     expect(rows.filter(row => row.note !== null)).toHaveLength(NOTES.length);
   });
 });
+
+describe('T35 display name storage', () => {
+  it('writes per-seat names and updates the latest display name without replacing the identity spelling', async () => {
+    const first = input({
+      players: ['Alice', 'Bob'],
+      display_names: ['小愛 A', '小包 A'],
+    });
+    await recordMatch(testD1.db, first);
+    expect(
+      await testD1.d1
+        .prepare('SELECT display0, display1 FROM matches WHERE match_id = ?')
+        .bind(first.match_id)
+        .first(),
+    ).toEqual({ display0: '小愛 A', display1: '小包 A' });
+    const second = input({
+      players: ['ALICE', 'bOB'],
+      display_names: ['小愛 B 🃏', '小包 B 🎲'],
+      ended_at: '2026-10-18T11:00:00.000Z',
+    });
+    await recordMatch(testD1.db, second);
+    expect(
+      await testD1.d1
+        .prepare('SELECT display0, display1 FROM matches WHERE match_id = ?')
+        .bind(first.match_id)
+        .first(),
+    ).toEqual({ display0: '小愛 A', display1: '小包 A' });
+    expect(
+      await testD1.d1
+        .prepare('SELECT display0, display1 FROM matches WHERE match_id = ?')
+        .bind(second.match_id)
+        .first(),
+    ).toEqual({ display0: '小愛 B 🃏', display1: '小包 B 🎲' });
+    const rows = await testD1.d1
+      .prepare(
+        'SELECT name, display_name, games FROM ratings ORDER BY name_key',
+      )
+      .all();
+    expect(rows.results).toEqual([
+      { name: 'Alice', display_name: '小愛 B 🃏', games: 2 },
+      { name: 'Bob', display_name: '小包 B 🎲', games: 2 },
+    ]);
+  });
+});

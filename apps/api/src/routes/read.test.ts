@@ -198,6 +198,7 @@ describe('GET /v1/leaderboard', () => {
       {
         rank: 1,
         name: 'Alice',
+        display_name: 'Alice',
         rating: 1516,
         games: 1,
         wins: 1,
@@ -207,6 +208,7 @@ describe('GET /v1/leaderboard', () => {
       {
         rank: 2,
         name: 'Bob',
+        display_name: 'Bob',
         rating: 1484,
         games: 1,
         wins: 0,
@@ -320,6 +322,7 @@ describe('GET /v1/matches', () => {
         {
           match_id: rated.match_id,
           players: ['Alice', 'Bob'],
+          display_names: ['Alice', 'Bob'],
           result: 'seat0_win',
           ended_at: minutes(5),
           rated: true,
@@ -327,6 +330,7 @@ describe('GET /v1/matches', () => {
         {
           match_id: bot.match_id,
           players: ['carol', 'house-bot'],
+          display_names: ['carol', 'House Bot'],
           result: 'seat0_win',
           ended_at: minutes(4),
           rated: false,
@@ -334,6 +338,7 @@ describe('GET /v1/matches', () => {
         {
           match_id: voided.match_id,
           players: ['Alice', 'Bob'],
+          display_names: ['Alice', 'Bob'],
           result: 'void',
           ended_at: minutes(3),
           rated: false,
@@ -341,6 +346,7 @@ describe('GET /v1/matches', () => {
         {
           match_id: cancelled.match_id,
           players: ['ALICE', 'dave'],
+          display_names: ['ALICE', 'dave'],
           result: 'cancelled',
           ended_at: minutes(2),
           rated: false,
@@ -485,6 +491,7 @@ describe('GET /v1/matches/{match_id}', () => {
     expect(await matchDetail(match.match_id)).toStrictEqual({
       match_id: match.match_id,
       players: ['Alice', 'bob'],
+      display_names: ['Alice', 'bob'],
       settings: {
         max_hands: 2,
         turn_seconds: 45,
@@ -703,5 +710,72 @@ describe('T34 freezeout match records', () => {
     });
     expect(detail.hands).toHaveLength(6);
     for (const hand of detail.hands) expect(hand.blinds).toEqual([1, 2]);
+  });
+});
+
+describe('T35 recorded display names', () => {
+  it('keeps per-match names and updates the existing identity to its latest rated display name', async () => {
+    const first = await record({
+      players: ['Alice', 'Bob'],
+      display_names: ['小愛 A', '小包 A'],
+      ended_at: minutes(1),
+    });
+    const second = await record({
+      players: ['ALICE', 'bOB'],
+      display_names: ['小愛 B 🃏', '小包 B 🎲'],
+      ended_at: minutes(2),
+    });
+    expect((await matchDetail(first.match_id)).display_names).toEqual([
+      '小愛 A',
+      '小包 A',
+    ]);
+    expect((await matchDetail(second.match_id)).display_names).toEqual([
+      '小愛 B 🃏',
+      '小包 B 🎲',
+    ]);
+    expect((await matchList()).matches.map(m => m.display_names)).toEqual([
+      ['小愛 B 🃏', '小包 B 🎲'],
+      ['小愛 A', '小包 A'],
+    ]);
+    expect((await leaderboard()).entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Alice',
+          display_name: '小愛 B 🃏',
+          games: 2,
+        }),
+        expect.objectContaining({
+          name: 'Bob',
+          display_name: '小包 B 🎲',
+          games: 2,
+        }),
+      ]),
+    );
+    expect((await leaderboard()).entries).toHaveLength(2);
+  });
+
+  it('reads pre-T35 null match and rating columns using each stored name', async () => {
+    const match = await record({
+      players: ['AlIce', 'bOB'],
+      display_names: ['新名字', '另一個名字'],
+    });
+    await testD1.d1
+      .prepare('UPDATE matches SET display0 = NULL, display1 = NULL')
+      .run();
+    await testD1.d1.prepare('UPDATE ratings SET display_name = NULL').run();
+    expect((await matchDetail(match.match_id)).display_names).toEqual([
+      'AlIce',
+      'bOB',
+    ]);
+    expect((await matchList()).matches[0]?.display_names).toEqual([
+      'AlIce',
+      'bOB',
+    ]);
+    expect((await leaderboard()).entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'AlIce', display_name: 'AlIce' }),
+        expect.objectContaining({ name: 'bOB', display_name: 'bOB' }),
+      ]),
+    );
   });
 });

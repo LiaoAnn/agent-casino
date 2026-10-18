@@ -73,7 +73,13 @@ const joinedRoom = async (webUrl?: string) => {
     await room.join({ name: 'bob', invite_code: INPUT.invite_code }),
   ).toEqual({
     ok: true,
-    value: { seat: 1, opponent_name: 'alice', settings: INPUT.settings },
+    value: {
+      seat: 1,
+      opponent_name: 'alice',
+      display_name: 'bob',
+      opponent_display_name: 'alice',
+      settings: INPUT.settings,
+    },
   });
   return { room, storage, matchmaker, id, recordMatch, recorded };
 };
@@ -296,4 +302,104 @@ describe('match_over record links (T32, A15)', () => {
       );
     });
   }
+});
+
+describe('T35 persisted room display names', () => {
+  it('persists both display names across a RoomReferee recreation and passes them to the match recorder', async () => {
+    const storage = new MemoryStorage();
+    const record = vi.fn(
+      async (_input: MatchRecordInput): Promise<RecordedMatch> => ({
+        rated: false,
+        ratings: null,
+      }),
+    );
+    const options = { waitMs: 1, record };
+    const referee = new RoomReferee(storage, options);
+    expect(
+      await referee.create({ ...INPUT, display_name: '小愛 🃏' }),
+    ).toMatchObject({ ok: true });
+    expect(
+      await referee.join({
+        name: 'bob',
+        display_name: '小包 🎲',
+        invite_code: INPUT.invite_code,
+      }),
+    ).toMatchObject({
+      ok: true,
+      value: { display_name: '小包 🎲', opponent_display_name: '小愛 🃏' },
+    });
+    const restored = new RoomReferee(storage, options);
+    for (const wait of [false, true]) {
+      for (const seat of [0, 1] as const) {
+        expect(await restored.status(seat, { wait })).toMatchObject({
+          ok: true,
+          value: {
+            display_name: seat === 0 ? '小愛 🃏' : '小包 🎲',
+            opponent_display_name: seat === 0 ? '小包 🎲' : '小愛 🃏',
+          },
+        });
+      }
+    }
+    expect(await restored.leave(0)).toMatchObject({ ok: true });
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        players: ['alice', 'bob'],
+        display_names: ['小愛 🃏', '小包 🎲'],
+      }),
+    );
+  });
+
+  it.each(['waiting', 'human', 'bot'] as const)(
+    'reads a pre-T35 %s room without display_names',
+    async kind => {
+      const storage = new MemoryStorage();
+      const options = { waitMs: 1 };
+      const original = new RoomReferee(storage, options);
+      expect(
+        await original.create({
+          ...INPUT,
+          display_name: '新名字',
+          ...(kind === 'bot' ? { opponent: 'bot' as const } : {}),
+        }),
+      ).toMatchObject({ ok: true });
+      if (kind === 'human') {
+        expect(
+          await original.join({
+            name: 'bOB',
+            display_name: '另一個名字',
+            invite_code: INPUT.invite_code,
+          }),
+        ).toMatchObject({ ok: true });
+      }
+      const stored = await storage.get<Record<string, unknown>>('room');
+      if (!stored) throw new Error('Expected a persisted room');
+      delete stored.display_names;
+      await storage.put('room', stored);
+      const restored = new RoomReferee(storage, options);
+      const opponent =
+        kind === 'waiting' ? null : kind === 'bot' ? 'House Bot' : 'bOB';
+      for (const wait of [false, true]) {
+        expect(await restored.status(0, { wait })).toMatchObject({
+          ok: true,
+          value: { display_name: 'alice', opponent_display_name: opponent },
+        });
+        if (kind === 'human') {
+          expect(await restored.status(1, { wait })).toMatchObject({
+            ok: true,
+            value: { display_name: 'bOB', opponent_display_name: 'alice' },
+          });
+        }
+      }
+      expect(await restored.watch(0)).toMatchObject({
+        ok: true,
+        value: { display_names: ['alice', opponent] },
+      });
+      if (kind === 'human') {
+        expect(await restored.watch(1)).toMatchObject({
+          ok: true,
+          value: { display_names: ['alice', 'bOB'] },
+        });
+      }
+    },
+  );
 });

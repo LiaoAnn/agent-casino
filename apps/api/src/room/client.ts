@@ -4,7 +4,9 @@
 import { Effect, Schema } from 'effect';
 import { type ApiError, apiError } from '../contract/errors';
 import {
+  HOUSE_BOT_DISPLAY_NAME,
   NAME_PATTERN,
+  normalizeDisplayName,
   RESERVED_NAMES,
   RoomId,
   SETTINGS_DEFAULTS,
@@ -89,6 +91,16 @@ export const roomDefaults = (
   const test = defaults || input.test ? { ...defaults, ...input.test } : null;
   return { settings, test };
 };
+
+// A20: the display name to store, `name` when none was given. Requests are
+// checked by the contract, so a given one is valid.
+export const displayNameOf = (input: {
+  name: string;
+  display_name?: string;
+}) =>
+  input.display_name === undefined
+    ? input.name
+    : (normalizeDisplayName(input.display_name) ?? input.name);
 
 // `retry` names the request to resend with another name.
 export const nameError = (name: string, retry: string) => {
@@ -192,6 +204,8 @@ export const openRoom = (
   env: Bindings,
   input: {
     name: string;
+    // Normalized (A20); `name` when left out.
+    display_name?: string;
     settings?: typeof Settings.Type;
     test?: typeof TestSettings.Type;
     opponent?: 'bot';
@@ -210,6 +224,7 @@ export const openRoom = (
         room_id,
         invite_code,
         name: input.name,
+        display_name: input.display_name,
         settings,
         seed: newSeed(test),
         test,
@@ -217,14 +232,23 @@ export const openRoom = (
       }),
     );
     const signed = yield* sign(env, { room_id, seat: 0, name: input.name });
-    return { room_id, invite_code, seat: 0 as const, ...signed, settings };
+    return {
+      room_id,
+      invite_code,
+      seat: 0 as const,
+      ...signed,
+      display_name: input.display_name ?? input.name,
+      opponent_display_name:
+        input.opponent === 'bot' ? HOUSE_BOT_DISPLAY_NAME : null,
+      settings,
+    };
   });
 
 // Seats `name` in seat 1 of the room. Check the name with nameError first.
 export const joinRoom = (
   env: Bindings,
   roomId: string,
-  input: { name: string; invite_code: string },
+  input: { name: string; display_name?: string; invite_code: string },
 ) =>
   Effect.gen(function* () {
     const stub = yield* roomStub(env, roomId);

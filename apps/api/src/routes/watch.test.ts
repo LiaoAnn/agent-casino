@@ -774,6 +774,7 @@ describe('GET /v1/rooms/{room_id}/watch while waiting for an opponent', () => {
       room_id: room.room_id,
       seat: 0,
       players: ['alice', null],
+      display_names: ['alice', null],
       settings: {
         max_hands: 5,
         turn_seconds: 20,
@@ -1523,4 +1524,72 @@ it('fills freezeout defaults in create, join, wait, state and watch responses', 
   const { watch } = await watchOf(t.env, room.room_id, tokenOf(room.watch_url));
   expect(watch.settings).toEqual(expected);
   expect(watch.view).toMatchObject({ blinds: [1, 2], next_blinds_at_hand: 6 });
+});
+
+describe('T35 watch display names', () => {
+  it('returns seat-ordered normalized names before joining, during play and after finishing', async () => {
+    const { env } = makeEnv();
+    const room = await createRoom(env, {
+      name: 'AlIce',
+      display_name: '  小愛   🃏 ',
+    });
+    const watchToken = tokenOf(room.watch_url);
+    expect(
+      (await watchOf(env, room.room_id, watchToken)).watch.display_names,
+    ).toEqual(['小愛 🃏', null]);
+    const response = await post(env, `/v1/rooms/${room.room_id}/join`, {
+      name: 'bOB',
+      invite_code: room.invite_code,
+      display_name: '  Cafe\u0301  🎲 ',
+    });
+    expect(response.status).toBe(200);
+    const joined = decodeJoin(await response.json());
+    for (const token of [watchToken, tokenOf(joined.watch_url)]) {
+      expect(
+        (await watchOf(env, room.room_id, token)).watch.display_names,
+      ).toEqual(['小愛 🃏', 'Café 🎲']);
+    }
+    expect(
+      (await post(env, `/v1/rooms/${room.room_id}/leave`, {}, room.token))
+        .status,
+    ).toBe(200);
+    for (const token of [watchToken, tokenOf(joined.watch_url)]) {
+      expect(
+        (await watchOf(env, room.room_id, token)).watch.display_names,
+      ).toEqual(['小愛 🃏', 'Café 🎲']);
+    }
+    const detail = await get(env, `/v1/matches/${room.room_id}`);
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({
+      players: ['AlIce', 'bOB'],
+      display_names: ['小愛 🃏', 'Café 🎲'],
+    });
+    const list = await get(env, '/v1/matches');
+    expect(list.status).toBe(200);
+    expect(await list.json()).toMatchObject({
+      matches: [
+        expect.objectContaining({
+          match_id: room.room_id,
+          display_names: ['小愛 🃏', 'Café 🎲'],
+        }),
+      ],
+    });
+    const board = await get(env, '/v1/leaderboard');
+    expect(board.status).toBe(200);
+    expect(await board.json()).toMatchObject({
+      entries: expect.arrayContaining([
+        expect.objectContaining({ name: 'AlIce', display_name: '小愛 🃏' }),
+        expect.objectContaining({ name: 'bOB', display_name: 'Café 🎲' }),
+      ]),
+    });
+  });
+
+  it('defaults to the request spelling and House Bot', async () => {
+    const { env } = makeEnv();
+    const room = await createRoom(env, { name: 'AlIce', opponent: 'bot' });
+    expect(
+      (await watchOf(env, room.room_id, tokenOf(room.watch_url))).watch
+        .display_names,
+    ).toEqual(['AlIce', 'House Bot']);
+  });
 });

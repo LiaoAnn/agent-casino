@@ -521,3 +521,74 @@ describe('T34 freezeout fake records', () => {
     }
   });
 });
+
+describe('T35 fake display names', () => {
+  const data = makeFakeData();
+  const { pages, summaries } = allSummaries(data);
+  const details = summaries.map(summary => {
+    const detail = data.match(summary.match_id);
+    if (detail === undefined) throw new Error(`no ${summary.match_id}`);
+    return detail;
+  });
+
+  it('provides display names on every leaderboard entry, summary, detail and watch response', () => {
+    const leaderboard = data.leaderboard();
+    expect(Schema.decodeUnknownSync(Leaderboard)(leaderboard)).toEqual(
+      leaderboard,
+    );
+    for (const entry of leaderboard.entries) {
+      expect(entry).toHaveProperty('display_name', expect.any(String));
+      expect(entry).not.toHaveProperty('display_name', '');
+    }
+    for (const page of pages) {
+      expect(Schema.decodeUnknownSync(MatchList)(page)).toEqual(page);
+    }
+    summaries.forEach((summary, index) => {
+      const detail = details[index];
+      expect(summary).toHaveProperty('display_names', [
+        expect.any(String),
+        expect.any(String),
+      ]);
+      expect(detail).toHaveProperty('display_names', summary.display_names);
+      expect(Schema.decodeUnknownSync(MatchDetail)(detail)).toEqual(detail);
+    });
+    for (const response of [data.watch.playing, data.watch.finished]) {
+      expect(response).toHaveProperty('display_names', [
+        expect.any(String),
+        expect.any(String),
+      ]);
+      expect(Schema.decodeUnknownSync(WatchResponse)(response)).toEqual(
+        response,
+      );
+    }
+  });
+
+  it('includes Chinese or emoji display names rather than only identity names', () => {
+    const names = [
+      ...data.leaderboard().entries.map(entry => entry.display_name),
+      ...summaries.flatMap(summary => summary.display_names),
+      ...details.flatMap(detail => detail.display_names),
+      ...(data.watch.playing.display_names ?? []),
+      ...(data.watch.finished.display_names ?? []),
+    ];
+    expect(
+      names.some(
+        name =>
+          typeof name === 'string' &&
+          /[\p{Script=Han}\p{Extended_Pictographic}]/u.test(name),
+      ),
+    ).toBe(true);
+  });
+
+  it('falls back to identity names for legacy records with fixed blinds', () => {
+    const legacy = details.filter(
+      detail => detail.settings.blind_every === null,
+    );
+    expect(legacy.length).toBeGreaterThan(0);
+    for (const detail of legacy) {
+      expect(detail).toHaveProperty('display_names', detail.players);
+      const summary = summaries.find(s => s.match_id === detail.match_id);
+      expect(summary).toHaveProperty('display_names', detail.players);
+    }
+  });
+});

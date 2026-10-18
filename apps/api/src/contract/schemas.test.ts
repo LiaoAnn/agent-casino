@@ -7,6 +7,8 @@ import {
   Card,
   CreateRoomRequest,
   CreateRoomResponse,
+  DISPLAY_NAME_MAX,
+  DisplayNameInput,
   InviteCode,
   IsoTime,
   JoinRequest,
@@ -14,8 +16,11 @@ import {
   Leaderboard,
   MatchDetail,
   MatchList,
+  MatchOver,
+  MatchSummary,
   NAME_PATTERN,
   Name,
+  normalizeDisplayName,
   QUEUE_KEY_PATTERN,
   QueueRequest,
   QueueResponse,
@@ -84,6 +89,8 @@ const yourTurn = {
   status: 'your_turn',
   room_status: 'playing',
   opponent_name: 'bob',
+  display_name: '小愛 🃏',
+  opponent_display_name: '鮑伯',
   settings,
   to_act_seat: 0,
   turn_id: 't_41',
@@ -117,6 +124,8 @@ const matchOver = {
   status: 'match_over',
   room_status: 'finished',
   opponent_name: 'bob',
+  display_name: '小愛 🃏',
+  opponent_display_name: '鮑伯',
   settings,
   to_act_seat: null,
   hand_number: 10,
@@ -340,6 +349,8 @@ describe('responses', () => {
         seat: 0,
         token: 'abc.def',
         opponent_name: 'bob',
+        display_name: '小愛 🃏',
+        opponent_display_name: '鮑伯',
         settings,
         watch_url: watchUrl,
         hint: `Matched. Next, call GET /v1/rooms/${ROOM}/wait`,
@@ -363,6 +374,8 @@ describe('responses', () => {
       decodes(CreateRoomResponse, {
         room_id: ROOM,
         invite_code: 'K7Q2MX',
+        display_name: '小愛 🃏',
+        opponent_display_name: null,
         seat: 0,
         token: 'abc.def',
         settings,
@@ -380,6 +393,8 @@ describe('responses', () => {
         status: 'waiting',
         room_status: 'waiting',
         opponent_name: null,
+        display_name: '小愛 🃏',
+        opponent_display_name: null,
         settings,
         to_act_seat: null,
         hand_number: null,
@@ -424,6 +439,8 @@ describe('responses', () => {
       seat: 1,
       token: 'abc.def',
       opponent_name: 'alice',
+      display_name: '小愛 🃏',
+      opponent_display_name: '鮑伯',
       settings,
       watch_url: watchUrl,
       hint: `Joined. Next, call GET /v1/rooms/${ROOM}/wait`,
@@ -439,6 +456,8 @@ describe('responses', () => {
     const created = {
       room_id: ROOM,
       invite_code: 'K7Q2MX',
+      display_name: '小愛 🃏',
+      opponent_display_name: null,
       seat: 0,
       token: 'abc.def',
       settings,
@@ -455,6 +474,8 @@ describe('responses', () => {
       seat: 0,
       token: 'abc.def',
       opponent_name: 'bob',
+      display_name: '小愛 🃏',
+      opponent_display_name: '鮑伯',
       settings,
       watch_url: watchUrl,
       hint: 'Matched',
@@ -516,6 +537,7 @@ describe('responses', () => {
           {
             rank: 1,
             name: 'alice',
+            display_name: '小愛 🃏',
             rating: 1532,
             games: 4,
             wins: 3,
@@ -528,6 +550,7 @@ describe('responses', () => {
     const summary = {
       match_id: ROOM,
       players: ['alice', 'bob'],
+      display_names: ['小愛 🃏', '鮑伯'],
       result: 'seat0_win',
       ended_at: '2026-10-16T12:50:30Z',
       rated: true,
@@ -547,6 +570,7 @@ describe('responses', () => {
   const detail = {
     match_id: ROOM,
     players: ['alice', 'bob'],
+    display_names: ['小愛 🃏', '鮑伯'],
     settings: {
       max_hands: 1,
       turn_seconds: 60,
@@ -697,6 +721,7 @@ describe('WatchResponse', () => {
     room_id: ROOM,
     seat: 0,
     players: ['alice', 'bob'],
+    display_names: ['小愛 🃏', '鮑伯'],
     settings,
     room_status: 'playing',
     hand_number: 2,
@@ -748,6 +773,7 @@ describe('WatchResponse', () => {
         room_id: ROOM,
         seat: 0,
         players: ['alice', null],
+        display_names: ['小愛 🃏', null],
         settings,
         room_status: 'waiting',
         hand_number: null,
@@ -986,5 +1012,284 @@ describe('T34 required freezeout fields', () => {
       };
       expect(Schema.decodeUnknownSync(RoomStatus)(response)).toEqual(response);
     }
+  });
+});
+
+// T35 / A20: validate input, but leave normalization to the handler.
+describe('T35 display name input', () => {
+  const valid = [
+    ['中文', '中文'],
+    ['牌桌 🃏', '牌桌 🃏'],
+    ['  小愛   的\u00a0\u3000牌桌  ', '小愛 的 牌桌'],
+    ['  Cafe\u0301  ', 'Café'],
+    ['🃏'.repeat(24), '🃏'.repeat(24)],
+    ['e\u0301'.repeat(24), 'é'.repeat(24)],
+    [`${'  牌'.padEnd(40, ' ')}桌  `, '牌 桌'],
+  ] as const;
+  const invalid = [
+    '',
+    ' \u00a0\u3000 ',
+    '牌'.repeat(25),
+    '🃏'.repeat(25),
+    'a\u0000b',
+    'a\u001fb',
+    'a\u007fb',
+    'a\u0085b',
+    '\nAlice',
+    'Alice\r',
+    'Alice\tBob',
+    'Alice\u2028Bob',
+    'Alice\u2029Bob',
+  ];
+
+  it('exports the 24 code point limit', () => {
+    expect(DISPLAY_NAME_MAX).toBe(24);
+  });
+
+  it.each(valid)(
+    'normalizes %j to %j, while decoding preserves raw input',
+    (raw, normalized) => {
+      expect(normalizeDisplayName(raw)).toBe(normalized);
+      expect(Schema.decodeUnknownSync(DisplayNameInput)(raw)).toBe(raw);
+    },
+  );
+
+  it.each(invalid)(
+    'rejects %j before whitespace can hide forbidden characters',
+    raw => {
+      expect(normalizeDisplayName(raw)).toBeNull();
+      expect(decodes(DisplayNameInput, raw)).toBe(false);
+    },
+  );
+
+  it('explains the length and control character rules in decode errors', () => {
+    const decode = Schema.decodeUnknownSync(DisplayNameInput);
+    expect(() => decode('牌'.repeat(25))).toThrow(/24/);
+    expect(() => decode('a\nb')).toThrow(/control/i);
+  });
+
+  const requests = [
+    [
+      'queue',
+      QueueRequest,
+      { game: 'holdem', name: 'alice', queue_key: 'alice-queue-key-1' },
+    ],
+    ['create', CreateRoomRequest, { game: 'holdem', name: 'alice' }],
+    ['join', JoinRequest, { name: 'alice', invite_code: 'K7Q2MX' }],
+  ] as const;
+
+  it.each(requests)(
+    '%s accepts optional display_name and keeps the original text',
+    (_label, schema, base) => {
+      const decode = Schema.decodeUnknownSync(
+        schema as unknown as Schema.Codec<unknown>,
+      );
+      expect(decodes(schema, base)).toBe(true);
+      for (const [raw] of valid) {
+        expect(decode({ ...base, display_name: raw })).toEqual({
+          ...base,
+          display_name: raw,
+        });
+      }
+      for (const display_name of [...invalid, null, 123]) {
+        expect(
+          decodes(schema, { ...base, display_name }),
+          JSON.stringify(display_name),
+        ).toBe(false);
+      }
+    },
+  );
+});
+
+describe('T35 required display names in responses', () => {
+  const named = { display_name: '小愛 🃏', opponent_display_name: '鮑伯' };
+  const entry = {
+    rank: 1,
+    name: 'alice',
+    display_name: '小愛 🃏',
+    rating: 1500,
+    games: 1,
+    wins: 1,
+    losses: 0,
+    draws: 0,
+  };
+  const summary = {
+    match_id: ROOM,
+    players: ['alice', 'bob'],
+    display_names: ['小愛 🃏', '鮑伯'],
+    result: 'cancelled',
+    rated: false,
+    ended_at: '2026-10-16T12:50:30Z',
+  };
+  const detail = {
+    ...summary,
+    settings,
+    seed: SEED,
+    final_stacks: [40, 40],
+    rating_changes: null,
+    hands: [],
+  };
+  const waiting = {
+    status: 'waiting',
+    room_status: 'waiting',
+    ...named,
+    opponent_display_name: null,
+    opponent_name: null,
+    settings,
+    to_act_seat: null,
+    hand_number: null,
+    view: null,
+    hint: 'Wait again',
+  };
+  const watch = {
+    room_id: ROOM,
+    seat: 0,
+    players: ['alice', null],
+    display_names: ['小愛 🃏', null],
+    settings,
+    room_status: 'waiting',
+    hand_number: null,
+    to_act_seat: null,
+    deadline: null,
+    view: null,
+    hands: [],
+  };
+  const finishedWatch = {
+    ...watch,
+    players: ['alice', 'bob'],
+    display_names: ['小愛 🃏', '鮑伯'],
+    room_status: 'finished',
+    match_id: ROOM,
+    result: 'cancelled',
+    final_stacks: [40, 40],
+    ratings: null,
+  };
+  const created = {
+    room_id: ROOM,
+    invite_code: 'K7Q2MX',
+    seat: 0,
+    token: 'abc.def',
+    settings,
+    watch_url: watchUrl,
+    hint: 'Wait again',
+    ...named,
+    opponent_display_name: null,
+  };
+  const joined = {
+    room_id: ROOM,
+    seat: 1,
+    token: 'abc.def',
+    opponent_name: 'bob',
+    settings,
+    watch_url: watchUrl,
+    hint: 'Call wait',
+    ...named,
+  };
+  const envelopes = [
+    ['matched', QueueResponse, { ...joined, status: 'matched' }, false],
+    ['join', JoinResponse, joined, false],
+    ['create', CreateRoomResponse, created, true],
+    ['your_turn', RoomStatus, yourTurn, true],
+    ['waiting', RoomStatus, waiting, true],
+    ['match_over via RoomStatus', RoomStatus, matchOver, true],
+    ['MatchOver', MatchOver, matchOver, true],
+  ] as const;
+
+  it.each(envelopes)(
+    '%s requires both display fields and preserves them',
+    (_label, schema, response, nullable) => {
+      const decode = Schema.decodeUnknownSync(
+        schema as unknown as Schema.Codec<unknown>,
+      );
+      expect(decode(response)).toEqual(response);
+      for (const key of ['display_name', 'opponent_display_name'] as const) {
+        const { [key]: _removed, ...without } = response;
+        expect(decodes(schema, without), `missing ${key}`).toBe(false);
+        expect(
+          decodes(schema, { ...response, [key]: '' }),
+          `empty ${key}`,
+        ).toBe(false);
+        expect(
+          decodes(schema, { ...response, [key]: null }),
+          `null ${key}`,
+        ).toBe(key === 'opponent_display_name' && nullable);
+        // Legacy fallback names can be longer than the input limit.
+        expect(decode({ ...response, [key]: 'a'.repeat(32) })).toMatchObject({
+          [key]: 'a'.repeat(32),
+        });
+      }
+    },
+  );
+
+  it('accepts House Bot as the opponent display name when creating a bot room', () => {
+    const response = { ...created, opponent_display_name: 'House Bot' };
+    expect(Schema.decodeUnknownSync(CreateRoomResponse)(response)).toEqual(
+      response,
+    );
+  });
+
+  const tuples = [
+    ['watch waiting/playing', WatchResponse, watch, true],
+    ['watch finished', WatchResponse, finishedWatch, true],
+    ['match summary', MatchSummary, summary, false],
+    ['match detail', MatchDetail, detail, false],
+  ] as const;
+
+  it.each(tuples)(
+    '%s requires the display_names tuple with nonempty strings',
+    (_label, schema, response, nullable) => {
+      const decode = Schema.decodeUnknownSync(
+        schema as unknown as Schema.Codec<unknown>,
+      );
+      expect(decode(response)).toEqual(response);
+      const { display_names: _names, ...without } = response;
+      expect(decodes(schema, without)).toBe(false);
+      for (const display_names of [
+        [],
+        ['Alice'],
+        ['Alice', 'Bob', 'Carol'],
+        ['', 'Bob'],
+        ['Alice', ''],
+        [null, 'Bob'],
+        ['Alice', 123],
+      ]) {
+        expect(
+          decodes(schema, { ...response, display_names }),
+          JSON.stringify(display_names),
+        ).toBe(false);
+      }
+      expect(
+        decodes(schema, { ...response, display_names: ['Alice', null] }),
+      ).toBe(nullable);
+      const display_names = ['a'.repeat(32), 'b'.repeat(32)];
+      expect(decode({ ...response, display_names })).toMatchObject({
+        display_names,
+      });
+    },
+  );
+
+  it('requires a nonempty display_name in each leaderboard entry, preserving a legacy name', () => {
+    const decode = Schema.decodeUnknownSync(Leaderboard);
+    expect(decode({ entries: [entry] })).toEqual({ entries: [entry] });
+    const { display_name: _name, ...without } = entry;
+    expect(decodes(Leaderboard, { entries: [without] })).toBe(false);
+    for (const display_name of ['', null, 123]) {
+      expect(
+        decodes(Leaderboard, { entries: [{ ...entry, display_name }] }),
+      ).toBe(false);
+    }
+    const legacy = {
+      ...entry,
+      name: 'a'.repeat(32),
+      display_name: 'a'.repeat(32),
+    };
+    expect(decode({ entries: [legacy] })).toEqual({ entries: [legacy] });
+  });
+
+  it('requires display_names on every match list entry', () => {
+    const response = { matches: [summary], next: null };
+    expect(Schema.decodeUnknownSync(MatchList)(response)).toEqual(response);
+    const { display_names: _names, ...without } = summary;
+    expect(decodes(MatchList, { matches: [without], next: null })).toBe(false);
   });
 });

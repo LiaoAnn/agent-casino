@@ -23,7 +23,10 @@ export const createRoom = HttpApiBuilder.handler(
       const badName = Rooms.nameError(payload.name, 'POST /v1/rooms');
       if (badName) return yield* Effect.fail(badName);
       yield* refuseBanned(env, payload.name, 'POST /v1/rooms');
-      const room = yield* Rooms.openRoom(env, payload);
+      const room = yield* Rooms.openRoom(env, {
+        ...payload,
+        display_name: Rooms.displayNameOf(payload),
+      });
       const wait = `GET /v1/rooms/${room.room_id}/wait`;
       return {
         ...room,
@@ -49,7 +52,10 @@ export const joinRoom = HttpApiBuilder.handler(
       );
       if (badName) return yield* Effect.fail(badName);
       yield* refuseBanned(env, payload.name, `POST /v1/rooms/${roomId}/join`);
-      const seated = yield* Rooms.joinRoom(env, roomId, payload);
+      const seated = yield* Rooms.joinRoom(env, roomId, {
+        ...payload,
+        display_name: Rooms.displayNameOf(payload),
+      });
       return {
         ...seated,
         hint: `Joined. ${SHARE_WATCH_URL}, then call GET /v1/rooms/${roomId}/wait for your first turn`,

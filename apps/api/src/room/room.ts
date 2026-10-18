@@ -28,7 +28,7 @@ export class Room extends DurableObject<Env> implements RoomApi {
     return this.#referee.create(input);
   }
 
-  join(input: { name: string; invite_code: string }) {
+  join(input: Parameters<RoomReferee['join']>[0]) {
     return this.#referee.join(input);
   }
 

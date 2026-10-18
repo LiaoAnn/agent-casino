@@ -24,6 +24,8 @@ type Matched = Extract<Answer, { status: 'matched' }>;
 export interface QueueInput {
   // Checked (name rules, house-bot, bans) by the handler.
   name: string;
+  // Normalized by the handler (A20); `name` when left out.
+  display_name?: string;
   settings?: typeof Settings.Type;
   // Only where ALLOW_TEST_ROOMS=true; the handler drops it otherwise.
   test?: typeof TestSettings.Type;
@@ -221,8 +223,9 @@ export class MatchQueue {
       return { ok: false, error: NAME_IN_USE(input.name) };
     }
     if (entry) {
-      // The same person waiting on: their latest settings count.
-      entry.input = input;
+      // The same person waiting on: their latest settings count, but the
+      // display name they first queued with stays (A20).
+      entry.input = { ...input, display_name: entry.input.display_name };
       entry.pairingKey = pairingKey(input);
     } else {
       entry = {
@@ -299,6 +302,9 @@ export class MatchQueue {
       }
       for (const { keys, queueKeys, at, matched } of saved?.pairings ?? []) {
         if (queueKeys === undefined) continue;
+        // Matched before display names (T35): the answer no longer fits the
+        // contract, so it is dropped as if expired.
+        if (matched.some(seat => seat.display_name === undefined)) continue;
         const pairing = {
           keys,
           queueKeys,
@@ -455,6 +461,7 @@ const openMatchIn =
         const room = yield* Rooms.openRoom(env, first);
         const joined = yield* Rooms.joinRoom(env, room.room_id, {
           name: second.name,
+          display_name: second.display_name,
           invite_code: room.invite_code,
         });
         const seats: [Seated, Seated] = [
@@ -463,6 +470,8 @@ const openMatchIn =
             seat: room.seat,
             token: room.token,
             opponent_name: second.name,
+            display_name: room.display_name,
+            opponent_display_name: joined.display_name,
             settings: room.settings,
             watch_url: room.watch_url,
           },

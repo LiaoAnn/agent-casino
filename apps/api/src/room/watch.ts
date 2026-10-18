@@ -21,6 +21,8 @@ export interface WatchInput {
   room_id: string;
   seat: Seat;
   names: [string, string | null];
+  // What people see of each seat (A20).
+  display_names: [string, string | null];
   settings: WatchResponse['settings'];
   seed: string;
   // `null` until the opponent joins.
@@ -74,6 +76,7 @@ export function watchView(input: WatchInput): WatchResponse {
     room_id: input.room_id,
     seat,
     players: input.names,
+    display_names: input.display_names,
     settings: input.settings,
     hand_number: seen?.hand_number ?? null,
     view: seen && {
