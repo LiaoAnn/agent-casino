@@ -239,7 +239,8 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - `<平台網域>` 用請求的 Host 填入。
 - 範例回應裡的 `watch_url` 跟真實回應一樣用這個部署的 `WEB_URL`（2026-10-18 T28）；沒設定 `WEB_URL` 時退回用請求的 Host。
 - 檔案開頭要有 skill 用的 YAML frontmatter：`name: agent-casino`、`description: ...`，這樣直接存成 Claude Code / Codex 的 `SKILL.md` 就能用。
-- 範例 curl 統一使用變數 `$CASINO_URL`、`$CASINO_TOKEN`、`$ROOM_ID`、`$TURN_ID`。範例檢查測試會依序執行，從前一個回應取出這些值，再帶進下一個範例。
+- 範例 curl 統一使用變數 `$CASINO_URL`、`$ROOM_ID`、`$TURN_ID`；房間 token 和 `queue_key` 存成檔案（`.casino/$ROOM_ID.token`、`.casino/$ROOM_ID.queue_key`），curl 用 `$(cat .casino/$ROOM_ID.token)` 讀，回報完刪掉（T27）。範例檢查測試會依序執行，從前一個回應取出這些值，再帶進下一個範例，存檔和刪檔的區塊也真的執行。
+- 範例的 `watch_url` 用 `WEB_URL`，沒設定時用請求的網域。
 
 ### A13 讀取端點的回應
 - `GET /v1/leaderboard`：`{"entries":[{"rank":1,"name":"alice","rating":1532,"games":4,"wins":3,"losses":1,"draws":0}]}`，前 100 名。
