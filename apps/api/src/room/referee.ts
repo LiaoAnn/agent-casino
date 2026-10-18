@@ -343,13 +343,17 @@ export class RoomReferee {
   > {
     const dropped = await this.#dropRequest(seat);
     if (dropped) return fail(dropped);
-    const opened = await this.#open();
+    // A3 first: the resend of an accepted action answers the same even
+    // while the finished match can't be stored.
+    const opened = await this.#open({ record: false });
     if (!opened.ok) return opened;
-    const data = opened.value;
-    const used = data.used_turns[input.turn_id];
+    const used = opened.value.used_turns[input.turn_id];
     if (used?.seat === seat && !used.timeout) {
-      return ok({ ...accepted(data), duplicate: true });
+      return ok({ ...accepted(opened.value), duplicate: true });
     }
+    const stored = await this.#stored(opened.value);
+    if (!stored.ok) return stored;
+    const data = stored.value;
     const state = statusFor(data, seat);
     if (data.ended) return fail(matchOverError(state));
     const { match, turn } = data;
@@ -523,17 +527,16 @@ export class RoomReferee {
 
   // Loads the room, refusing a missing one or one that ended over an hour
   // ago (A8).
-  async #open(): Promise<
+  // A10: no match_over before a played match is stored, unless `record` is
+  // false; then the caller calls #stored itself.
+  async #open(
+    options: { record: boolean } = { record: true },
+  ): Promise<
     Result<RoomData, 'room_not_found' | 'invalid_token' | 'unavailable'>
   > {
     const loaded = await this.#load();
     if (!loaded) return fail(roomNotFound());
-    let data = await this.#settle(loaded);
-    // A10: no match_over before the match is stored.
-    if (unrecorded(data)) {
-      if (!(await this.#record())) return fail(recordFailed());
-      data = (await this.#load()) ?? data;
-    }
+    const data = await this.#settle(loaded);
     if (data.ended && this.#now() - data.ended.at > EXPIRES_AFTER_END_MS) {
       return fail(
         apiError(
@@ -543,7 +546,15 @@ export class RoomReferee {
         ),
       );
     }
-    return ok(data);
+    return options.record ? this.#stored(data) : ok(data);
+  }
+
+  // The room once a match that ended is stored; `unavailable` if it can't
+  // be yet.
+  async #stored(data: RoomData): Promise<Result<RoomData, 'unavailable'>> {
+    if (!unrecorded(data)) return ok(data);
+    if (!(await this.#record())) return fail(recordFailed());
+    return ok((await this.#load()) ?? data);
   }
 
   // The one way an action is applied: by a player now, by the server on a

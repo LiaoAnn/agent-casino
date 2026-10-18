@@ -363,6 +363,79 @@ describe('T13 S1: replay, record, then match_over', () => {
     },
   );
 
+  it('returns the original accepted result for a duplicate final action while recording keeps failing', async () => {
+    let failing = true;
+    const t = fixture(
+      async () => {
+        if (failing) throw new Error('D1 temporarily unavailable');
+        return RECORDED;
+      },
+      { ...SETTINGS, hands: 1 },
+    );
+    await t.open();
+    const current = await t.turn();
+    const action = { turn_id: current.turn_id, type: 'fold' as const };
+    const accepted = await t.referee.act(current.seat, action);
+    expect(accepted).toMatchObject({
+      ok: true,
+      value: { status: 'accepted' },
+    });
+    if (!accepted.ok) throw new Error('Expected accepted final action');
+    expect(t.spy).toHaveBeenCalledTimes(1);
+    for (let retry = 0; retry < 2; retry++) {
+      expect(await t.referee.act(current.seat, action)).toEqual({
+        ok: true,
+        value: { ...accepted.value, duplicate: true },
+      });
+    }
+
+    failing = false;
+    for (const seat of [0, 1] as const) {
+      expect(await over(t, seat)).toMatchObject({
+        room_status: 'finished',
+        ratings: RECORDED.ratings,
+      });
+    }
+  });
+
+  it('schedules future alarms after failed recording, retries when due, and clears the alarm after success', async () => {
+    let failing = true;
+    const t = fixture(
+      async () => {
+        if (failing) throw new Error('D1 temporarily unavailable');
+        return RECORDED;
+      },
+      { ...SETTINGS, hands: 1 },
+    );
+    await t.open();
+    expect(await t.step({ type: 'fold' })).toMatchObject({
+      ok: true,
+      value: { status: 'accepted' },
+    });
+    expect(t.spy).toHaveBeenCalledTimes(1);
+    const original = structuredClone(t.spy.mock.calls[0][0]);
+    const firstAlarm = t.storage.alarm;
+    if (firstAlarm === null) throw new Error('Expected recording retry alarm');
+    expect(firstAlarm).toBeGreaterThan(t.clock.ms);
+
+    t.clock.ms = firstAlarm;
+    await t.referee.alarm();
+    expect(t.spy).toHaveBeenCalledTimes(2);
+    const secondAlarm = t.storage.alarm;
+    if (secondAlarm === null) throw new Error('Expected another retry alarm');
+    expect(secondAlarm).toBeGreaterThan(t.clock.ms);
+
+    failing = false;
+    t.clock.ms = secondAlarm;
+    await t.referee.alarm();
+    expect(t.spy).toHaveBeenCalledTimes(3);
+    expect(t.storage.alarm).toBeNull();
+    for (const [input] of t.spy.mock.calls) expect(input).toEqual(original);
+    expect(await over(t)).toMatchObject({ ratings: RECORDED.ratings });
+    expect(t.spy).toHaveBeenCalledTimes(3);
+    expect(t.storage.alarm).toBeNull();
+  });
+
   it.each(['state', 'wait', 'alarm'] as const)(
     'keeps the final action accepted and retries failed recording on every %s until success',
     async trigger => {
