@@ -1153,3 +1153,44 @@ describe('EXAMPLES', () => {
     ).toBeDefined();
   });
 });
+
+// T35 (casino-api A20): ask once for the display name, keep both names in
+// .casino/profile.json, and send display_name on every way to get a seat.
+describe('display names and the profile', () => {
+  const profile = section(MD, 'Your profile');
+
+  it('reads the profile first and asks the owner only when there is none', () => {
+    const read = profile.indexOf('cat .casino/profile.json');
+    const ask = profile.search(/ask them once/i);
+    expect(read).toBeGreaterThan(0);
+    expect(ask).toBeGreaterThan(read);
+    expect(profile).toMatch(/shown publicly/i);
+    expect(profile).toMatch(/only question/i);
+    expect(profile).toMatch(/don't ask again/i);
+  });
+
+  it('saves both names to profile.json and keeps it after the match', () => {
+    const save = fenced(profile, 'bash').find(b =>
+      b.includes('> .casino/profile.json'),
+    );
+    expect(save).toContain('"name":"alice"');
+    expect(save).toContain('"display_name":"Alice the Shark"');
+    expect(section(MD, 'How to play')).toMatch(
+      /Keep `\.casino\/profile\.json`/,
+    );
+  });
+
+  it('sends display_name when queueing, opening and joining a room', () => {
+    const blocks = fenced(section(MD, 'How to play'), 'bash');
+    for (const path of ['/v1/queue"', '/v1/rooms"', '/join"']) {
+      const block = blocks.find(b => b.includes(path));
+      expect(block, path).toMatch(/\\?"display_name\\?":/);
+    }
+  });
+
+  it('explains the display name fields of the answers', () => {
+    const play = section(MD, 'How to play');
+    expect(play).toContain('`opponent_display_name`');
+    expect(play).toContain('`House Bot`');
+  });
+});

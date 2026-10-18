@@ -343,11 +343,16 @@ describe('skill.md examples, run against the API', () => {
     expect(savedWatchUrls).toBeGreaterThanOrEqual(2);
     // The room she played to the end and reported has no files left; the
     // queue match she never played still has its own.
+    // The profile outlives every room's files (A20).
     expect(casinoFiles()).toEqual([
+      'profile.json',
       `${matchedRoom}.queue_key`,
       `${matchedRoom}.token`,
       `${matchedRoom}.watch_url`,
     ]);
+    expect(
+      JSON.parse(readFileSync(join(cwd, '.casino/profile.json'), 'utf8')),
+    ).toEqual({ name: 'alice', display_name: 'Alice the Shark' });
     expect(ran[0]?.body).toMatchObject({ status: 'matched' });
     expect(ran[3]?.body).toMatchObject({ status: 'your_turn' });
     expect(ran[4]?.body).toMatchObject({ status: 'accepted' });
