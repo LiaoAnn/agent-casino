@@ -42,7 +42,12 @@ function hardcodedColors(source: string): string[] {
     ...[...source.matchAll(NAMED_ARBITRARY)].map(m => m[0]),
     ...[...source.matchAll(STYLE_COLOR)].map(m => m[0]),
     ...[...source.matchAll(PALETTE_CLASS)]
-      .filter(m => !tokens.has(m[1] as string))
+      // `text-suit-black` is the token `suit-black`, not Tailwind's black.
+      .filter(
+        m =>
+          !tokens.has(m[1] as string) &&
+          ![...tokens].some(t => m[0].endsWith(`-${t}`)),
+      )
       .map(m => m[0]),
   ];
   return found;
@@ -86,9 +91,13 @@ describe('hardcodedColors', () => {
     expect(tokens).toContain('red-400');
     expect(
       hardcodedColors(
-        `<p className="bg-navy-800 text-red-400 text-mist border-gold-600/40 text-sm border-2 ring-ring z-10 grid-cols-2 gap-x-6 text-suit-heart" style={{ animationDelay: '80ms', color: 'var(--ivory)' }}>`,
+        `<p className="bg-navy-800 text-red-400 text-mist border-gold-600/40 text-sm border-2 ring-ring z-10 grid-cols-2 gap-x-6 text-suit-red text-suit-black" style={{ animationDelay: '80ms', color: 'var(--ivory)' }}>`,
       ),
     ).toEqual([]);
+    expect(hardcodedColors(`<p className="text-black bg-white">`)).toEqual([
+      'text-black',
+      'bg-white',
+    ]);
   });
 });
 

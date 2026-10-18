@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { WatchError, WatchView } from '@/components/watch-view';
-import { getWatch, type WatchData } from '@/data';
+import { getLeaderboard, getWatch, type WatchData } from '@/data';
 
 // Each poll is a Durable Object request (docs/cost.md 6b): every 2.5 s while
 // the match is on, never once it is over.
@@ -14,8 +14,16 @@ export const Route = createFileRoute('/watch/$roomId')({
   validateSearch: (search: Record<string, unknown>): { token?: string } =>
     search.token === undefined ? {} : { token: String(search.token) },
   loaderDeps: ({ search }) => ({ token: search.token ?? '' }),
-  loader: ({ params, deps }) =>
-    getWatch({ data: { roomId: params.roomId, token: deps.token } }),
+  // The leaderboard once, for the players' Elo (the watch answer has none
+  // while the match is on); never again while polling. Without it the
+  // seats just show no Elo.
+  loader: async ({ params, deps }) => {
+    const [watch, leaderboard] = await Promise.all([
+      getWatch({ data: { roomId: params.roomId, token: deps.token } }),
+      getLeaderboard().catch(() => null),
+    ]);
+    return { watch, ratings: leaderboard?.entries ?? [] };
+  },
   // The URL holds the token: never send it on to another page.
   headers: () => ({ 'Referrer-Policy': 'no-referrer' }),
   component: WatchPage,
@@ -24,13 +32,14 @@ export const Route = createFileRoute('/watch/$roomId')({
 function WatchPage() {
   const { roomId } = Route.useParams();
   const { token } = Route.useLoaderDeps();
-  const initial = Route.useLoaderData();
+  const { watch, ratings } = Route.useLoaderData();
   return (
     <Watch
       key={`${roomId}?${token}`}
       roomId={roomId}
       token={token}
-      initial={initial}
+      initial={watch}
+      ratings={ratings}
     />
   );
 }
@@ -44,11 +53,18 @@ function Watch({
   roomId,
   token,
   initial,
+  ratings,
 }: {
   roomId: string;
   token: string;
   initial: WatchData;
+  ratings: readonly { name: string; rating: number }[];
 }) {
+  // Leaderboard names are unique case-insensitively (casino-api A14).
+  const byName = useMemo(
+    () => new Map(ratings.map(r => [r.name.toLowerCase(), r.rating])),
+    [ratings],
+  );
   const [watch, setWatch] = useState(initial);
   const [offline, setOffline] = useState(false);
   // When the data on screen was fetched; set in the browser only, so the
@@ -83,5 +99,12 @@ function Watch({
   }, [done, polls, roomId, token]);
 
   if ('error' in watch) return <WatchError code={watch.error} />;
-  return <WatchView watch={watch} offline={offline} updatedAt={updatedAt} />;
+  return (
+    <WatchView
+      watch={watch}
+      offline={offline}
+      updatedAt={updatedAt}
+      ratings={byName}
+    />
+  );
 }

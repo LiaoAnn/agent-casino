@@ -1,67 +1,109 @@
 import { useEffect, useState } from 'react';
 import { ChipStack } from '@/components/chip-stack';
-import { type Pair, Pairs } from '@/components/pairs';
 import { Cards } from '@/components/playing-card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
-// One seat of the hand in play. `cards` is null for the opponent, whose
-// cards the watched seat has not seen; `deadline` only on the watched seat's
-// own turn, out of `turnSeconds`.
+// One player's plate on the rim of the table: name, the dealer button, hole
+// cards (backs when unseen), chips behind, Elo when known, and whose turn it
+// is. `deadline` only on the watched seat's own turn, out of `turnSeconds`;
+// `won` once a hand is over; `deal` deals the cards in, for a hand in play
+// (a record shows them still). Labels are for screen readers: the plate shows
+// the values alone, as a broadcast does.
 export function SeatPanel({
   name,
   stack,
-  bet,
+  rating,
   cards,
-  toAct,
-  deadline,
-  turnSeconds,
+  dealer,
+  toAct = false,
+  won = false,
+  deadline = null,
+  turnSeconds = 0,
+  deal = false,
 }: {
   name: string;
   stack: number;
-  bet: number;
+  rating?: number;
   cards: readonly string[] | null;
-  toAct: boolean;
-  deadline: string | null;
-  turnSeconds: number;
+  dealer: boolean;
+  toAct?: boolean;
+  won?: boolean;
+  deadline?: string | null;
+  turnSeconds?: number;
+  deal?: boolean;
 }) {
-  const items: Pair[] = [
-    ['籌碼', String(stack), 'font-semibold text-gold-400 text-lg'],
-    ['本街下注', <ChipStack key="b" amount={bet} />],
-    ['底牌', <Cards key="c" cards={cards} size="md" deal />],
-  ];
-  if (toAct)
-    items.push([
-      '行動',
-      <Badge key="a" variant="turn">
-        輪到
-      </Badge>,
-    ]);
-  if (deadline !== null) {
-    items.push([
-      '剩餘時間',
-      <Remaining key="t" deadline={deadline} turnSeconds={turnSeconds} />,
-    ]);
-  }
   return (
     <section
       aria-label={`座位：${name}`}
       className={cn(
-        'space-y-3 rounded-lg bg-navy-800 p-4 transition-[border-color,box-shadow] duration-150 ease-out',
+        'rounded-lg bg-navy-800 p-3 transition-[border-color,box-shadow] duration-150 ease-out',
         toAct
           ? 'glow-turn border-2 border-gold-400'
           : 'border-2 border-gold-600/40',
       )}>
-      <div className="flex flex-wrap items-center gap-2">
-        <h4 className="font-semibold text-ivory text-lg">{name}</h4>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h4 className="min-w-0 font-semibold text-ivory [overflow-wrap:anywhere]">
+          {name}
+        </h4>
+        {dealer && (
+          <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-ivory font-bold text-navy-950 text-xs">
+            <span aria-hidden="true" className="before:content-['D']" />
+            <span className="sr-only">莊家</span>
+          </span>
+        )}
         {/* No chips behind, all in the pot: nothing left to bet. */}
         {stack === 0 && <Badge variant="allin">ALL-IN</Badge>}
+        {won && <Badge variant="win">勝</Badge>}
       </div>
-      <Pairs items={items} />
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-sm">
+        <div className="contents">
+          <dt className="sr-only">底牌</dt>
+          <dd className="col-start-1 row-span-4 row-start-1">
+            <Cards cards={cards} size="md" deal={deal} />
+          </dd>
+        </div>
+        <div className="contents">
+          <dt className="sr-only">籌碼</dt>
+          <dd className="col-start-2">
+            <ChipStack
+              amount={stack}
+              className="font-semibold text-gold-400 text-lg"
+            />
+          </dd>
+        </div>
+        {rating !== undefined && (
+          <div className="contents">
+            <dt className="sr-only">Elo</dt>
+            <dd className="col-start-2 text-mist tabular-nums">
+              <span
+                aria-hidden="true"
+                className="mr-1 text-xs before:content-['Elo']"
+              />
+              {rating}
+            </dd>
+          </div>
+        )}
+        {toAct && (
+          <div className="contents">
+            <dt className="sr-only">行動</dt>
+            <dd className="col-start-2">
+              <Badge variant="turn">輪到</Badge>
+            </dd>
+          </div>
+        )}
+        {deadline !== null && (
+          <div className="contents">
+            <dt className="sr-only">剩餘時間</dt>
+            <dd className="col-start-2">
+              <Remaining deadline={deadline} turnSeconds={turnSeconds} />
+            </dd>
+          </div>
+        )}
+      </dl>
     </section>
   );
 }
-
 // Seconds left until `deadline`, as a ring and a number, counted in the
 // browser only: the server's clock would not match the page's by the time
 // it hydrates. The last five seconds turn the timeout colour.
