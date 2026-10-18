@@ -60,8 +60,8 @@ Ann 在 2026-10-17 同意，ticket thread 不用每次問就可以：
 | 自己寫 | 設定、膠水程式、純搬移或刪除 | 同一個 agent 照 `/tdd` 做 red → green，或寫明豁免理由 |
 
 拆開寫的三步：
-1. **test-author subagent 先寫測試**（用 Codex，見下面「subagent 用 Codex」）。 給它：計畫的 Why、這個 slice 的 Outcome 與 Acceptance、公開介面、相關 skill 的規格。**不給**實作方式，也不讓它看實作。請它從規格和邊界情況寫測試（規則用「種子 + 動作 → 預期結果」），跑一次，交回測試和 RED 的輸出。
-2. **確認 RED 的原因是對的**：失敗是因為功能還沒做（例如找不到函式、回傳不符），不是語法、import 或設定錯。原因不對就退回 test-author 修。
+1. **test-author subagent 先寫測試**（用 Codex，見下面「subagent 用 Codex」）。 給它：計畫的 Why、這個 slice 的 Outcome 與 Acceptance、公開介面、相關 skill 的規格。**不給**實作方式，也不讓它看實作。請它從規格和邊界情況寫測試（規則用「種子 + 動作 → 預期結果」），跑一次，交回測試和 RED 的輸出。邊界情況以 skill 寫到的為限；skill 沒定義的行為不要自己編成測試，列成問題交回。
+2. **你檢查 Codex 寫的測試**：RED 的原因要對（功能還沒做，例如找不到函式、回傳不符，而不是語法、import 或設定錯）；再對照規格看有沒有漏掉重要的情況，或測了規格沒要求的細節（實作細節、skill 沒定義的行為、不可能發生的輸入）。有問題就連同理由退回 test-author 修，不要自己改。
 3. **確認 RED 之後才開始實作**，寫到測試全過。實作者可以讀測試（測試就是規格），但**不准改測試**；覺得某個測試錯了，連同理由退回 test-author，還有爭議就通知 coordinator 問人。
 
 PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒有 RED 證據的拆開寫 slice 不算完成。
@@ -78,9 +78,15 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 
 **驗收（slice loop 第 5 步）** 照 `/verification-evidence` 拿 Observed 的證據：API 用 `curl https://<route>-<wt>.<vm>.liaoann.net/...`（網址看 `wt-status`），網頁用 t3 preview 截圖。需要 dev server 時開在 tmux（`<wt>-api`），用完就關，VM 記憶體很少。
 
-**Review（slice loop 第 6 步與最後）** 每個 slice 跑 `/review-change`，最後整個 branch 再跑一次（finished-feature 的 lenses）。每個 lens 的 reviewer 用 Codex（見下面「subagent 用 Codex」），選 lens、合併重複、確認 Blocker 仍由你自己做。給 reviewer 的 plan 要附 ticket 原文，讓它也檢查：做多、做少、寫死的數字、碰了範圍外的檔案、改了合約、跟 skill 規格不符。有 Blocker 就修，重跑受影響的檢查和驗收。
+**Review（slice loop 第 6 步與最後）** 每個 slice 跑 `/review-change`，最後整個 branch 再跑一次（finished-feature 的 lenses）。照 `/review-change` 的規則選 lens（一般 slice 只要 Correctness + Test Quality；碰到合約、持久資料、共用模組才加 Design Fit、Simplicity；碰到驗證、外部輸入、秘密才加 Security），不要每個 slice 都開五個。每個 lens 的 reviewer 用 Codex（見下面「subagent 用 Codex」），合併重複、確認 Blocker、決定 Hardening 要不要修仍由你自己做。給 reviewer 的 plan 要附 ticket 原文，讓它也檢查：做多、做少、寫死的數字、碰了範圍外的檔案、改了合約、跟 skill 規格不符。有 Blocker 就修，重跑受影響的檢查和驗收。
 
-**subagent 用 Codex**：test-author、review lens 和 verifier 交給別家模型，一方面省 Claude 的額度，一方面寫測試、review 和實作的不是同一個模型，比較容易抓到盲點。
+**subagent 用 Codex**：主要的 agent 一定是 Claude（你），負責計畫、實作和所有決定。繁瑣但必須做的事交給 Codex：照規格寫測試、照 lens 看 diff、從乾淨狀態重跑驗證。兩邊互相檢查對方寫的東西：Codex 寫的測試你檢查，你寫的程式 Codex review，Codex 的驗證結果你看過才開 PR。這樣省 Claude 的額度，不同模型也比較容易看到對方沒看到的東西。
+
+**不要鑽牛角尖**：給 Codex 的每個任務都要寫明下面這段，你判斷它的意見時也用同一個標準：
+- 只回報有實際觸發情境的問題：參賽 agent 照 skill.md 用 curl 會做的事（包括常見的錯誤用法：重送、太晚、斷線、交錯動作）、看網頁的人、管理員、平台自己的程式（Room DO、Matchmaker、D1）。
+- 不回報：合約或 schema 已經擋掉的輸入、需要攻擊者控制伺服器或環境的情況、DO 單執行緒下不可能發生的競態、單挑不會出現的牌局、只有理論上可能的事。
+- 屬於別張 ticket 的問題只寫一行（哪張 ticket、什麼問題），不要求這張修。
+- 每個 lens 的 Hardening 最多 3 個，挑最重要的。
 - 用 t3 的 `delegate_task`，不要用 Claude 內建的 subagent。先呼叫 `orchestrator_capabilities` 找 Codex 的 `providerInstanceId`（目前是 `codex`），`target` 填 `{"providerInstanceId":"codex","model":"gpt-6.1-sol","options":{"reasoningEffort":"medium"}}`，`role` 填 `test`、`review` 或 `general`。
 - `isolation` 用預設的 `shared`：子任務直接在你的 worktree 裡跑，看得到還沒 commit 的改動。不要用 `worktree`，那會從上一個 commit 開新的 checkout，看不到你正在改的東西。子任務在跑的時候，你不要改檔案。
 - 每個任務一個 `clientRequestId`（例如 `t09-s2-test-author-1`）。同一個任務重送時用同一個 id，不然會開出重複的子任務；新的一輪才換新 id。記下每個回傳的 `taskId`。
@@ -100,6 +106,9 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 2. 在容器裡重裝依賴（`pnpm install --frozen-lockfile`），重跑 `pnpm check` 和 ticket 的每個驗證指令。
 3. 自己起 dev server，照 ticket 的「功能驗證」在 worktree 網址上實際操作。
 4. 每一項回報過或不過，附指令和輸出；做不到的標 inconclusive。
+5. 關掉自己開的 dev server，用 `docker stats --no-stream` 確認容器回到閒置。
+
+你看過 verifier 的報告再開 PR：每一項都要有指令和輸出，「過」要真的對應到 ticket 的驗證項目；看起來不對就開新的 verifier 重驗，不要自己改結論。
 
 沒過就回到 `/implement-plan` 修，再開一個新的 verifier。三輪還過不了，停下來通知 coordinator。
 
