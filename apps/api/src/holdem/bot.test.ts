@@ -19,7 +19,7 @@ const CALL: Action = { type: 'call' };
 const raise = (amount: number): Action => ({ type: 'raise', amount });
 
 const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
-  seed: 1,
+  seed: '0000000000000000000000000000000000000000000000000000000000000005',
   hands: 10,
   startingStack: 40,
   ...overrides,
@@ -238,9 +238,17 @@ describe('randomAction', () => {
   it('plays whole matches against itself without an illegal action', () => {
     const random = mulberry32(99);
     for (const overrides of [
-      { seed: 5, hands: 50, startingStack: 10 },
-      { seed: 6, hands: 30, startingStack: 40 },
-      { seed: 0xffffffff, hands: 20, startingStack: 2000 },
+      {
+        seed: '0000000000000000000000000000000000000000000000000000000000000005',
+        hands: 50,
+        startingStack: 10,
+      },
+      {
+        seed: '0000000000000000000000000000000000000000000000000000000000000016',
+        hands: 30,
+        startingStack: 40,
+      },
+      { seed: 'f'.repeat(64), hands: 20, startingStack: 2000 },
     ]) {
       let state = startMatch(config(overrides));
       let steps = 0;

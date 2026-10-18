@@ -35,12 +35,14 @@ function makeRandom(seed: number) {
 }
 type Random = ReturnType<typeof makeRandom>;
 
-// The only place a match seed is made.
-const matchSeed = (random: Random): number =>
-  Math.floor(random.next() * 0x1_0000_0000);
+// The only place a match seed is made: 64 hex characters from 8 draws.
+const matchSeed = (random: Random): string =>
+  Array.from({ length: 8 }, () =>
+    random.int(0x1_0000_0000).toString(16).padStart(8, '0'),
+  ).join('');
 
 // A seed whose first hand splits the pot at showdown.
-function splitSeed(random: Random): number {
+function splitSeed(random: Random): string {
   for (;;) {
     const seed = matchSeed(random);
     const { holeCards, board } = dealHand(seed, 1);

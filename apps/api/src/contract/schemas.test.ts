@@ -11,6 +11,7 @@ import {
   IsoTime,
   JoinRequest,
   Leaderboard,
+  MatchDetail,
   MatchList,
   NAME_PATTERN,
   Name,
@@ -33,6 +34,24 @@ const decodes = (schema: Schema.Top, value: unknown): boolean =>
 // The casino-api skill examples, with room_id / invite_code adjusted to the
 // A14 formats (the skill's prose uses short placeholders like "r_8f2").
 const ROOM = 'r_8f2abc0001';
+
+// A 256-bit match seed: exactly 64 lowercase hex characters.
+const SEED = 'df8d15e60f92a61bdf85b01a4424129de138488006fbee6493bff146e37de76e';
+
+const BAD_SEEDS = [
+  { case: 'as an integer (the old 32-bit seed)', seed: 12345 },
+  { case: 'as zero', seed: 0 },
+  { case: 'as a hex string of a number', seed: '3039' },
+  { case: 'in uppercase', seed: SEED.toUpperCase() },
+  { case: 'with one uppercase letter', seed: `D${SEED.slice(1)}` },
+  { case: 'with 63 characters', seed: SEED.slice(1) },
+  { case: 'with 65 characters', seed: `${SEED}0` },
+  { case: 'with a non-hex character', seed: `${SEED.slice(0, 63)}g` },
+  { case: 'with a 0x prefix', seed: `0x${SEED.slice(2)}` },
+  { case: 'with surrounding whitespace', seed: ` ${SEED.slice(1)}` },
+  { case: 'empty', seed: '' },
+  { case: 'as null', seed: null },
+] as const;
 
 const view = {
   street: 'flop',
@@ -156,7 +175,7 @@ describe('requests', () => {
         name: 'alice',
         opponent: 'bot',
         test: {
-          seed: 12345,
+          seed: SEED,
           chaos: {
             reject_first_action: true,
             extra_waiting: 2,
@@ -225,15 +244,30 @@ describe('requests', () => {
   });
 
   it('validates test settings', () => {
-    expect(decodes(TestSettings, { seed: 0 })).toBe(true);
-    expect(decodes(TestSettings, { seed: 4_294_967_295 })).toBe(true);
-    expect(decodes(TestSettings, { seed: 4_294_967_296 })).toBe(false);
-    expect(decodes(TestSettings, { seed: -1 })).toBe(false);
-    expect(decodes(TestSettings, { seed: 1.5 })).toBe(false);
+    expect(decodes(TestSettings, {})).toBe(true);
+    expect(decodes(TestSettings, { seed: SEED })).toBe(true);
+    expect(decodes(TestSettings, { seed: '0'.repeat(64) })).toBe(true);
+    expect(decodes(TestSettings, { seed: 'f'.repeat(64) })).toBe(true);
     expect(decodes(TestSettings, { chaos: { fail_request_every: 1 } })).toBe(
       false,
     );
     expect(decodes(TestSettings, { chaos: { extra_waiting: -1 } })).toBe(false);
+  });
+
+  // holdem-rules 種子與洗牌: a 256-bit seed written as exactly 64 lowercase
+  // hex characters. Numbers (the old 32-bit seed) no longer decode.
+  it.each(BAD_SEEDS)('rejects test.seed $case', ({ seed }) => {
+    expect(decodes(TestSettings, { seed })).toBe(false);
+    expect(
+      decodes(CreateRoomRequest, {
+        game: 'holdem',
+        name: 'alice',
+        test: { seed },
+      }),
+    ).toBe(false);
+    expect(
+      decodes(QueueRequest, { game: 'holdem', name: 'alice', test: { seed } }),
+    ).toBe(false);
   });
 });
 
@@ -355,6 +389,54 @@ describe('responses', () => {
       }),
     ).toBe(false);
   });
+
+  // The match record publishes the seed after the match (holdem-rules
+  // 種子與洗牌), in the same 64-lowercase-hex format as test.seed.
+  const detail = {
+    match_id: ROOM,
+    players: ['alice', 'bob'],
+    settings: { hands: 1, turn_seconds: 60, starting_stack: 40 },
+    seed: SEED,
+    result: 'seat1_win',
+    rated: true,
+    ended_at: '2026-10-16T12:50:30Z',
+    final_stacks: [39, 41],
+    rating_changes: [
+      { name: 'alice', before: 1200, after: 1184 },
+      { name: 'bob', before: 1200, after: 1216 },
+    ],
+    hands: [
+      {
+        hand_number: 1,
+        button_seat: 0,
+        board: [],
+        hole_cards: null,
+        events: [
+          { seat: 0, street: 'preflop', type: 'post_blind', amount: 1 },
+          { seat: 1, street: 'preflop', type: 'post_blind', amount: 2 },
+          { seat: 0, street: 'preflop', type: 'fold' },
+        ],
+        winner_seat: 1,
+        pot: 2,
+        ended_by: 'fold',
+        stacks: [39, 41],
+      },
+    ],
+  };
+
+  it('decodes a match detail whose seed is 64 lowercase hex characters', () => {
+    expect(decodes(MatchDetail, detail)).toBe(true);
+    expect(decodes(MatchDetail, { ...detail, seed: '0'.repeat(64) })).toBe(
+      true,
+    );
+  });
+
+  it.each(BAD_SEEDS)(
+    'rejects a match detail with the seed $case',
+    ({ seed }) => {
+      expect(decodes(MatchDetail, { ...detail, seed })).toBe(false);
+    },
+  );
 
   it('decodes the skill error example', () => {
     const [schema] = apiErrors('invalid_action');

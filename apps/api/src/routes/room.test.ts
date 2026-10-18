@@ -31,7 +31,8 @@ const BASE = 'http://api.test';
 const TOKEN_SECRET = 'test-token-secret';
 const ADMIN_KEY = 'test-admin-key';
 const NEVER_CREATED = 'r_zzzzz99999';
-const SEED = 12345;
+// Reference HMAC-SHA256 shuffle, hand 1: Kc Ts 8h Tc Ac 9h Js 7d 7h.
+const SEED = '0000000000000000000000000000000000000000000000000000000000003039';
 
 // --- Fakes ------------------------------------------------------------------
 
@@ -406,6 +407,21 @@ describe('room settings', () => {
     if (status.status === 'your_turn') {
       expect(Date.parse(status.deadline)).toBe(joinedAt + 30_000);
     }
+  });
+
+  it.each([
+    { case: 'an integer', seed: 12345 },
+    { case: 'uppercase hex', seed: 'ABCDEF0123456789'.repeat(4) },
+  ])('test.seed as $case answers 400 invalid_request', async ({ seed }) => {
+    const { env } = makeEnv({ allowTestRooms: true });
+    await expectError(
+      await post(env, '/v1/rooms', {
+        game: 'holdem',
+        name: 'alice',
+        test: { seed },
+      }),
+      'invalid_request',
+    );
   });
 
   it('with ALLOW_TEST_ROOMS=true, test.seed deals dealHand(seed, 1) to each seat', async () => {
@@ -833,7 +849,7 @@ const errorState = (body: ErrorBody): Status => {
 
 // Replays `actions` (seat, action) in the engine from hand 1.
 const engineAfter = (
-  config: { seed: number; hands: number; startingStack?: number },
+  config: { seed: string; hands: number; startingStack?: number },
   actions: ReadonlyArray<readonly [Seat, Action]>,
 ): MatchState => {
   let match = startMatch({
@@ -1191,10 +1207,6 @@ describe('POST /v1/rooms/{room_id}/actions: finishing a 1-hand match by a fold',
     const turn = await yourTurn(t.env, roomId, tokens[0]);
     return { t, roomId, tokens, turn };
   };
-  const expectedEnd = engineAfter({ seed: SEED, hands: 1 }, [
-    [0, { type: 'fold' }],
-  ]);
-
   it('both seats get match_over from state and wait at once', async () => {
     const { t, roomId, tokens, turn } = await foldedMatch(2000);
     await act(t.env, roomId, tokens[0], {
@@ -1229,6 +1241,9 @@ describe('POST /v1/rooms/{room_id}/actions: finishing a 1-hand match by a fold',
       turn_id: turn.turn_id,
       type: 'fold',
     });
+    const expectedEnd = engineAfter({ seed: SEED, hands: 1 }, [
+      [0, { type: 'fold' }],
+    ]);
     const results = ['loss', 'win'] as const;
     for (const seat of [0, 1] as const) {
       const over = asMatchOver(
@@ -2122,11 +2137,15 @@ describe('Durable Object storage stays under the per-value limit', () => {
 });
 
 describe('the seed stays secret during the match', () => {
-  // A distinctive seed: no room_id, token, turn_id, deadline or chip count
-  // legitimately contains these ten digits. The check is on the behaviour
-  // (no `seed` key, no seed text), not on the seed's format.
-  const SECRET_SEED = 3_141_592_653;
-  const SEED_TEXT = String(SECRET_SEED);
+  // Distinctive seed and fragments that no room id, token, deadline or
+  // chip count should legitimately contain.
+  const SECRET_SEED =
+    'd7e9a13c6b2048f5a92d03e7c84b6150e3f98a26b470dc15f2a6039e8c51b7d4';
+  const SEED_TEXTS = [
+    SECRET_SEED,
+    SECRET_SEED.slice(0, 16),
+    SECRET_SEED.slice(-16),
+  ];
 
   // Every object key anywhere in a JSON value.
   const allKeys = (value: unknown): string[] =>
@@ -2376,7 +2395,9 @@ describe('the seed stays secret during the match', () => {
     expect(seen.length).toBeGreaterThan(40);
     for (const { label, raw } of seen) {
       expect(allKeys(JSON.parse(raw)), label).not.toContain('seed');
-      expect(raw.includes(SEED_TEXT), `${label}: ${raw}`).toBe(false);
+      for (const fragment of SEED_TEXTS) {
+        expect(raw, label).not.toContain(fragment);
+      }
     }
   });
 });

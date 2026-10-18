@@ -43,7 +43,7 @@ export interface CreateInput {
   invite_code: string;
   name: string;
   settings: RoomSettings;
-  seed: number;
+  seed: string;
   // Only where ALLOW_TEST_ROOMS=true; `chaos` is for T11.
   test: typeof TestSettings.Type | null;
 }
@@ -66,7 +66,7 @@ interface RoomData {
   room_id: string;
   invite_code: string;
   settings: RoomSettings;
-  seed: number;
+  seed: string;
   test: typeof TestSettings.Type | null;
   names: [string, string | null];
   // `null` until the second player joins.

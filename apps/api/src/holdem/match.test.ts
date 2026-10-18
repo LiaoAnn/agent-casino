@@ -13,21 +13,17 @@ import {
 } from './match';
 import { dealHand } from './shuffle';
 
-// Deals used below, read from dealHand (seat 0 cards, seat 1 cards, board)
-// and cross-checked with evaluateHand:
-//
-// seed 1 hand 1: 2d As | Jc 7c | 6d Js 7h 5h 6c
-//   seat 1 wins: two pair J+7 beats seat 0's pair of sixes.
-// seed 1 hand 2: 8d Kh | Ad 6c | 5c Tc 5s Kc 2d
-//   seat 0 wins: two pair K+5 beats seat 1's pair of fives, ace kicker.
-// seed 1 hand 3: 5h 3c | 9s 7d | 4d 6d 5s 6s Tc
-//   seat 0 wins: two pair 6+5 beats seat 1's pair of sixes.
-// seed 1 hand 4: Qd Jd | Tc 5d | 7d Th 9d 6s 6c
-//   seat 1 wins: two pair T+6 beats seat 0's pair of sixes.
-// seed 3 hand 1: Ah 2s | 7c 5s | Tc 3h Ac Td 6c
-//   seat 0 wins: two pair A+T beats seat 1's pair of tens.
-// seed 6 hand 1: 9d 5s | 3d 9s | 8d 4d 9h Jc 8c
-//   tie: both play 9 9 8 8 J.
+// Independent node:crypto reference deals, cross-checked with evaluateHand.
+// Seeds are 64 lowercase hex chars; abbreviated below by their final 4 chars.
+// ...0005 replaces old seed 1, preserving winners 1, 0, 0, 1 in hands 1–4:
+// hand 1: 9c Ks | Jh 9d | Jc Qh 3d 7c 3c (J+3 two pair beats a pair of 3s)
+// hand 2: Qc Th | Qs Ac | 7d 9d Jc 8d 5h (Q-high straight beats ace high)
+// hand 3: 6d 7h | Td 2d | 9c Ks Ts 8c 7s (T-high straight beats a pair of Ts)
+// hand 4: 6c Jh | 9c 9s | 4c Kh Td Ac 9h (three 9s beat ace high)
+// ...0000 replaces old seed 3: Tc Jd | 6h Js | 2c Ac Qs Jh 4h
+//   seat 0 wins: both pair Js with A/Q, T kicker beats 6.
+// ...0016 replaces old seed 6: 7s 3d | 3s 4d | 3c 2s Qd 5s 2h
+//   tie: both play 3 3 2 2 Q.
 
 type Step = [Seat, Action];
 
@@ -37,7 +33,7 @@ const CALL: Action = { type: 'call' };
 const raise = (amount: number): Action => ({ type: 'raise', amount });
 
 const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
-  seed: 1,
+  seed: '0000000000000000000000000000000000000000000000000000000000000005',
   hands: 10,
   startingStack: 40,
   ...overrides,
@@ -130,7 +126,10 @@ describe('startMatch', () => {
       handNumber: 1,
       button: 0,
       street: 'preflop',
-      holeCards: dealHand(1, 1).holeCards,
+      holeCards: dealHand(
+        '0000000000000000000000000000000000000000000000000000000000000005',
+        1,
+      ).holeCards,
       board: [],
       stacks: [39, 38],
       bets: [1, 2],
@@ -143,9 +142,11 @@ describe('startMatch', () => {
   });
 
   it.each([
-    ['seed -1', { seed: -1 }],
-    ['seed 2^32', { seed: 2 ** 32 }],
-    ['seed 1.5', { seed: 1.5 }],
+    ['uppercase seed', { seed: 'A'.repeat(64) }],
+    ['63-character seed', { seed: '0'.repeat(63) }],
+    ['non-hex seed', { seed: 'g'.repeat(64) }],
+    ['empty seed', { seed: '' }],
+    ['65-character seed', { seed: '0'.repeat(65) }],
     ['hands 0', { hands: 0 }],
     ['hands 201', { hands: 201 }],
     ['hands 2.5', { hands: 2.5 }],
@@ -158,8 +159,8 @@ describe('startMatch', () => {
 
   it('accepts the boundary values', () => {
     for (const overrides of [
-      { seed: 0, hands: 1, startingStack: 10 },
-      { seed: 0xffffffff, hands: 200, startingStack: 2000 },
+      { seed: '0'.repeat(64), hands: 1, startingStack: 10 },
+      { seed: 'f'.repeat(64), hands: 200, startingStack: 2000 },
     ]) {
       expect(startMatch(config(overrides)).handNumber).toBe(1);
     }
@@ -261,7 +262,10 @@ describe('preflop', () => {
 
 describe('streets', () => {
   it('reveals 3, 4, 5 board cards and the non-button acts first postflop', () => {
-    const deal = dealHand(1, 1);
+    const deal = dealHand(
+      '0000000000000000000000000000000000000000000000000000000000000005',
+      1,
+    );
     let { state } = playFrom({}, [
       [0, CALL],
       [1, CHECK],
@@ -328,7 +332,12 @@ describe('streets', () => {
     expect(state.handNumber).toBe(2);
     expect(state.button).toBe(1);
     expect(state.street).toBe('flop');
-    expect(state.board).toEqual(dealHand(1, 2).board.slice(0, 3));
+    expect(state.board).toEqual(
+      dealHand(
+        '0000000000000000000000000000000000000000000000000000000000000005',
+        2,
+      ).board.slice(0, 3),
+    );
     expect(state.toAct).toBe(0);
   });
 });
@@ -359,7 +368,10 @@ describe('hand endings', () => {
       handNumber: 2,
       button: 1,
       street: 'preflop',
-      holeCards: dealHand(1, 2).holeCards,
+      holeCards: dealHand(
+        '0000000000000000000000000000000000000000000000000000000000000005',
+        2,
+      ).holeCards,
       board: [],
       stacks: [37, 40],
       bets: [2, 1],
@@ -406,14 +418,20 @@ describe('hand endings', () => {
       winner_seat: 1,
       pot: 4,
       ended_by: 'fold',
-      board: dealHand(1, 1).board.slice(0, 3),
+      board: dealHand(
+        '0000000000000000000000000000000000000000000000000000000000000005',
+        1,
+      ).board.slice(0, 3),
       hole_cards: null,
       stacks: [38, 42],
     });
   });
 
-  it('check-down seed 1 hand 1: seat 1 wins at showdown, full hand record', () => {
-    const deal = dealHand(1, 1);
+  it('check-down seed ...0005 hand 1: seat 1 wins at showdown, full hand record', () => {
+    const deal = dealHand(
+      '0000000000000000000000000000000000000000000000000000000000000005',
+      1,
+    );
     const { state, finished } = playFrom({}, CHECK_DOWN_HAND_1);
     const street = (s: 'flop' | 'turn' | 'river'): HistoryEvent[] => [
       { seat: 1, street: s, type: 'check' },
@@ -445,18 +463,26 @@ describe('hand endings', () => {
     expect(state.stacks).toEqual([36, 41]);
   });
 
-  it('check-down seed 3 hand 1: seat 0 wins at showdown', () => {
-    const { finished } = playFrom({ seed: 3 }, CHECK_DOWN_HAND_1);
+  it('check-down seed ...0000 hand 1: seat 0 wins at showdown', () => {
+    const { finished } = playFrom(
+      {
+        seed: '0000000000000000000000000000000000000000000000000000000000000000',
+      },
+      CHECK_DOWN_HAND_1,
+    );
     expect(finished[0]).toMatchObject({
       winner_seat: 0,
       pot: 4,
       ended_by: 'showdown',
-      hole_cards: dealHand(3, 1).holeCards,
+      hole_cards: dealHand(
+        '0000000000000000000000000000000000000000000000000000000000000000',
+        1,
+      ).holeCards,
       stacks: [42, 38],
     });
   });
 
-  it('bets on every street go into the pot: seed 1 hand 1, seat 1 wins 32', () => {
+  it('bets on every street go into the pot: seed ...0005 hand 1, seat 1 wins 32', () => {
     const { finished } = playFrom({}, [
       [0, CALL],
       [1, CHECK],
@@ -479,18 +505,25 @@ describe('hand endings', () => {
     ]);
   });
 
-  it('split pot seed 6 hand 1: winner_seat null and half each', () => {
-    const { finished } = playFrom({ seed: 6 }, [
-      [0, raise(6)],
-      [1, CALL],
-      ...checkPostflop(1),
-    ]);
+  it('split pot seed ...0016 hand 1: winner_seat null and half each', () => {
+    const { finished } = playFrom(
+      {
+        seed: '0000000000000000000000000000000000000000000000000000000000000016',
+      },
+      [[0, raise(6)], [1, CALL], ...checkPostflop(1)],
+    );
     expect(finished[0]).toMatchObject({
       winner_seat: null,
       pot: 12,
       ended_by: 'showdown',
-      board: dealHand(6, 1).board,
-      hole_cards: dealHand(6, 1).holeCards,
+      board: dealHand(
+        '0000000000000000000000000000000000000000000000000000000000000016',
+        1,
+      ).board,
+      hole_cards: dealHand(
+        '0000000000000000000000000000000000000000000000000000000000000016',
+        1,
+      ).holeCards,
       stacks: [40, 40],
     });
   });
@@ -498,7 +531,10 @@ describe('hand endings', () => {
 
 describe('all-in', () => {
   it('all-in and call preflop runs the board out; the loser at 0 ends the match', () => {
-    const deal = dealHand(1, 1);
+    const deal = dealHand(
+      '0000000000000000000000000000000000000000000000000000000000000005',
+      1,
+    );
     const { state, finished } = playFrom({}, [[0, raise(40)]]);
     expect(legalActions(state)).toEqual([
       { type: 'fold' },
@@ -540,24 +576,32 @@ describe('all-in', () => {
   });
 
   it('all-in on the flop and call deals turn and river with no more actions', () => {
-    const { state, finished } = playFrom({ seed: 3 }, [
-      [0, CALL],
-      [1, CHECK],
-      [1, raise(38)],
-      [0, CALL],
-    ]);
+    const { state, finished } = playFrom(
+      {
+        seed: '0000000000000000000000000000000000000000000000000000000000000000',
+      },
+      [
+        [0, CALL],
+        [1, CHECK],
+        [1, raise(38)],
+        [0, CALL],
+      ],
+    );
     expect(finished[0]).toMatchObject({
       hand_number: 1,
       winner_seat: 0,
       pot: 80,
       ended_by: 'showdown',
-      board: dealHand(3, 1).board,
+      board: dealHand(
+        '0000000000000000000000000000000000000000000000000000000000000000',
+        1,
+      ).board,
       stacks: [80, 0],
     });
     expect(state.over).toBe(true);
   });
 
-  // Seed 1, 40 chips. Hand 1 checked down: [38, 42]. Hand 2 (seat 1 button,
+  // Seed ...0005, 40 chips. Hand 1 checked down: [38, 42]. Hand 2 (seat 1 button,
   // 41 behind + 1 posted) shoves 42; seat 0 has only 36 behind.
   const shoveHand2 = (): MatchState =>
     playFrom({}, [...CHECK_DOWN_HAND_1, [1, raise(42)]]).state;
@@ -592,8 +636,14 @@ describe('all-in', () => {
         winner_seat: 0,
         pot: 76,
         ended_by: 'showdown',
-        board: dealHand(1, 2).board,
-        hole_cards: dealHand(1, 2).holeCards,
+        board: dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          2,
+        ).board,
+        hole_cards: dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          2,
+        ).holeCards,
         stacks: [76, 4],
         events: [
           blind(1, 1),
@@ -685,7 +735,7 @@ describe('all-in', () => {
   });
 });
 
-describe('blind all-ins (seed 1, 10 chips)', () => {
+describe('blind all-ins (seed ...0005, 10 chips)', () => {
   // Hand 1: seat 0 raises to 4, seat 1 to 8, seat 0 folds -> [6, 14].
   // Hand 2 (seat 1 button): seat 1 raises to 5, seat 0 calls 3 (1 left),
   //   flop: seat 0 checks, seat 1 bets 2, seat 0 folds -> [1, 19].
@@ -715,7 +765,10 @@ describe('blind all-ins (seed 1, 10 chips)', () => {
         winner_seat: 1,
         pot: 10,
         ended_by: 'fold',
-        board: dealHand(1, 2).board.slice(0, 3),
+        board: dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          2,
+        ).board.slice(0, 3),
         stacks: [1, 19],
       }),
       {
@@ -724,8 +777,14 @@ describe('blind all-ins (seed 1, 10 chips)', () => {
         winner_seat: 0,
         pot: 2,
         ended_by: 'showdown',
-        board: dealHand(1, 3).board,
-        hole_cards: dealHand(1, 3).holeCards,
+        board: dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          3,
+        ).board,
+        hole_cards: dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          3,
+        ).holeCards,
         stacks: [2, 18],
         events: [blind(0, 1), blind(1, 2)],
       },
@@ -764,7 +823,10 @@ describe('blind all-ins (seed 1, 10 chips)', () => {
         winner_seat: 1,
         pot: 4,
         ended_by: 'showdown',
-        board: dealHand(1, 4).board,
+        board: dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          4,
+        ).board,
         stacks: [0, 20],
       }),
     ]);
@@ -781,7 +843,7 @@ describe('blind all-ins (seed 1, 10 chips)', () => {
   //   seat 0 folds: uncalled 1 back, pot 18 -> [1, 19].
   // Hand 2 (seat 1 button): seat 1 posts 1, seat 0 posts its last chip as
   //   big blind. Both have 1 in, so nobody has to act: board runs out and
-  //   seat 0 wins (seed 1 hand 2: K+5 two pair) a pot of 2 -> [2, 18].
+  //   seat 0 wins (seed ...0005 hand 2: Q-high straight) a pot of 2 -> [2, 18].
   // Hand 3 (seat 0 button): blinds 1 and 2 posted, seat 0 to act.
   it('big blind shorter than the blind posts what it has; nobody acts, runout', () => {
     const before = playFrom({ startingStack: 10 }, [
@@ -804,8 +866,14 @@ describe('blind all-ins (seed 1, 10 chips)', () => {
         winner_seat: 0,
         pot: 2,
         ended_by: 'showdown',
-        board: dealHand(1, 2).board,
-        hole_cards: dealHand(1, 2).holeCards,
+        board: dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          2,
+        ).board,
+        hole_cards: dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000005',
+          2,
+        ).holeCards,
         stacks: [2, 18],
         events: [blind(1, 1), blind(0, 1)],
       },
@@ -815,7 +883,10 @@ describe('blind all-ins (seed 1, 10 chips)', () => {
       handNumber: 3,
       button: 0,
       street: 'preflop',
-      holeCards: dealHand(1, 3).holeCards,
+      holeCards: dealHand(
+        '0000000000000000000000000000000000000000000000000000000000000005',
+        3,
+      ).holeCards,
       board: [],
       stacks: [1, 16],
       bets: [1, 2],
@@ -837,13 +908,22 @@ describe('blind all-ins (seed 1, 10 chips)', () => {
 
 describe('match flow', () => {
   it('rotates the button and deals each hand from dealHand(seed, n)', () => {
-    let state = startMatch(config({ seed: 7 }));
+    let state = startMatch(
+      config({
+        seed: '0000000000000000000000000000000000000000000000000000000000000007',
+      }),
+    );
     for (let n = 1; n <= 4; n++) {
       const button: Seat = (n - 1) % 2 === 0 ? 0 : 1;
       expect(state.handNumber).toBe(n);
       expect(state.button).toBe(button);
       expect(state.toAct).toBe(button);
-      expect(state.holeCards).toEqual(dealHand(7, n).holeCards);
+      expect(state.holeCards).toEqual(
+        dealHand(
+          '0000000000000000000000000000000000000000000000000000000000000007',
+          n,
+        ).holeCards,
+      );
       expect(state.history).toEqual([
         blind(button, 1),
         blind(button === 0 ? 1 : 0, 2),
@@ -853,7 +933,10 @@ describe('match flow', () => {
   });
 
   it('ends after the configured number of hands (hands: 1)', () => {
-    const deal = dealHand(1, 1);
+    const deal = dealHand(
+      '0000000000000000000000000000000000000000000000000000000000000005',
+      1,
+    );
     const { state, finished } = playFrom({ hands: 1 }, CHECK_DOWN_HAND_1);
     expect(finished).toHaveLength(1);
     expect(state).toMatchObject({
@@ -907,13 +990,28 @@ describe('match flow', () => {
       ...checkPostflop(1).slice(2),
       [1, FOLD],
     ];
-    const a = playFrom({ seed: 42 }, script);
-    const b = playFrom({ seed: 42 }, script);
+    const a = playFrom(
+      {
+        seed: '000000000000000000000000000000000000000000000000000000000000001a',
+      },
+      script,
+    );
+    const b = playFrom(
+      {
+        seed: '000000000000000000000000000000000000000000000000000000000000001a',
+      },
+      script,
+    );
     expect(a).toEqual(b);
 
     // Flop: seat 1 bets 2, seat 0 raises to 8 -> seat 1 calls 6, may
     // re-raise to 14 (8 + raise size 6).
-    const flopRaised = playFrom({ seed: 42 }, script.slice(0, 4)).state;
+    const flopRaised = playFrom(
+      {
+        seed: '000000000000000000000000000000000000000000000000000000000000001a',
+      },
+      script.slice(0, 4),
+    ).state;
     expect(flopRaised).toMatchObject({
       street: 'flop',
       bets: [8, 2],
@@ -926,7 +1024,12 @@ describe('match flow', () => {
       { type: 'call', amount: 6 },
       { type: 'raise', min: 14, max: 34 },
     ]);
-    const turn = playFrom({ seed: 42 }, script.slice(0, 5)).state;
+    const turn = playFrom(
+      {
+        seed: '000000000000000000000000000000000000000000000000000000000000001a',
+      },
+      script.slice(0, 5),
+    ).state;
     expect(turn).toMatchObject({
       street: 'turn',
       bets: [0, 0],
@@ -935,9 +1038,12 @@ describe('match flow', () => {
       toAct: 1,
     });
 
-    // Seed 42 hand 1: 6d 5s | 7s 3h | Jh Jc Ks Qh Jd, both play J J J K Q:
+    // Seed ...001a hand 1: 7h Jd | Js 2s | Ks Ad 3h 8d 9h, both play A K J 9 8:
     // split 28. Hand 2: seat 1 folds its small blind -> [41, 39].
-    const deal = dealHand(42, 1);
+    const deal = dealHand(
+      '000000000000000000000000000000000000000000000000000000000000001a',
+      1,
+    );
     expect(a.finished).toEqual([
       {
         hand_number: 1,

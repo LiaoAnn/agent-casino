@@ -22,7 +22,7 @@ const CALL: Action = { type: 'call' };
 const raise = (amount: number): Action => ({ type: 'raise', amount });
 
 const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
-  seed: 1,
+  seed: '0000000000000000000000000000000000000000000000000000000000000005',
   hands: 10,
   startingStack: 40,
   ...overrides,
@@ -138,12 +138,12 @@ const CHECK_DOWN_HAND_1: Step[] = [[0, CALL], [1, CHECK], ...checkPostflop(1)];
 
 const SCRIPTS: [string, MatchConfig, Step[]][] = [
   [
-    'check-down, then a short all-in and a bust (seed 1)',
+    'check-down, then a short all-in and a bust (seed ...0005)',
     config(),
     [...CHECK_DOWN_HAND_1, [1, raise(42)], [0, CALL], [0, raise(4)], [1, CALL]],
   ],
   [
-    'blind all-ins by posting (seed 1, 10 chips)',
+    'blind all-ins by posting (seed ...0005, 10 chips)',
     config({ startingStack: 10 }),
     [
       [0, raise(4)],
@@ -158,7 +158,7 @@ const SCRIPTS: [string, MatchConfig, Step[]][] = [
     ],
   ],
   [
-    'big blind shorter than the blind (seed 1, 10 chips)',
+    'big blind shorter than the blind (seed ...0005, 10 chips)',
     config({ startingStack: 10, hands: 3 }),
     [
       [0, raise(9)],
@@ -178,13 +178,19 @@ const SCRIPTS: [string, MatchConfig, Step[]][] = [
     ],
   ],
   [
-    'split pot on the last hand (seed 6, hands 1)',
-    config({ seed: 6, hands: 1 }),
+    'split pot on the last hand (seed ...0016, hands 1)',
+    config({
+      seed: '0000000000000000000000000000000000000000000000000000000000000016',
+      hands: 1,
+    }),
     [[0, raise(6)], [1, CALL], ...checkPostflop(1)],
   ],
   [
-    'raises on every street, split pot, then folds to the end (seed 42)',
-    config({ seed: 42, hands: 3 }),
+    'raises on every street, split pot, then folds to the end (seed ...001a)',
+    config({
+      seed: '000000000000000000000000000000000000000000000000000000000000001a',
+      hands: 3,
+    }),
     [
       [0, raise(6)],
       [1, CALL],
@@ -197,7 +203,7 @@ const SCRIPTS: [string, MatchConfig, Step[]][] = [
     ],
   ],
   [
-    'timeouts (seed 1, hands 2)',
+    'timeouts (seed ...0005, hands 2)',
     config({ hands: 2 }),
     [
       [0, CALL, { timeout: true }],
@@ -212,8 +218,8 @@ describe('replay', () => {
   it('no events, or only the first blinds, gives the start of the match', () => {
     for (const matchConfig of [
       config(),
-      config({ seed: 0, hands: 1, startingStack: 10 }),
-      config({ seed: 0xffffffff, hands: 200, startingStack: 2000 }),
+      config({ seed: '0'.repeat(64), hands: 1, startingStack: 10 }),
+      config({ seed: 'f'.repeat(64), hands: 200, startingStack: 2000 }),
     ]) {
       const start = startMatch(matchConfig);
       expectReplayed(replay(matchConfig, []), {
@@ -255,10 +261,24 @@ describe('replay', () => {
   );
 
   it.each<[MatchConfig, number]>([
-    [config({ seed: 0, hands: 50, startingStack: 10 }), 1],
-    [config({ seed: 0xffffffff, hands: 40, startingStack: 12 }), 2],
-    [config({ seed: 777, hands: 30, startingStack: 40 }), 3],
-    [config({ seed: 31337, hands: 20, startingStack: 2000 }), 4],
+    [config({ seed: '0'.repeat(64), hands: 50, startingStack: 10 }), 1],
+    [config({ seed: 'f'.repeat(64), hands: 40, startingStack: 12 }), 2],
+    [
+      config({
+        seed: '0000000000000000000000000000000000000000000000000000000000000309',
+        hands: 30,
+        startingStack: 40,
+      }),
+      3,
+    ],
+    [
+      config({
+        seed: '0000000000000000000000000000000000000000000000000000000000007a69',
+        hands: 20,
+        startingStack: 2000,
+      }),
+      4,
+    ],
   ])(
     'random legal match %o replays exactly, prefixes too',
     (matchConfig, botSeed) => {
@@ -429,8 +449,11 @@ describe('replay rejects', () => {
     ['hands 201', { hands: 201 }],
     ['startingStack 5', { startingStack: 5 }],
     ['startingStack 2001', { startingStack: 2001 }],
-    ['seed -1', { seed: -1 }],
-    ['seed 2^32', { seed: 2 ** 32 }],
+    ['uppercase seed', { seed: 'A'.repeat(64) }],
+    ['63-character seed', { seed: '0'.repeat(63) }],
+    ['non-hex seed', { seed: 'g'.repeat(64) }],
+    ['empty seed', { seed: '' }],
+    ['65-character seed', { seed: '0'.repeat(65) }],
   ])('a bad config (%s) throws RangeError', (_name, overrides) => {
     expect(() => replay(config(overrides), [])).toThrow(RangeError);
   });

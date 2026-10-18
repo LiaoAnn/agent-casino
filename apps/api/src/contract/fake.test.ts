@@ -94,6 +94,28 @@ describe('makeFakeData', () => {
     expect(makeFakeData({ seed: 2 }).matches()).not.toEqual(data.matches());
   });
 
+  // The generator seed (`makeFakeData({ seed })`) stays a number; the match
+  // seeds it makes are 256-bit seeds, 64 lowercase hex (holdem-rules 種子與洗牌).
+  it('gives every match its own 64-lowercase-hex seed, the same per generator seed', () => {
+    const seeds = details.map(detail => detail.seed);
+    for (const seed of seeds) {
+      expect(typeof seed).toBe('string');
+      expect(seed).toMatch(/^[0-9a-f]{64}$/);
+    }
+    expect(new Set(seeds).size).toBe(seeds.length);
+
+    const again = makeFakeData({ seed: 1 });
+    expect(details.map(d => again.match(d.match_id)?.seed)).toEqual(seeds);
+
+    const other = makeFakeData({ seed: 2 });
+    const otherSeeds = allSummaries(other).summaries.map(
+      s => other.match(s.match_id)?.seed,
+    );
+    expect(otherSeeds).toHaveLength(seeds.length);
+    for (const seed of otherSeeds) expect(seed).toMatch(/^[0-9a-f]{64}$/);
+    expect(otherSeeds).not.toEqual(seeds);
+  });
+
   it('pages 20 matches at a time, newest first, 30 by default', () => {
     expect(pages.map(page => page.matches.length)).toEqual([20, 10]);
     expect(pages[0]?.next).toBe(pages[0]?.matches.at(-1)?.match_id);
