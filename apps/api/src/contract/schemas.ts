@@ -94,13 +94,28 @@ export const JoinRequest = Schema.Struct({
 
 const ActionType = Schema.Literals(['fold', 'check', 'call', 'raise']);
 
+// Why the agent played this step, for its owner's watch link only (A16).
+const Note = Schema.String.check(Schema.isMaxLength(500));
+
 export const ActionRequest = Schema.Struct({
   turn_id: Schema.String,
   type: ActionType,
   amount: Schema.optionalKey(Schema.Int),
+  note: Schema.optionalKey(Note),
 });
 
 // --- Joining ----------------------------------------------------------------
+
+// The settings a room is played with, defaults filled in.
+const RoomSettings = Schema.Struct({
+  hands: limited('hands'),
+  turn_seconds: limited('turn_seconds'),
+  starting_stack: limited('starting_stack'),
+});
+
+// `<WEB_URL>/watch/{room_id}?token=<watch token>`: the owner's read-only
+// view of this seat (A16).
+const WatchUrl = Schema.String;
 
 export const QueueResponse = Schema.Union([
   Schema.Struct({
@@ -108,6 +123,9 @@ export const QueueResponse = Schema.Union([
     room_id: RoomId,
     seat: Seat,
     token: Token,
+    opponent_name: Name,
+    settings: RoomSettings,
+    watch_url: WatchUrl,
     hint: Hint,
   }),
   Schema.Struct({ status: Schema.Literal('waiting'), hint: Hint }),
@@ -118,6 +136,8 @@ export const CreateRoomResponse = Schema.Struct({
   invite_code: InviteCode,
   seat: Seat,
   token: Token,
+  settings: RoomSettings,
+  watch_url: WatchUrl,
   hint: Hint,
 });
 
@@ -125,6 +145,9 @@ export const JoinResponse = Schema.Struct({
   room_id: RoomId,
   seat: Seat,
   token: Token,
+  opponent_name: Name,
+  settings: RoomSettings,
+  watch_url: WatchUrl,
   hint: Hint,
 });
 
@@ -182,6 +205,9 @@ const LastHand = Schema.Struct({
 
 const roomFields = {
   room_status: Schema.Literals(['waiting', 'playing', 'finished', 'void']),
+  // `null` until the opponent joins; "house-bot" against the bot.
+  opponent_name: Schema.NullOr(Name),
+  settings: RoomSettings,
   to_act_seat: Schema.NullOr(Seat),
   hand_number: Schema.NullOr(
     Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
@@ -206,18 +232,20 @@ const Waiting = Schema.Struct({
 
 const Rating = Schema.Int;
 
+const SeatRatings = Schema.NullOr(
+  Schema.Tuple([
+    Schema.Struct({ name: Name, rating: Rating, change: Schema.Int }),
+    Schema.Struct({ name: Name, rating: Rating, change: Schema.Int }),
+  ]),
+);
+
 export const MatchOver = Schema.Struct({
   status: Schema.Literal('match_over'),
   ...roomFields,
   match_id: MatchId,
   result: Schema.Literals(['win', 'loss', 'draw', 'cancelled', 'void']),
   final_stacks: Stacks,
-  ratings: Schema.NullOr(
-    Schema.Tuple([
-      Schema.Struct({ name: Name, rating: Rating, change: Schema.Int }),
-      Schema.Struct({ name: Name, rating: Rating, change: Schema.Int }),
-    ]),
-  ),
+  ratings: SeatRatings,
   last_hand: Schema.NullOr(LastHand),
 });
 
@@ -272,12 +300,6 @@ export const MatchList = Schema.Struct({
 });
 export type MatchList = typeof MatchList.Type;
 
-const RoomSettings = Schema.Struct({
-  hands: limited('hands'),
-  turn_seconds: limited('turn_seconds'),
-  starting_stack: limited('starting_stack'),
-});
-
 export const MatchHand = Schema.Struct({
   hand_number: Schema.Int,
   button_seat: Seat,
@@ -323,3 +345,60 @@ export const BanResponse = Schema.Struct({
   status: Schema.Literal('banned'),
   name: Name,
 });
+
+// --- Watching (A16) ---------------------------------------------------------
+
+// A step as history shows it, with the note the watched seat sent with it.
+const WatchEvent = Schema.Struct({
+  ...HistoryEntry.fields,
+  note: Schema.optionalKey(Note),
+});
+
+const WatchView = Schema.Struct({
+  ...View.fields,
+  history: Schema.Array(WatchEvent),
+});
+
+// A finished hand as the match record shows it. While the match is played,
+// the opponent's cards are `null` unless the hand went to showdown.
+const WatchHand = Schema.Struct({
+  ...MatchHand.fields,
+  hole_cards: Schema.Tuple([
+    Schema.NullOr(HoleCards),
+    Schema.NullOr(HoleCards),
+  ]),
+  events: Schema.Array(WatchEvent),
+});
+
+// Nothing the watched seat couldn't get from its own `state` at the same
+// time, except its notes: never the seed, a turn_id or legal_actions.
+const watchFields = {
+  room_id: RoomId,
+  // The watched seat.
+  seat: Seat,
+  players: Schema.Tuple([Name, Schema.NullOr(Name)]),
+  settings: RoomSettings,
+  hand_number: roomFields.hand_number,
+  to_act_seat: roomFields.to_act_seat,
+  // Only while it is the watched seat's turn.
+  deadline: Schema.NullOr(IsoTime),
+  view: Schema.NullOr(WatchView),
+  // The hands played so far, all of them once the match is over.
+  hands: Schema.Array(WatchHand),
+};
+
+export const WatchResponse = Schema.Union([
+  Schema.Struct({
+    ...watchFields,
+    room_status: Schema.Literals(['waiting', 'playing']),
+  }),
+  Schema.Struct({
+    ...watchFields,
+    room_status: Schema.Literals(['finished', 'void']),
+    match_id: MatchId,
+    result: SeatResult,
+    final_stacks: Stacks,
+    ratings: SeatRatings,
+  }),
+]);
+export type WatchResponse = typeof WatchResponse.Type;

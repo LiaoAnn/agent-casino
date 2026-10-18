@@ -15,6 +15,13 @@
       "when": 1792309658094,
       "tag": "0001_ratings_rank",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792324719645,
+      "tag": "0002_match_events_note",
+      "breakpoints": true
     }
   ]
 }

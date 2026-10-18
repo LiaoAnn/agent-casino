@@ -7,7 +7,7 @@
 import { HttpApi } from 'effect/http-api';
 import { describe, expect, it } from 'vitest';
 import { handle } from './app';
-import { AdminAuth, CasinoApi, RoomAuth } from './contract/api';
+import { AdminAuth, CasinoApi, RoomAuth, WatchAuth } from './contract/api';
 import { ERROR_STATUS, type ErrorCode } from './contract/errors';
 import { RoomReferee, type RoomStorage } from './room/referee';
 import type { Bindings } from './routes/env';
@@ -153,7 +153,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     name: string;
     // The contract's route template, e.g. 'POST /v1/rooms/:room_id/join'.
     route: string;
-    auth: 'none' | 'room' | 'admin';
+    auth: 'none' | 'room' | 'watch' | 'admin';
   } & Omit<Call, 'authorization'>;
 
   const ENDPOINTS: Endpoint[] = [
@@ -218,6 +218,13 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
       path: `/v1/rooms/${ROOM}/leave`,
     },
     {
+      name: 'watch.watch',
+      route: 'GET /v1/rooms/:room_id/watch',
+      auth: 'watch',
+      method: 'GET',
+      path: `/v1/rooms/${ROOM}/watch`,
+    },
+    {
       name: 'read.leaderboard',
       route: 'GET /v1/leaderboard',
       auth: 'none',
@@ -262,14 +269,16 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
         const keys: ReadonlySet<unknown> = middleware;
         const auth = keys.has(RoomAuth)
           ? 'room'
-          : keys.has(AdminAuth)
-            ? 'admin'
-            : 'none';
+          : keys.has(WatchAuth)
+            ? 'watch'
+            : keys.has(AdminAuth)
+              ? 'admin'
+              : 'none';
         contract.push(`${endpoint.method} ${endpoint.path} ${auth}`);
       },
     });
     const table = ENDPOINTS.map(e => `${e.route} ${e.auth}`);
-    expect(contract).toHaveLength(13);
+    expect(contract).toHaveLength(14);
     expect([...table].sort()).toEqual([...contract].sort());
   });
 
@@ -283,7 +292,8 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
   // Real handlers now; routes/room.test.ts covers the room ones (T09),
   // skill/route.test.ts GET /skill.md (T05), routes/read.test.ts and
   // routes/admin.test.ts the read endpoints and the ban (T07),
-  // routes/queue.test.ts the queue (T12).
+  // routes/queue.test.ts the queue (T12), routes/watch.test.ts the watch
+  // link (T23).
   const IMPLEMENTED = new Set([
     'skill.skill',
     'lobby.queue',
@@ -293,6 +303,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     'room.state',
     'room.act',
     'room.leave',
+    'watch.watch',
     'read.leaderboard',
     'read.matches',
     'read.match',

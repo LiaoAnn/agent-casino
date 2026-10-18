@@ -7,8 +7,17 @@ import {
   TOKEN_TTL_SECONDS,
   tokenRejectionError,
   verifyRoomToken,
+  verifyWatchToken,
+  watchRejectionError,
 } from '../token/token';
-import { AdminAuth, CasinoApi, RoomAuth, RoomSession } from './api';
+import {
+  AdminAuth,
+  CasinoApi,
+  RoomAuth,
+  RoomSession,
+  WatchAuth,
+  WatchSession,
+} from './api';
 import { apiError, ERROR_CODES, ERROR_STATUS, type ErrorCode } from './errors';
 
 const SECRET = 'test-secret-not-real';
@@ -41,7 +50,11 @@ const NAME_CODES: ErrorCode[] = [
 
 const EXPECTED: Record<
   string,
-  { route: string; auth: 'none' | 'room' | 'admin'; codes: ErrorCode[] }
+  {
+    route: string;
+    auth: 'none' | 'room' | 'watch' | 'admin';
+    codes: ErrorCode[];
+  }
 > = {
   'skill.skill': { route: 'GET /skill.md', auth: 'none', codes: [] },
   'lobby.queue': { route: 'POST /v1/queue', auth: 'none', codes: NAME_CODES },
@@ -89,6 +102,12 @@ const EXPECTED: Record<
     auth: 'room',
     codes: ['invalid_token', 'room_not_found', 'match_over'],
   },
+  // The watch link has its own token (A16): it is guarded by WatchAuth, not RoomAuth.
+  'watch.watch': {
+    route: 'GET /v1/rooms/:room_id/watch',
+    auth: 'watch',
+    codes: ['invalid_token', 'room_not_found'],
+  },
   'read.leaderboard': {
     route: 'GET /v1/leaderboard',
     auth: 'none',
@@ -118,7 +137,7 @@ const EXPECTED: Record<
 
 type Reflected = {
   route: string;
-  auth: 'none' | 'room' | 'admin';
+  auth: 'none' | 'room' | 'watch' | 'admin';
   codes: ErrorCode[];
 };
 
@@ -130,9 +149,11 @@ const reflectApi = (): Record<string, Reflected> => {
       const keys: ReadonlySet<unknown> = middleware;
       const auth = keys.has(RoomAuth)
         ? 'room'
-        : keys.has(AdminAuth)
-          ? 'admin'
-          : 'none';
+        : keys.has(WatchAuth)
+          ? 'watch'
+          : keys.has(AdminAuth)
+            ? 'admin'
+            : 'none';
       const codes = ERROR_CODES.filter(code =>
         (errors.get(ERROR_STATUS[code]) ?? []).some(schema =>
           decodes(schema, errorBody(code)),
@@ -177,6 +198,8 @@ const waitingStatus = (hint: string) =>
   ({
     status: 'waiting',
     room_status: 'playing',
+    opponent_name: 'bob',
+    settings: { hands: 10, turn_seconds: 60, starting_stack: 40 },
     to_act_seat: 1,
     hand_number: 1,
     view: null,
@@ -209,6 +232,27 @@ const RoomAuthTest = Layer.succeed(RoomAuth, {
       return yield* Effect.provideService(
         httpEffect,
         RoomSession,
+        result.claims,
+      );
+    }),
+});
+
+const WatchAuthTest = Layer.succeed(WatchAuth, {
+  bearer: (httpEffect, { credential }) =>
+    Effect.gen(function* () {
+      const params = yield* HttpRouter.params;
+      const result = yield* Effect.promise(() =>
+        verifyWatchToken(
+          Redacted.value(credential),
+          SECRET,
+          params.room_id ?? '',
+        ),
+      );
+      if (!result.ok)
+        return yield* Effect.fail(watchRejectionError(result.reason));
+      return yield* Effect.provideService(
+        httpEffect,
+        WatchSession,
         result.claims,
       );
     }),
@@ -254,6 +298,10 @@ const RoomHandlers = HttpApiBuilder.group(CasinoApi, 'room', handlers =>
   }),
 );
 
+const WatchHandlers = HttpApiBuilder.group(CasinoApi, 'watch', handlers =>
+  handlers.handle('watch', notServed),
+);
+
 const ReadHandlers = HttpApiBuilder.group(CasinoApi, 'read', handlers =>
   handlers.handleAll({
     leaderboard: () => Effect.succeed({ entries: [] }),
@@ -276,10 +324,11 @@ const { handler, dispose } = HttpRouter.toWebHandler(
       SkillHandlers,
       LobbyHandlers,
       RoomHandlers,
+      WatchHandlers,
       ReadHandlers,
       AdminHandlers,
     ]),
-    Layer.provide([RoomAuthTest, AdminAuthTest]),
+    Layer.provide([RoomAuthTest, AdminAuthTest, WatchAuthTest]),
     Layer.provide(HttpServer.layerServices),
   ),
   { disableLogger: true },

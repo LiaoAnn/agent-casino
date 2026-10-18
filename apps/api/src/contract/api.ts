@@ -9,7 +9,7 @@ import {
   HttpApiSchema,
   HttpApiSecurity,
 } from 'effect/http-api';
-import type { RoomTokenClaims } from '../token/token';
+import type { RoomTokenClaims, WatchTokenClaims } from '../token/token';
 import { apiErrors } from './errors';
 import {
   AbortResponse,
@@ -27,6 +27,7 @@ import {
   QueueRequest,
   QueueResponse,
   RoomStatus,
+  WatchResponse,
 } from './schemas';
 
 // The verified claims of the caller's room token.
@@ -40,6 +41,22 @@ export class RoomAuth extends HttpApiMiddleware.Service<
   RoomAuth,
   { provides: RoomSession }
 >()('agent-casino/RoomAuth', {
+  security: { bearer: HttpApiSecurity.bearer },
+  error: apiErrors('invalid_token'),
+}) {}
+
+// The verified claims of the caller's watch token (A16).
+export class WatchSession extends Context.Service<
+  WatchSession,
+  WatchTokenClaims
+>()('agent-casino/WatchSession') {}
+
+// `Authorization: Bearer <watch token>`; checked with token/verifyWatchToken.
+// Room tokens are refused here, and watch tokens by RoomAuth.
+export class WatchAuth extends HttpApiMiddleware.Service<
+  WatchAuth,
+  { provides: WatchSession }
+>()('agent-casino/WatchAuth', {
   security: { bearer: HttpApiSecurity.bearer },
   error: apiErrors('invalid_token'),
 }) {}
@@ -145,6 +162,17 @@ const RoomGroup = HttpApiGroup.make('room')
   )
   .middleware(RoomAuth);
 
+// The owner's read-only view of one seat; answers at once (A16).
+const WatchGroup = HttpApiGroup.make('watch')
+  .add(
+    HttpApiEndpoint.get('watch', '/v1/rooms/:room_id/watch', {
+      params: roomParams,
+      success: WatchResponse,
+      error: apiErrors('room_not_found', 'unavailable', 'internal'),
+    }),
+  )
+  .middleware(WatchAuth);
+
 const ReadGroup = HttpApiGroup.make('read').add(
   HttpApiEndpoint.get('leaderboard', '/v1/leaderboard', {
     success: Leaderboard,
@@ -186,5 +214,6 @@ export class CasinoApi extends HttpApi.make('agent-casino')
   .add(SkillGroup)
   .add(LobbyGroup)
   .add(RoomGroup)
+  .add(WatchGroup)
   .add(ReadGroup)
   .add(AdminGroup) {}

@@ -1,9 +1,10 @@
-// Opening and joining rooms, and the room endpoints behind RoomAuth (T09).
+// Opening and joining rooms, the room endpoints behind RoomAuth (T09), and
+// the owner's watch link behind WatchAuth (T23).
 // createRoom and joinRoom join the lobby group in routes/lobby.ts. The game
 // itself is refereed by the room's Durable Object (room/referee.ts).
-import { Effect } from 'effect';
+import { Effect, Layer } from 'effect';
 import { HttpApiBuilder } from 'effect/http-api';
-import { CasinoApi, RoomSession } from '../contract/api';
+import { CasinoApi, RoomSession, WatchSession } from '../contract/api';
 import * as Rooms from '../room/client';
 import type { RoomApi } from '../room/referee';
 import { WorkerEnv } from './env';
@@ -65,7 +66,7 @@ const inRoom = <A, E>(
     return yield* call(stub, session.seat);
   });
 
-export const RoomHandlers = HttpApiBuilder.group(CasinoApi, 'room', handlers =>
+const SeatHandlers = HttpApiBuilder.group(CasinoApi, 'room', handlers =>
   handlers.handleAll({
     wait: ({ params }) =>
       inRoom(params.room_id, (stub, seat) =>
@@ -85,3 +86,17 @@ export const RoomHandlers = HttpApiBuilder.group(CasinoApi, 'room', handlers =>
       ),
   }),
 );
+
+const WatchHandlers = HttpApiBuilder.group(CasinoApi, 'watch', handlers =>
+  handlers.handle('watch', ({ params }) =>
+    Effect.gen(function* () {
+      const env = yield* WorkerEnv;
+      const session = yield* WatchSession;
+      const stub = yield* Rooms.roomStub(env, params.room_id);
+      return yield* Rooms.callRoom(() => stub.watch(session.seat));
+    }),
+  ),
+);
+
+// Both groups, so app.ts provides them as one.
+export const RoomHandlers = Layer.mergeAll(SeatHandlers, WatchHandlers);

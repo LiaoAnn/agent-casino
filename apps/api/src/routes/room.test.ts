@@ -12,6 +12,7 @@ import {
   CreateRoomResponse,
   JoinResponse,
   RoomStatus,
+  SETTINGS_DEFAULTS,
 } from '../contract/schemas';
 import { banName } from '../db/bans';
 import { startTestD1, type TestD1 } from '../db/test-d1';
@@ -26,7 +27,11 @@ import {
 import { dealHand } from '../holdem/shuffle';
 import { viewFor } from '../holdem/view';
 import { RoomReferee, type RoomStorage } from '../room/referee';
-import { signRoomToken, verifyRoomToken } from '../token/token';
+import {
+  signRoomToken,
+  verifyRoomToken,
+  verifyWatchToken,
+} from '../token/token';
 import type { Bindings } from './env';
 
 let testD1: TestD1;
@@ -115,6 +120,7 @@ const makeEnv = (
   };
   const env = {
     TOKEN_SECRET,
+    WEB_URL: 'https://web.test',
     ADMIN_KEY,
     DB: testD1.d1,
     ROOM,
@@ -2554,6 +2560,133 @@ describe('the seed stays secret during the match', () => {
       for (const fragment of SEED_TEXTS) {
         expect(raw, label).not.toContain(fragment);
       }
+    }
+  });
+});
+
+// --- T23: opponent_name, settings and watch_url (A16) --------------------------
+
+describe('opponent_name and settings in room responses (A16)', () => {
+  const SETTINGS = { hands: 3, turn_seconds: 30, starting_stack: 100 };
+
+  it('POST /v1/rooms answers the settings in use: the given ones, or the defaults', async () => {
+    const { env } = makeEnv();
+    expect((await createRoom(env, { settings: SETTINGS })).settings).toEqual(
+      SETTINGS,
+    );
+    expect((await createRoom(env)).settings).toEqual(SETTINGS_DEFAULTS);
+    expect(
+      (await createRoom(env, { settings: { hands: 5 } })).settings,
+    ).toEqual({ ...SETTINGS_DEFAULTS, hands: 5 });
+  });
+
+  it('join answers opponent_name (the creator) and the room settings', async () => {
+    const { env } = makeEnv();
+    const room = await createRoom(env, { settings: SETTINGS });
+    const joined = await joinRoom(env, room);
+    expect(joined.opponent_name).toBe('alice');
+    expect(joined.settings).toEqual(SETTINGS);
+  });
+
+  it('state and wait name the opponent as null before the join and by name after', async () => {
+    const t = makeEnv();
+    const room = await createRoom(t.env, { settings: SETTINGS });
+    for (const read of [state, wait]) {
+      const { status } = await read(t.env, room.room_id, room.token);
+      expect(status.opponent_name).toBeNull();
+      expect(status.settings).toEqual(SETTINGS);
+    }
+    const joined = await joinRoom(t.env, room);
+    for (const read of [state, wait]) {
+      const alice = await read(t.env, room.room_id, room.token);
+      expect(alice.status.opponent_name).toBe('bob');
+      expect(alice.status.settings).toEqual(SETTINGS);
+      const bob = await read(t.env, room.room_id, joined.token);
+      expect(bob.status.opponent_name).toBe('alice');
+      expect(bob.status.settings).toEqual(SETTINGS);
+    }
+  });
+
+  it('settings stay the same in your_turn, waiting and match_over', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const { roomId, tokens } = await seededRoom(t, SETTINGS);
+    const turn = await yourTurn(t.env, roomId, tokens[0]);
+    expect(turn.settings).toEqual(SETTINGS);
+    const waiting = await state(t.env, roomId, tokens[1]);
+    expect(waiting.status.status).toBe('waiting');
+    expect(waiting.status.settings).toEqual(SETTINGS);
+    await act(t.env, roomId, tokens[0], {
+      turn_id: turn.turn_id,
+      type: 'fold',
+    });
+    // Fold every first turn until the 3 hands are played.
+    for (let i = 0; i < 20; i++) {
+      const statuses = await Promise.all(
+        tokens.map(async token => (await state(t.env, roomId, token)).status),
+      );
+      const seat = statuses.findIndex(status => status.status === 'your_turn');
+      if (seat === -1) break;
+      const next = statuses[seat];
+      if (next?.status !== 'your_turn') break;
+      await act(t.env, roomId, tokens[seat as 0 | 1], {
+        turn_id: next.turn_id,
+        type: 'fold',
+      });
+    }
+    for (const [seat, opponent] of [
+      [0, 'bob'],
+      [1, 'alice'],
+    ] as const) {
+      const { status } = await state(t.env, roomId, tokens[seat]);
+      expect(status).toMatchObject({
+        status: 'match_over',
+        opponent_name: opponent,
+        settings: SETTINGS,
+      });
+    }
+  });
+
+  it('a room with the house bot names house-bot as the opponent', async () => {
+    const t = makeEnv({ allowTestRooms: true });
+    const room = await createRoom(t.env, {
+      opponent: 'bot',
+      settings: SETTINGS,
+      test: { seed: SEED },
+    });
+    expect(room.settings).toEqual(SETTINGS);
+    const { status } = await state(t.env, room.room_id, room.token);
+    expect(status.opponent_name).toBe('house-bot');
+    expect(status.settings).toEqual(SETTINGS);
+  });
+
+  it('the names keep their case as sent', async () => {
+    const { env } = makeEnv();
+    const room = await createRoom(env, { name: 'AlIce' });
+    const joined = await joinRoom(env, room, { name: 'bOB' });
+    expect(joined.opponent_name).toBe('AlIce');
+    expect(
+      (await state(env, room.room_id, room.token)).status.opponent_name,
+    ).toBe('bOB');
+  });
+
+  it('every watch_url is for the room, the seat and the name of its response', async () => {
+    const { env } = makeEnv();
+    const room = await createRoom(env, { name: 'AlIce' });
+    const joined = await joinRoom(env, room, { name: 'bOB' });
+    for (const [response, seat, name] of [
+      [room, 0, 'AlIce'],
+      [joined, 1, 'bOB'],
+    ] as const) {
+      const url = new URL(response.watch_url);
+      expect(url.origin).toBe('https://web.test');
+      expect(url.pathname).toBe(`/watch/${room.room_id}`);
+      const token = url.searchParams.get('token') ?? '';
+      expect(await verifyWatchToken(token, TOKEN_SECRET, room.room_id)).toEqual(
+        {
+          ok: true,
+          claims: { room_id: room.room_id, seat, name },
+        },
+      );
     }
   });
 });

@@ -10,6 +10,7 @@ import {
   InviteCode,
   IsoTime,
   JoinRequest,
+  JoinResponse,
   Leaderboard,
   MatchDetail,
   MatchList,
@@ -24,6 +25,7 @@ import {
   SETTINGS_LIMITS,
   Settings,
   TestSettings,
+  WatchResponse,
 } from './schemas';
 
 const decodes = (schema: Schema.Top, value: unknown): boolean =>
@@ -67,9 +69,14 @@ const view = {
   history: [{ seat: 1, street: 'flop', type: 'raise', amount: 4 }],
 };
 
+const settings = { hands: 10, turn_seconds: 60, starting_stack: 40 };
+const watchUrl = `https://web.test/watch/${ROOM}?token=abc.def`;
+
 const yourTurn = {
   status: 'your_turn',
   room_status: 'playing',
+  opponent_name: 'bob',
+  settings,
   to_act_seat: 0,
   turn_id: 't_41',
   deadline: '2026-10-16T12:50:30Z',
@@ -98,6 +105,8 @@ const yourTurn = {
 const matchOver = {
   status: 'match_over',
   room_status: 'finished',
+  opponent_name: 'bob',
+  settings,
   to_act_seat: null,
   hand_number: 10,
   view: null,
@@ -279,6 +288,9 @@ describe('responses', () => {
         room_id: ROOM,
         seat: 0,
         token: 'abc.def',
+        opponent_name: 'bob',
+        settings,
+        watch_url: watchUrl,
         hint: `Matched. Next, call GET /v1/rooms/${ROOM}/wait`,
       }),
     ).toBe(true);
@@ -300,6 +312,8 @@ describe('responses', () => {
         invite_code: 'K7Q2MX',
         seat: 0,
         token: 'abc.def',
+        settings,
+        watch_url: watchUrl,
         hint: 'Give room_id and invite_code to your opponent',
       }),
     ).toBe(true);
@@ -312,6 +326,8 @@ describe('responses', () => {
       decodes(RoomStatus, {
         status: 'waiting',
         room_status: 'waiting',
+        opponent_name: null,
+        settings,
         to_act_seat: null,
         hand_number: null,
         view: null,
@@ -347,6 +363,89 @@ describe('responses', () => {
     expect(decodes(RoomStatus, { ...matchOver, result: 'seat0_win' })).toBe(
       false,
     );
+  });
+
+  it('decodes the join response with opponent_name, settings and watch_url', () => {
+    const joined = {
+      room_id: ROOM,
+      seat: 1,
+      token: 'abc.def',
+      opponent_name: 'alice',
+      settings,
+      watch_url: watchUrl,
+      hint: `Joined. Next, call GET /v1/rooms/${ROOM}/wait`,
+    };
+    expect(decodes(JoinResponse, joined)).toBe(true);
+    for (const key of ['opponent_name', 'settings', 'watch_url'] as const) {
+      const { [key]: _removed, ...without } = joined;
+      expect(decodes(JoinResponse, without), key).toBe(false);
+    }
+  });
+
+  it('requires settings and watch_url in the create room response, and watch_url in queue matched', () => {
+    const created = {
+      room_id: ROOM,
+      invite_code: 'K7Q2MX',
+      seat: 0,
+      token: 'abc.def',
+      settings,
+      watch_url: watchUrl,
+      hint: 'Give room_id and invite_code to your opponent',
+    };
+    for (const key of ['settings', 'watch_url'] as const) {
+      const { [key]: _removed, ...without } = created;
+      expect(decodes(CreateRoomResponse, without), key).toBe(false);
+    }
+    const matched = {
+      status: 'matched',
+      room_id: ROOM,
+      seat: 0,
+      token: 'abc.def',
+      opponent_name: 'bob',
+      settings,
+      watch_url: watchUrl,
+      hint: 'Matched',
+    };
+    expect(decodes(QueueResponse, matched)).toBe(true);
+    for (const key of ['opponent_name', 'settings', 'watch_url'] as const) {
+      const { [key]: _removed, ...without } = matched;
+      expect(decodes(QueueResponse, without), key).toBe(false);
+    }
+  });
+
+  it('requires opponent_name (null allowed) and complete settings in every room status', () => {
+    for (const status of [yourTurn, matchOver]) {
+      const { opponent_name: _name, ...noName } = status;
+      expect(decodes(RoomStatus, noName)).toBe(false);
+      const { settings: _settings, ...noSettings } = status;
+      expect(decodes(RoomStatus, noSettings)).toBe(false);
+      expect(decodes(RoomStatus, { ...status, opponent_name: null })).toBe(
+        true,
+      );
+      expect(decodes(RoomStatus, { ...status, settings: { hands: 10 } })).toBe(
+        false,
+      );
+    }
+  });
+
+  it('accepts an action note up to 500 characters and rejects longer or non-text notes', () => {
+    const base = { turn_id: 't_41', type: 'call' };
+    expect(decodes(ActionRequest, { ...base, note: 'pot odds are fine' })).toBe(
+      true,
+    );
+    expect(decodes(ActionRequest, { ...base, note: '' })).toBe(true);
+    expect(decodes(ActionRequest, { ...base, note: 'x'.repeat(500) })).toBe(
+      true,
+    );
+    expect(decodes(ActionRequest, { ...base, note: '牌'.repeat(500) })).toBe(
+      true,
+    );
+    expect(decodes(ActionRequest, { ...base, note: 'x'.repeat(501) })).toBe(
+      false,
+    );
+    expect(decodes(ActionRequest, { ...base, note: 5 })).toBe(false);
+    expect(decodes(ActionRequest, { ...base, note: null })).toBe(false);
+    expect(decodes(ActionRequest, base)).toBe(true);
   });
 
   it('decodes accepted, with and without duplicate', () => {
@@ -483,5 +582,163 @@ describe('responses', () => {
         retryable: true,
       }),
     ).toBe(true);
+  });
+});
+
+// --- WatchResponse (A16) ------------------------------------------------------
+
+describe('WatchResponse', () => {
+  const noted = (note: string) => ({
+    seat: 0,
+    street: 'preflop',
+    type: 'call',
+    amount: 1,
+    note,
+  });
+  const hand = (overrides: Record<string, unknown> = {}) => ({
+    hand_number: 1,
+    button_seat: 0,
+    board: ['2h', '3h', '9c'],
+    hole_cards: [['As', 'Qd'], null],
+    events: [
+      { seat: 0, street: 'preflop', type: 'post_blind', amount: 1 },
+      { seat: 1, street: 'preflop', type: 'post_blind', amount: 2 },
+      noted('call to see a flop'),
+      { seat: 1, street: 'preflop', type: 'check' },
+      { seat: 1, street: 'flop', type: 'fold' },
+    ],
+    winner_seat: 0,
+    pot: 4,
+    ended_by: 'fold',
+    stacks: [42, 38],
+    ...overrides,
+  });
+  const playing = {
+    room_id: ROOM,
+    seat: 0,
+    players: ['alice', 'bob'],
+    settings,
+    room_status: 'playing',
+    hand_number: 2,
+    to_act_seat: 0,
+    deadline: '2026-10-16T12:50:30Z',
+    view: { ...view, history: [noted('opening note')] },
+    hands: [hand()],
+  };
+  const finished = {
+    ...playing,
+    room_status: 'finished',
+    hand_number: 2,
+    to_act_seat: null,
+    deadline: null,
+    hands: [
+      hand({
+        hole_cards: [
+          ['As', 'Qd'],
+          ['9h', '9d'],
+        ],
+      }),
+    ],
+    match_id: ROOM,
+    result: 'seat0_win',
+    final_stacks: [55, 25],
+    ratings: [
+      { name: 'alice', rating: 1516, change: 16 },
+      { name: 'bob', rating: 1484, change: -16 },
+    ],
+  };
+
+  it('decodes a playing room, with notes on the own steps and the opponent hole cards null', () => {
+    expect(decodes(WatchResponse, playing)).toBe(true);
+    const decoded = Schema.decodeUnknownSync(WatchResponse)(playing);
+    expect(decoded.view?.history[0]?.note).toBe('opening note');
+    expect(decoded.hands[0]?.events[2]?.note).toBe('call to see a flop');
+    expect(decoded.hands[0]?.hole_cards[1]).toBeNull();
+  });
+
+  it('decodes a playing room on the opponent turn: no deadline, to_act_seat 1', () => {
+    expect(
+      decodes(WatchResponse, { ...playing, to_act_seat: 1, deadline: null }),
+    ).toBe(true);
+  });
+
+  it('decodes a waiting room: second player, view and hand number null, no hands', () => {
+    expect(
+      decodes(WatchResponse, {
+        room_id: ROOM,
+        seat: 0,
+        players: ['alice', null],
+        settings,
+        room_status: 'waiting',
+        hand_number: null,
+        to_act_seat: null,
+        deadline: null,
+        view: null,
+        hands: [],
+      }),
+    ).toBe(true);
+  });
+
+  it('decodes a finished room with both seats hole cards, result, final stacks and ratings', () => {
+    expect(decodes(WatchResponse, finished)).toBe(true);
+    expect(decodes(WatchResponse, { ...finished, ratings: null })).toBe(true);
+    for (const result of ['seat1_win', 'draw', 'void', 'cancelled']) {
+      expect(decodes(WatchResponse, { ...finished, result }), result).toBe(
+        true,
+      );
+    }
+    expect(decodes(WatchResponse, { ...finished, room_status: 'void' })).toBe(
+      true,
+    );
+  });
+
+  it('rejects results that use the agent angle, or a seat other than 0 or 1', () => {
+    expect(decodes(WatchResponse, { ...finished, result: 'win' })).toBe(false);
+    expect(decodes(WatchResponse, { ...playing, seat: 2 })).toBe(false);
+    expect(decodes(WatchResponse, { ...playing, to_act_seat: 2 })).toBe(false);
+    expect(decodes(WatchResponse, { ...playing, room_status: 'over' })).toBe(
+      false,
+    );
+  });
+
+  it('rejects malformed pieces: players, hole cards, hand_number 0, events', () => {
+    expect(decodes(WatchResponse, { ...playing, players: ['alice'] })).toBe(
+      false,
+    );
+    expect(decodes(WatchResponse, { ...playing, hand_number: 0 })).toBe(false);
+    expect(
+      decodes(WatchResponse, {
+        ...playing,
+        hands: [hand({ hole_cards: [['As'], null] })],
+      }),
+    ).toBe(false);
+    expect(
+      decodes(WatchResponse, {
+        ...playing,
+        hands: [hand({ ended_by: 'timeout' })],
+      }),
+    ).toBe(false);
+    expect(
+      decodes(WatchResponse, {
+        ...playing,
+        view: { ...view, history: [{ ...noted('x'), type: 'bet' }] },
+      }),
+    ).toBe(false);
+    const { room_id: _room, ...noRoom } = playing;
+    expect(decodes(WatchResponse, noRoom)).toBe(false);
+    const { hands: _hands, ...noHands } = playing;
+    expect(decodes(WatchResponse, noHands)).toBe(false);
+  });
+
+  it('does not carry seed, turn_id or legal_actions through decoding', () => {
+    const decoded = Schema.decodeUnknownSync(WatchResponse)({
+      ...playing,
+      seed: SEED,
+      turn_id: 't_1',
+      legal_actions: [{ type: 'fold' }],
+    });
+    expect(decoded).not.toHaveProperty('seed');
+    expect(decoded).not.toHaveProperty('turn_id');
+    expect(decoded).not.toHaveProperty('legal_actions');
   });
 });

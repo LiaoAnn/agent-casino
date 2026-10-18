@@ -49,6 +49,7 @@ const makeEnv = (): Bindings => {
   const referees = new Map<string, RoomReferee>();
   const env = {
     TOKEN_SECRET: 'skill-run-token-secret',
+    WEB_URL: 'https://web.test',
     ADMIN_KEY: 'skill-run-admin-key',
     DB: testD1.d1,
     ROOM: {

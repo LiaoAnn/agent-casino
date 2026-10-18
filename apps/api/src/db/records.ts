@@ -28,6 +28,8 @@ export interface MatchRecordInput {
   final_stacks: [number, number];
   /** The engine's finished hands, in order. */
   hands: HandRecord[];
+  /** Each seat's notes (A16); `seq` is the step's position in the hand's events. */
+  notes?: { hand_number: number; seq: number; note: string }[];
 }
 
 /** The `ratings` field of `match_over` (A15). */
@@ -172,6 +174,9 @@ export async function recordMatch(
     endedBy: hand.ended_by,
     stacks: hand.stacks,
   }));
+  const notes = new Map(
+    (input.notes ?? []).map(n => [`${n.hand_number}:${n.seq}`, n.note]),
+  );
   const eventRows = input.hands.flatMap(hand =>
     hand.events.map((event, seq) => ({
       matchId: input.match_id,
@@ -182,6 +187,7 @@ export async function recordMatch(
       type: event.type,
       amount: event.amount ?? null,
       timeout: event.timeout === true,
+      note: notes.get(`${hand.hand_number}:${seq}`) ?? null,
     })),
   );
 

@@ -438,6 +438,23 @@ describe('renderSkill: what an agent must know', () => {
     }
     expect(todo.toLowerCase()).toContain('network');
   });
+
+  // T23 (casino-api A16).
+  it('says to hand watch_url to the owner and explains the new seat fields', () => {
+    const play = section(MD, 'How to play');
+    expect(play).toMatch(/`watch_url`[^\n]*owner/);
+    expect(play).toMatch(/read-only/);
+    expect(play).toContain('`opponent_name`');
+    expect(play).toContain('`settings`');
+  });
+
+  it('offers an optional note of at most 500 characters that only the owner sees', () => {
+    const play = section(MD, 'How to play');
+    expect(play).toMatch(/`note`/);
+    expect(play).toContain('500 characters');
+    expect(play).toMatch(/opponent never/);
+    expect(play).toMatch(/never let writing it make you miss the deadline/);
+  });
 });
 
 // --- the hand-written examples ----------------------------------------------

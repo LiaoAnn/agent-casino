@@ -74,6 +74,8 @@ describe('apiError', () => {
     const state = {
       status: 'waiting',
       room_status: 'waiting',
+      opponent_name: null,
+      settings: { hands: 10, turn_seconds: 60, starting_stack: 40 },
       to_act_seat: null,
       hand_number: null,
       view: null,
@@ -131,6 +133,8 @@ describe('apiErrors', () => {
       state: {
         status: 'match_over',
         room_status: 'finished',
+        opponent_name: 'bob',
+        settings: { hands: 10, turn_seconds: 60, starting_stack: 40 },
         to_act_seat: null,
         hand_number: 10,
         view: null,

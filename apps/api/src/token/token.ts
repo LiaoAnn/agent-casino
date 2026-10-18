@@ -1,14 +1,19 @@
 // Room tokens (casino-api skill: 房間 token, A8):
 // base64url(JSON claims) + "." + base64url(HMAC-SHA256(secret, first part)).
 // The Room DO separately refuses tokens of rooms that ended over an hour ago.
+// Watch tokens (A16) look the same without `exp`, and sign "watch." + the
+// first part, so neither kind passes for the other.
 import { type ApiError, apiError } from '../contract/errors';
 
 export const TOKEN_TTL_SECONDS = 86_400;
 
-export interface RoomTokenClaims {
+export interface WatchTokenClaims {
   room_id: string;
   seat: 0 | 1;
   name: string;
+}
+
+export interface RoomTokenClaims extends WatchTokenClaims {
   exp: number;
 }
 
@@ -18,9 +23,11 @@ export type TokenRejection =
   | 'expired'
   | 'wrong_room';
 
-type TokenCheck =
-  | { ok: true; claims: RoomTokenClaims }
+type TokenCheck<C> =
+  | { ok: true; claims: C }
   | { ok: false; reason: TokenRejection };
+
+const WATCH_PREFIX = 'watch.';
 
 const encoder = new TextEncoder();
 
@@ -51,7 +58,22 @@ const hmacKey = (secret: string) =>
 
 const nowSeconds = (nowMs: number) => Math.floor(nowMs / 1000);
 
-export async function signRoomToken(
+// `prefix` goes in front of the payload into the HMAC only.
+async function sign(
+  claims: object,
+  secret: string,
+  prefix = '',
+): Promise<string> {
+  const payload = toBase64Url(encoder.encode(JSON.stringify(claims)));
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    await hmacKey(secret),
+    encoder.encode(prefix + payload),
+  );
+  return `${payload}.${toBase64Url(new Uint8Array(signature))}`;
+}
+
+export function signRoomToken(
   claims: Omit<RoomTokenClaims, 'exp'>,
   secret: string,
   nowMs: number,
@@ -62,32 +84,44 @@ export async function signRoomToken(
     name: claims.name,
     exp: nowSeconds(nowMs) + TOKEN_TTL_SECONDS,
   };
-  const payload = toBase64Url(encoder.encode(JSON.stringify(full)));
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    await hmacKey(secret),
-    encoder.encode(payload),
-  );
-  return `${payload}.${toBase64Url(new Uint8Array(signature))}`;
+  return sign(full, secret);
 }
 
-const isClaims = (value: unknown): value is RoomTokenClaims => {
+// No exp: the link works as long as TOKEN_SECRET stays the same (A16). The
+// same claims always give the same token.
+export function signWatchToken(
+  claims: WatchTokenClaims,
+  secret: string,
+): Promise<string> {
+  const { room_id, seat, name } = claims;
+  return sign({ room_id, seat, name }, secret, WATCH_PREFIX);
+}
+
+const isWatchClaims = (value: unknown): value is WatchTokenClaims => {
   if (typeof value !== 'object' || value === null) return false;
-  const { room_id, seat, name, exp } = value as Record<string, unknown>;
+  const { room_id, seat, name } = value as Record<string, unknown>;
   return (
     typeof room_id === 'string' &&
     (seat === 0 || seat === 1) &&
-    typeof name === 'string' &&
-    Number.isInteger(exp)
+    typeof name === 'string'
   );
 };
 
-export async function verifyRoomToken(
+const isClaims = (value: unknown): value is RoomTokenClaims =>
+  isWatchClaims(value) && Number.isInteger((value as { exp?: unknown }).exp);
+
+// Checks the signature, the claims' shape, `expired`, then the room.
+async function verify<C extends WatchTokenClaims>(
   token: string,
   secret: string,
   roomId: string,
-  nowMs: number,
-): Promise<TokenCheck> {
+  kind: {
+    isShape: (value: unknown) => value is C;
+    expired?: (claims: C) => boolean;
+    prefix?: string;
+  },
+): Promise<TokenCheck<C>> {
+  const { isShape, expired, prefix = '' } = kind;
   const parts = token.split('.');
   if (parts.length !== 2) return { ok: false, reason: 'malformed' };
   const [payload = '', signaturePart = ''] = parts;
@@ -100,7 +134,7 @@ export async function verifyRoomToken(
     'HMAC',
     await hmacKey(secret),
     signature,
-    encoder.encode(payload),
+    encoder.encode(prefix + payload),
   );
   if (!valid) return { ok: false, reason: 'bad_signature' };
 
@@ -110,10 +144,33 @@ export async function verifyRoomToken(
   } catch {
     return { ok: false, reason: 'malformed' };
   }
-  if (!isClaims(claims)) return { ok: false, reason: 'malformed' };
-  if (nowSeconds(nowMs) >= claims.exp) return { ok: false, reason: 'expired' };
+  if (!isShape(claims)) return { ok: false, reason: 'malformed' };
+  if (expired?.(claims)) return { ok: false, reason: 'expired' };
   if (claims.room_id !== roomId) return { ok: false, reason: 'wrong_room' };
   return { ok: true, claims };
+}
+
+export function verifyRoomToken(
+  token: string,
+  secret: string,
+  roomId: string,
+  nowMs: number,
+): Promise<TokenCheck<RoomTokenClaims>> {
+  return verify(token, secret, roomId, {
+    isShape: isClaims,
+    expired: claims => nowSeconds(nowMs) >= claims.exp,
+  });
+}
+
+export function verifyWatchToken(
+  token: string,
+  secret: string,
+  roomId: string,
+): Promise<TokenCheck<WatchTokenClaims>> {
+  return verify(token, secret, roomId, {
+    isShape: isWatchClaims,
+    prefix: WATCH_PREFIX,
+  });
 }
 
 const JOIN_AGAIN =
@@ -143,4 +200,20 @@ export function tokenRejectionError(
 ): ApiError<'invalid_token'> {
   const [message, hint] = REJECTIONS[reason];
   return apiError('invalid_token', message, hint);
+}
+
+// For whoever opened the watch link: usually the owner, not the agent.
+const WATCH_AGAIN =
+  'Open the watch_url exactly as your agent got it from POST /v1/queue, POST /v1/rooms or POST /v1/rooms/{room_id}/join; a room token does not work here';
+
+export function watchRejectionError(
+  reason: TokenRejection,
+): ApiError<'invalid_token'> {
+  return apiError(
+    'invalid_token',
+    reason === 'wrong_room'
+      ? 'This watch token belongs to a different room. Use the room_id of the watch_url it came with'
+      : 'Missing or invalid watch token. Send the header "Authorization: Bearer <token>" with the token from the watch_url',
+    WATCH_AGAIN,
+  );
 }

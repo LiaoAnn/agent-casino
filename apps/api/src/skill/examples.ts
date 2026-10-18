@@ -33,6 +33,13 @@ export interface EndpointExample {
 const ROOM = 'r_8f2k1x9q0a';
 const TOKEN = 'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MH0.Hk3vQ9xZ2mPq';
 const WAIT = `GET /v1/rooms/${ROOM}/wait`;
+const SETTINGS = { hands: 10, turn_seconds: 60, starting_stack: 40 };
+const watchUrl = (token: string) =>
+  `https://web.example.net/watch/${ROOM}?token=${token}`;
+const WATCH_URL = watchUrl(
+  'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MH0.Wt5mK2pQ8vNa',
+);
+const OPPONENT = { opponent_name: 'bob', settings: SETTINGS };
 const ACT = `POST /v1/rooms/${ROOM}/actions`;
 
 const queueRequest: typeof QueueRequest.Type = {
@@ -45,6 +52,9 @@ const matched: typeof QueueResponse.Type = {
   room_id: ROOM,
   seat: 0,
   token: TOKEN,
+  opponent_name: 'bob',
+  settings: SETTINGS,
+  watch_url: WATCH_URL,
   hint: `Matched. Next, call ${WAIT}`,
 };
 
@@ -64,6 +74,8 @@ const created: typeof CreateRoomResponse.Type = {
   invite_code: 'K7Q2MX',
   seat: 0,
   token: TOKEN,
+  settings: SETTINGS,
+  watch_url: WATCH_URL,
   hint: `Give room_id and invite_code to your opponent, then call ${WAIT}`,
 };
 
@@ -76,6 +88,11 @@ const joined: typeof JoinResponse.Type = {
   room_id: ROOM,
   seat: 1,
   token: 'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Wc7nR4tB8yLs',
+  opponent_name: 'alice',
+  settings: SETTINGS,
+  watch_url: watchUrl(
+    'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe',
+  ),
   hint: `Joined. Next, call ${WAIT}`,
 };
 
@@ -102,6 +119,7 @@ const hand2 = {
 const yourTurn: RoomStatus = {
   status: 'your_turn',
   room_status: 'playing',
+  ...OPPONENT,
   to_act_seat: 0,
   hand_number: 3,
   turn_id: 't_41',
@@ -134,6 +152,7 @@ const yourTurn: RoomStatus = {
 const opponentActing: RoomStatus = {
   status: 'waiting',
   room_status: 'playing',
+  ...OPPONENT,
   to_act_seat: 1,
   hand_number: 3,
   view: {
@@ -155,6 +174,8 @@ const opponentActing: RoomStatus = {
 const opponentNotHere: RoomStatus = {
   status: 'waiting',
   room_status: 'waiting',
+  opponent_name: null,
+  settings: SETTINGS,
   to_act_seat: null,
   hand_number: null,
   view: null,
@@ -165,6 +186,7 @@ const opponentNotHere: RoomStatus = {
 const matchOver: typeof MatchOver.Type = {
   status: 'match_over',
   room_status: 'finished',
+  ...OPPONENT,
   to_act_seat: null,
   hand_number: 10,
   view: {
@@ -217,6 +239,7 @@ const actRequest: typeof ActionRequest.Type = {
   turn_id: '$TURN_ID',
   type: 'raise',
   amount: 8,
+  note: 'Top pair with the best kicker: raise for value',
 };
 
 const accepted: typeof ActionAccepted.Type = {
@@ -246,6 +269,7 @@ const staleTurn: ApiError<'stale_turn'> = {
 const left: typeof MatchOver.Type = {
   status: 'match_over',
   room_status: 'finished',
+  ...OPPONENT,
   to_act_seat: null,
   hand_number: 3,
   view: opponentActing.view,
