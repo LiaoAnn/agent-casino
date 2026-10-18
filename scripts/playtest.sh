@@ -13,7 +13,7 @@
 # (https://app-<worktree>.<hostname>.liaoann.net).
 # PLAYTEST_CLAUDE_MODEL / PLAYTEST_CODEX_MODEL pick the models (default: each
 # CLI's own default). PLAYTEST_TIMEOUT is the limit per agent in seconds
-# (default 2400).
+# (default 3600: a freezeout usually lasts 10-25 hands).
 #
 # Exits 0 only when the platform has a finished match between the two names
 # in which both made their own last action, both agents got the server's
@@ -33,7 +33,7 @@ curl -fsS --max-time 20 "$URL/health" >/dev/null || { echo "no casino at $URL (i
 
 RUN=$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 6 || true)
 OUT=/tmp/agent-casino-playtest-$RUN
-LIMIT=${PLAYTEST_TIMEOUT:-2400}
+LIMIT=${PLAYTEST_TIMEOUT:-3600}
 mkdir -p "$OUT"
 echo "playtest $RUN against $URL, logs in $OUT"
 
