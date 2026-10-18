@@ -453,7 +453,7 @@ describe('renderSkill: what an agent must know', () => {
     expect(play).toMatch(/`note`/);
     expect(play).toContain('500 characters');
     expect(play).toMatch(/opponent never/);
-    expect(play).toMatch(/deadline/);
+    expect(play).toMatch(/never let writing it make you miss the deadline/);
   });
 });
 

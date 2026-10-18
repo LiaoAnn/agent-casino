@@ -183,7 +183,7 @@ const sign = (
         signWatchToken(claims, env.TOKEN_SECRET),
       ]),
     );
-    const watch_url = `${WEB_URL.replace(/\/+$/, '')}/watch/${claims.room_id}?token=${watchToken}`;
+    const watch_url = `${WEB_URL}/watch/${claims.room_id}?token=${watchToken}`;
     return { token, watch_url };
   });
 

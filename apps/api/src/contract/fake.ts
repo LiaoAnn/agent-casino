@@ -178,15 +178,17 @@ const NOTES: Record<Action['type'], string> = {
 
 // A watched seat-0 match between alice and Bob, played by the engine with a
 // note on every move of alice's: `playing` stops on alice's turn after two
-// finished hands, `finished` plays to the end.
+// finished hands, `finished` plays to the end. `record` is the public record
+// of `finished`, which match() also answers, so its result can link to it.
 function fakeWatch(seed: number): {
   playing: WatchResponse;
   finished: WatchResponse;
+  record: MatchDetail;
 } {
-  const random = makeRandom(seed);
+  // Its own stream, apart from the list's, so its room ids differ.
+  const random = makeRandom(seed + 0x5eed);
   const names: [string, string] = ['alice', 'Bob'];
   const settings = { ...SETTINGS_DEFAULTS };
-  const room_id = roomId(random);
   const startedAt = START_TIME + 30 * 24 * 60 * 60_000;
   // `pauseAfter`: stop on alice's turn once that many hands are finished;
   // `null` plays to the end.
@@ -231,6 +233,7 @@ function fakeWatch(seed: number): {
     }
   };
   const watched = (
+    room_id: string,
     played: ReturnType<typeof play>,
     ended: Parameters<typeof watchView>[0]['ended'],
   ) =>
@@ -251,16 +254,36 @@ function fakeWatch(seed: number): {
   const finished = play(null);
   const [a, b] = finished.state.stacks;
   const change = a === b ? 0 : a > b ? 16 : -16;
+  const result = a === b ? 'draw' : a > b ? 'seat0_win' : 'seat1_win';
+  const over = watched(roomId(random), finished, {
+    result,
+    final_stacks: [a, b],
+    ratings: [
+      { name: names[0], rating: 1500 + change, change },
+      { name: names[1], rating: 1500 - change, change: -change },
+    ],
+  });
   return {
-    playing: watched(playing, null),
-    finished: watched(finished, {
-      result: a === b ? 'draw' : a > b ? 'seat0_win' : 'seat1_win',
+    playing: watched(roomId(random), playing, null),
+    finished: over,
+    record: {
+      match_id: over.room_id,
+      players: names,
+      settings,
+      seed: finished.config.seed,
+      result,
+      rated: true,
+      ended_at: new Date(startedAt + 60 * 60_000).toISOString(),
       final_stacks: [a, b],
-      ratings: [
-        { name: names[0], rating: 1500 + change, change },
-        { name: names[1], rating: 1500 - change, change: -change },
+      rating_changes: [
+        { name: names[0], before: 1500, after: 1500 + change },
+        { name: names[1], before: 1500, after: 1500 - change },
       ],
-    }),
+      hands: finished.hands.map(hand => ({
+        ...hand,
+        hole_cards: dealHand(finished.config.seed, hand.hand_number).holeCards,
+      })),
+    },
   };
 }
 
@@ -372,6 +395,7 @@ export function makeFakeData(
     });
   }
 
+  const watch = fakeWatch(seed);
   const newestFirst: MatchSummary[] = details
     .map(({ match_id, players, result, ended_at, rated }) => ({
       match_id,
@@ -414,8 +438,9 @@ export function makeFakeData(
       };
     },
     match: (matchId: string): MatchDetail | undefined =>
-      details.find(d => d.match_id === matchId),
+      details.find(d => d.match_id === matchId) ??
+      (matchId === watch.record.match_id ? watch.record : undefined),
     // The owner's watch link of a match in play and of one that is over.
-    watch: fakeWatch(seed),
+    watch: { playing: watch.playing, finished: watch.finished },
   };
 }

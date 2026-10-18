@@ -162,18 +162,15 @@ export function verifyRoomToken(
   });
 }
 
-export async function verifyWatchToken(
+export function verifyWatchToken(
   token: string,
   secret: string,
   roomId: string,
 ): Promise<TokenCheck<WatchTokenClaims>> {
-  const result = await verify(token, secret, roomId, {
+  return verify(token, secret, roomId, {
     isShape: isWatchClaims,
     prefix: WATCH_PREFIX,
   });
-  if (!result.ok) return result;
-  const { room_id, seat, name } = result.claims;
-  return { ok: true, claims: { room_id, seat, name } };
 }
 
 const JOIN_AGAIN =
