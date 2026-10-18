@@ -10,7 +10,7 @@ import {
   ERROR_STATUS,
   type ErrorCode,
 } from '../contract/errors';
-import { EXAMPLE_ORIGIN, EXAMPLES } from './examples';
+import { EXAMPLE_ORIGIN, EXAMPLES, WATCH_URL } from './examples';
 import template from './template.md?raw' with { type: 'text' };
 
 interface Endpoint {
@@ -173,8 +173,8 @@ const curl = (key: string) => {
   return ['```bash', parts.join(' \\\n  '), '```'].join('\n');
 };
 
-// `watch_url` in the examples is on the web's domain, as in real answers;
-// without one, on the domain the agent asked (T27).
+// `watch_url` and the match page in the examples are on the web's domain, as
+// in real answers; without one, on the domain the agent asked (T27, T32).
 const responses = (key: string, webUrl: string) => {
   const examples = EXAMPLES[key]?.responses ?? [];
   if (examples.length === 0)
@@ -196,6 +196,8 @@ export function renderSkill(baseUrl: string, webUrl = baseUrl): string {
     errors: errorTable,
     curl,
     responses: key => responses(key, webUrl),
+    // The example answers' watch_url, for the blocks that save it (T32).
+    watch_url: () => WATCH_URL.replaceAll(EXAMPLE_ORIGIN, webUrl),
   };
   return template.replace(/\{\{(\w+)(?: ([\w.]+))?\}\}/g, (_, name, arg) => {
     const render = fill[name];

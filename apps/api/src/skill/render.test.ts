@@ -373,7 +373,7 @@ describe('renderSkill: curl examples', () => {
 });
 
 describe('renderSkill: base URL', () => {
-  it('uses the web URL only for watch_url examples', () => {
+  it('uses the web URL for spectator links and the API URL for installation', () => {
     const baseUrl = 'https://api.casino.test:8443';
     const webUrl = 'https://web.casino.test';
     const md = renderSkill(baseUrl, webUrl);
@@ -388,14 +388,16 @@ describe('renderSkill: base URL', () => {
     }
     expect(md).toContain(`export CASINO_URL=${baseUrl}`);
     expect(md).toContain(
-      `curl -fsSL ${baseUrl}/skill.md -o ~/.claude/skills/agent-casino/SKILL.md`,
+      `curl -fsSL ${baseUrl}/skill.md -o .claude/skills/agent-casino/SKILL.md`,
     );
     expect(lines(md).find(l => l.startsWith('description:'))).toContain(
       'api.casino.test:8443',
     );
-    expect(md.replaceAll(`${webUrl}/watch/`, `${baseUrl}/watch/`)).toBe(
-      renderSkill(baseUrl),
-    );
+    expect(
+      md
+        .replaceAll(`${webUrl}/watch/`, `${baseUrl}/watch/`)
+        .replaceAll(`${webUrl}/matches/`, `${baseUrl}/matches/`),
+    ).toBe(renderSkill(baseUrl));
   });
 
   it('keeps the default output when the optional web URL is omitted', () => {
@@ -408,9 +410,9 @@ describe('renderSkill: base URL', () => {
       const md = renderSkill(baseUrl);
       expect(md).toContain(`export CASINO_URL=${baseUrl}`);
       expect(md).toContain(
-        `curl -fsSL ${baseUrl}/skill.md -o ~/.claude/skills/agent-casino/SKILL.md`,
+        `curl -fsSL ${baseUrl}/skill.md -o .claude/skills/agent-casino/SKILL.md`,
       );
-      expect(md).toContain('~/.codex/skills/agent-casino/SKILL.md');
+      expect(md).toContain('.agents/skills/agent-casino/SKILL.md');
       expect(md).not.toContain('<平台網域>');
       // Compact request JSON like {"settings":{"hands":10}} legitimately ends
       // in `}}`; anything else left over is an unfilled template placeholder.
@@ -464,6 +466,139 @@ describe('renderSkill: base URL', () => {
 });
 
 describe('renderSkill: what an agent must know', () => {
+  // T32: check the rendered manual, including URLs substituted by renderSkill.
+  it('generates a random name instead of offering a name to copy', () => {
+    const quick = section(MD, 'Quick start');
+    expect(quick).not.toContain('sonnet-k7q2');
+    expect(quick).toContain('openssl rand -hex 2');
+  });
+
+  it.each([undefined, 'https://web.casino.test'])(
+    'saves the response watch_url beside every Step 1 token (web URL: %s)',
+    webUrl => {
+      const md = renderSkill(BASE_URL, webUrl);
+      const play = section(md, 'How to play');
+      const step1 = play.slice(0, play.indexOf('### Step 2'));
+      const responses = fenced(step1, 'json').map(
+        block => JSON.parse(block) as Record<string, unknown>,
+      );
+      const watchUrls = responses
+        .filter(body => typeof body.token === 'string')
+        .map(body => String(body.watch_url));
+      expect(watchUrls).toHaveLength(3);
+      const saves = fenced(step1, 'bash').filter(block =>
+        block.includes('> .casino/$ROOM_ID.token'),
+      );
+      // The create/join instructions may share one save block.
+      expect(saves.length).toBeGreaterThanOrEqual(2);
+      for (const block of saves) {
+        expect(block).toContain('> .casino/$ROOM_ID.watch_url');
+        const savedUrl = watchUrls.find(url => block.includes(url));
+        expect(savedUrl, block).toBeDefined();
+        expect(savedUrl).toContain(
+          `${webUrl ?? BASE_URL}/watch/r_8f2k1x9q0a?token=`,
+        );
+      }
+    },
+  );
+
+  it('returns the saved watch_url to the owner after reconnecting', () => {
+    const crash = section(
+      MD,
+      'If your program crashes or the connection drops',
+    );
+    expect(crash).toContain('.casino/$ROOM_ID.watch_url');
+    expect(crash).toMatch(/watch_url[\s\S]*owner[\s\S]*again/i);
+  });
+
+  it('reads watch_url from the saved file at Step 4 before cleanup', () => {
+    const play = section(MD, 'How to play');
+    const report = play.slice(play.indexOf('### Step 4'));
+    expect(report).toContain('cat .casino/$ROOM_ID.watch_url');
+    expect(report.indexOf('cat .casino/$ROOM_ID.watch_url')).toBeLessThan(
+      report.indexOf('rm .casino/$ROOM_ID.*'),
+    );
+  });
+
+  it('explains the five-minute cancellation in the private-room instructions', () => {
+    const play = section(MD, 'How to play');
+    const createAt = play.search(/^(?:#{3,6}\s+|-\s+\*\*)Private room/im);
+    const joinAt = play.search(/^(?:#{3,6}\s+|-\s+\*\*)Join/im);
+    expect(createAt).toBeGreaterThan(0);
+    expect(joinAt).toBeGreaterThan(createAt);
+    const privateRoom = play.slice(createAt, joinAt);
+    expect(privateRoom).toMatch(/5 minutes/i);
+    expect(privateRoom).toMatch(/join/i);
+    expect(privateRoom).toContain('cancelled');
+  });
+
+  it('distinguishes settled stack_changes from next-hand stacks after blinds', () => {
+    const rules = section(MD, "Hold'em rules");
+    expect(rules).toMatch(
+      /`stack_changes`[^\n]*(?:settle|result|end|finish|won|lost)/i,
+    );
+    expect(rules).toMatch(/next hand[^\n]*blind/i);
+    expect(rules).toContain('`my_stack`');
+    expect(rules).toContain('`opponent_stack`');
+  });
+
+  it('installs into project skill folders and describes global installs and pi', () => {
+    const blocks = fenced(SAVE, 'bash');
+    expect(blocks).toHaveLength(2);
+    for (const [i, path] of [
+      '.claude/skills/agent-casino',
+      '.agents/skills/agent-casino',
+    ].entries()) {
+      expect(blocks[i]).toContain(`mkdir -p ${path}`);
+      expect(blocks[i]).toContain(
+        `curl -fsSL ${BASE_URL}/skill.md -o ${path}/SKILL.md`,
+      );
+      expect(blocks[i]).not.toContain('~/');
+    }
+    const prose = blocks.reduce((text, block) => text.replace(block, ''), SAVE);
+    expect(prose).toContain('~/.claude/skills/agent-casino/');
+    expect(prose).toContain('~/.codex/skills/agent-casino/');
+    expect(prose).toMatch(/Codex[^\n]*pi|pi[^\n]*Codex/i);
+    expect(prose).toContain('/skill:agent-casino');
+    expect(prose).toMatch(/first[\s\S]*trust[\s\S]*folder/i);
+  });
+
+  it.each([undefined, 'https://web.casino.test'])(
+    'puts watch_url before wait in every seat response hint (web URL: %s)',
+    webUrl => {
+      const md = renderSkill(BASE_URL, webUrl);
+      const responses = fenced(md, 'json').map(
+        block => JSON.parse(block) as Record<string, unknown>,
+      );
+      const seats = responses.filter(body => typeof body.token === 'string');
+      expect(seats).toHaveLength(3);
+      for (const body of seats) {
+        const hint = String(body.hint);
+        expect(hint).toMatch(/watch_url[\s\S]*owner/i);
+        const watch = hint.indexOf('watch_url');
+        const wait = hint.indexOf('GET /v1/rooms/r_8f2k1x9q0a/wait');
+        expect(watch).toBeGreaterThanOrEqual(0);
+        expect(wait).toBeGreaterThan(watch);
+      }
+    },
+  );
+
+  it.each([undefined, 'https://web.casino.test'])(
+    'links both match_over examples to the match page (web URL: %s)',
+    webUrl => {
+      const responses = fenced(renderSkill(BASE_URL, webUrl), 'json').map(
+        block => JSON.parse(block) as Record<string, unknown>,
+      );
+      const finished = responses.filter(body => body.status === 'match_over');
+      expect(finished).toHaveLength(2);
+      for (const body of finished) {
+        expect(String(body.hint)).toContain(
+          `${webUrl ?? BASE_URL}/matches/r_8f2k1x9q0a`,
+        );
+      }
+    },
+  );
+
   it('explains call and raise amounts and legal_actions', () => {
     const rules = section(MD, "Hold'em rules");
     expect(rules.toLowerCase()).toContain('how many more chips');
@@ -603,7 +738,7 @@ describe('renderSkill: what an agent must know', () => {
   it('says how to pick a name when none was given, and that names are shared', () => {
     const quick = section(MD, 'Quick start');
     expect(quick).toMatch(/no name/i);
-    expect(quick).toContain('<model>-<4 random');
+    expect(quick).toContain('openssl rand -hex 2');
     expect(quick).toMatch(/public/i);
     expect(quick).toMatch(/same name[^\n]*rating[^\n]*record/i);
   });
