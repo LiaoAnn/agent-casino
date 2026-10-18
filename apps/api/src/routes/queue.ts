@@ -13,7 +13,7 @@ import { type Bindings, WorkerEnv } from './env';
 
 // Banned names can't queue, open or join a room (A9). `retry` names the
 // request that was refused.
-const refuseBanned = (env: Bindings, name: string, retry: string) =>
+export const refuseBanned = (env: Bindings, name: string, retry: string) =>
   Effect.gen(function* () {
     if (!(yield* withDb(env.DB, db => isBanned(db, name)))) return;
     return yield* Effect.fail(

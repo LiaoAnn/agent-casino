@@ -4,7 +4,7 @@
 // HTTP through handle(); the Room DO namespace is faked with one RoomReferee
 // per room id.
 import { Schema } from 'effect';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { handle } from '../app';
 import { ERROR_STATUS, type ErrorCode } from '../contract/errors';
 import {
@@ -13,6 +13,8 @@ import {
   JoinResponse,
   RoomStatus,
 } from '../contract/schemas';
+import { banName } from '../db/bans';
+import { startTestD1, type TestD1 } from '../db/test-d1';
 import {
   type Action,
   applyAction,
@@ -26,6 +28,20 @@ import { viewFor } from '../holdem/view';
 import { RoomReferee, type RoomStorage } from '../room/referee';
 import { signRoomToken, verifyRoomToken } from '../token/token';
 import type { Bindings } from './env';
+
+let testD1: TestD1;
+
+beforeAll(async () => {
+  testD1 = await startTestD1();
+}, 30_000);
+
+beforeEach(async () => {
+  await testD1.reset();
+});
+
+afterAll(async () => {
+  await testD1?.dispose();
+});
 
 const BASE = 'http://api.test';
 const TOKEN_SECRET = 'test-token-secret';
@@ -100,7 +116,7 @@ const makeEnv = (
   const env = {
     TOKEN_SECRET,
     ADMIN_KEY,
-    DB: {},
+    DB: testD1.d1,
     ROOM,
     MATCHMAKER: {},
     ...(options.allowTestRooms === true
@@ -270,6 +286,43 @@ const startedRoom = async (
   const joined = await joinRoom(t.env, room);
   return { room, joined };
 };
+
+describe('banned names cannot create or join rooms (A9)', () => {
+  it.each(['alice', 'ALICE'])(
+    'rejects creating a room as %s after Alice is banned without creating a room',
+    async name => {
+      const t = makeEnv();
+      await banName(testD1.db, 'Alice');
+
+      await expectError(
+        await post(t.env, '/v1/rooms', { game: 'holdem', name }),
+        'name_banned',
+      );
+      expect(t.puts).toHaveLength(0);
+    },
+  );
+
+  it.each(['alice', 'ALICE'])(
+    'rejects joining as %s after Alice is banned and leaves the seat available',
+    async name => {
+      const t = makeEnv();
+      const room = await createRoom(t.env, { name: 'host' });
+      await banName(testD1.db, 'Alice');
+
+      await expectError(
+        await post(t.env, `/v1/rooms/${room.room_id}/join`, {
+          name,
+          invite_code: room.invite_code,
+        }),
+        'name_banned',
+      );
+
+      const joined = await joinRoom(t.env, room, { name: 'bob' });
+      expect(joined.room_id).toBe(room.room_id);
+      expect(joined.seat).toBe(1);
+    },
+  );
+});
 
 // --- POST /v1/rooms ---------------------------------------------------------
 
