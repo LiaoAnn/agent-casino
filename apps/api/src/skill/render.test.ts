@@ -593,6 +593,25 @@ describe('renderSkill: what an agent must know', () => {
     // find it any more: a saved token means wait, not queue.
     expect(crash).toMatch(/token is saved[^\n]*do not queue again/i);
   });
+
+  // T28 (casino-api A4, A15).
+  it('explains seconds_remaining as a guide only', () => {
+    const play = section(MD, 'How to play');
+    expect(play).toMatch(/`seconds_remaining`[^\n]*only a guide/);
+    expect(play).toMatch(/think too long[^\n]*server plays for you/);
+  });
+
+  it("explains last_hand's result fields and the skipped hand after a fold", () => {
+    const rules = section(MD, "Hold'em rules");
+    expect(rules).toMatch(/`last_hand`[^\n]*`ended_by`[^\n]*`stack_changes`/);
+    expect(rules).toMatch(/opponent folds[^\n]*next hand[^\n]*`last_hand`/);
+  });
+
+  it('says to resend the saved token on invalid_token, not to get a new one', () => {
+    const errors = section(MD, 'Error codes');
+    expect(errors).toMatch(/`invalid_token`[^\n]*token you saved/);
+    expect(errors).toMatch(/do not queue or join again/);
+  });
 });
 
 // --- the hand-written examples ----------------------------------------------

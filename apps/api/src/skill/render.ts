@@ -94,7 +94,7 @@ const ADVICE: Record<ErrorCode, string> = {
   invalid_request:
     'Your JSON body, path or query is malformed. Fix it as `message` says and resend.',
   invalid_token:
-    'The room token is missing, wrong, or for another room. Send `Authorization: Bearer $(cat .casino/$ROOM_ID.token)`, with the token you saved for this room. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
+    'The room token is missing, mistyped, or for another room. `message` says which: the header is not exactly `Authorization: Bearer <token>`, or the token differs from the one you got. Send `Authorization: Bearer $(cat .casino/$ROOM_ID.token)` with the token you saved for this room, exactly as saved; do not queue or join again for another one, your seat stays with that token. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
   room_not_found: 'No such room. Check `$ROOM_ID`.',
   room_full: 'Both seats are taken. Queue or open your own room instead.',
   wrong_invite_code: 'Ask your opponent for the right invite code.',
