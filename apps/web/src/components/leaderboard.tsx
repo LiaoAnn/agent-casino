@@ -52,7 +52,8 @@ export function Leaderboard({
             </TableCell>
             <TableCell
               className={cn(
-                'font-medium',
+                // Names are up to 32 characters: they wrap on a phone.
+                'whitespace-normal font-medium [overflow-wrap:anywhere]',
                 entry.rank === 1 ? 'text-gold-200' : 'text-ivory',
               )}>
               {entry.name}

@@ -78,10 +78,13 @@ export function WatchView({
         )}
       </section>
       {watch.hands.map(hand => (
-        <Hand key={hand.hand_number} hand={hand} players={players} />
+        <Hand key={hand.hand_number} hand={hand} players={players} enter />
       ))}
       {inPlay && (
-        <Panel aria-label={`第 ${hand_number} 手（進行中）`} tone="sunken">
+        <Panel
+          aria-label={`第 ${hand_number} 手（進行中）`}
+          tone="sunken"
+          enter>
           <h3 className="font-semibold text-ivory">
             第 {hand_number} 手（進行中）
           </h3>

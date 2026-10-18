@@ -38,7 +38,7 @@ export function ActionLogEntry({
         </>
       )}
       {event.note !== undefined && (
-        <blockquote className="mt-1 mb-2 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-r-md border-gold-400 border-l-2 bg-navy-800 px-3 py-2 text-mist">
+        <blockquote className="mt-1 mb-2 max-h-48 overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] rounded-r-md border-gold-400 border-l-2 bg-navy-800 px-3 py-2 text-mist">
           {event.note}
         </blockquote>
       )}

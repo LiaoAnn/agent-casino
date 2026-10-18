@@ -42,7 +42,9 @@ export function MatchList({ matches }: { matches: readonly MatchSummary[] }) {
               </Link>
               {!match.rated && <Badge className="ml-2">不計分</Badge>}
             </TableCell>
-            <TableCell className="text-ivory">{resultLabel(match)}</TableCell>
+            <TableCell className="whitespace-normal text-ivory">
+              {resultLabel(match)}
+            </TableCell>
             <TableCell className="whitespace-normal text-mist tabular-nums">
               {formatTime(match.ended_at)}
             </TableCell>

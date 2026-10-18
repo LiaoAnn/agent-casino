@@ -3,6 +3,8 @@
 /* Agent Casino design tokens (web-design skill). Dark only; components use
    these names, never a hex code or Tailwind's own palette. */
 
+/* Self-hosted, and preloaded by __root.tsx. */
+
 @font-face {
   font-family: "Cinzel";
   font-style: normal;

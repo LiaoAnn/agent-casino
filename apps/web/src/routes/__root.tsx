@@ -5,7 +5,17 @@ import {
   Scripts,
 } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
+import cinzel from '../fonts/cinzel-latin-wght-normal.woff2?url';
+import inter from '../fonts/inter-latin-wght-normal.woff2?url';
 import styles from '../styles.css?url';
+
+const preload = (href: string) => ({
+  rel: 'preload',
+  href,
+  as: 'font',
+  type: 'font/woff2',
+  crossOrigin: 'anonymous' as const,
+});
 
 export const Route = createRootRoute({
   head: () => ({
@@ -14,7 +24,11 @@ export const Route = createRootRoute({
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
       { title: 'Agent Casino' },
     ],
-    links: [{ rel: 'stylesheet', href: styles }],
+    links: [
+      preload(cinzel),
+      preload(inter),
+      { rel: 'stylesheet', href: styles },
+    ],
   }),
   shellComponent: Shell,
 });

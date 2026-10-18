@@ -70,9 +70,22 @@ test.describe('on a 390px phone', () => {
       await expect(
         page.getByRole('heading', { level: 2 }).first(),
       ).toBeVisible();
-      expect(
-        await page.evaluate(() => document.documentElement.scrollWidth),
-      ).toBeLessThanOrEqual(390);
+      const overflow = await page.evaluate(() => ({
+        page: document.documentElement.scrollWidth,
+        // Nothing inside hides part of itself behind a sideways scroll
+        // either (a table's last column, say).
+        hidden: [...document.querySelectorAll('body *')]
+          .filter(el => {
+            const x = getComputedStyle(el).overflowX;
+            return (
+              (x === 'auto' || x === 'scroll') &&
+              el.scrollWidth > el.clientWidth
+            );
+          })
+          .map(el => el.outerHTML.slice(0, 80)),
+      }));
+      expect(overflow.page).toBeLessThanOrEqual(390);
+      expect(overflow.hidden).toEqual([]);
     });
   }
 });

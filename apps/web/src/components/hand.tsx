@@ -14,9 +14,11 @@ export type HandRecord = WatchResponse['hands'][number];
 export function Hand({
   hand,
   players,
+  enter = false,
 }: {
   hand: HandRecord;
   players: MatchDetail['players'];
+  enter?: boolean;
 }) {
   const title = `第 ${hand.hand_number} 手`;
   const items: Pair[] = [['莊家', players[hand.button_seat]]];
@@ -48,7 +50,7 @@ export function Hand({
     <BySeat key="s" players={players} values={hand.stacks} />,
   ]);
   return (
-    <Panel aria-label={title} tone="sunken">
+    <Panel aria-label={title} tone="sunken" enter={enter}>
       <h3 className="font-semibold text-ivory">{title}</h3>
       <Pairs items={items} />
       <Steps title={title} events={hand.events} players={players} />
