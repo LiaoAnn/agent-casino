@@ -26,11 +26,11 @@ export function Felt({
     <div className="relative grid justify-items-center gap-3 px-2 sm:px-10">
       <div
         aria-hidden="true"
-        className="felt-surface absolute inset-x-0 top-12 bottom-12 rounded-[3rem] border-2 border-gold-600 sm:rounded-[50%]"
+        className="felt-surface absolute inset-x-0 top-12 bottom-12 rounded-[50%] border-2 border-gold-600"
       />
       <div className="relative w-full max-w-xs">{top}</div>
       <div className="relative flex min-h-8 items-center">{topBet}</div>
-      <div className="relative max-w-full rounded-xl bg-navy-900/80 px-3 py-3 sm:px-5">
+      <div className="relative max-w-[calc(100%-3rem)] rounded-xl bg-navy-900/80 px-3 py-3 sm:max-w-full sm:px-5">
         {children}
       </div>
       <div className="relative flex min-h-8 items-center">{bottomBet}</div>

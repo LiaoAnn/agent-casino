@@ -371,3 +371,47 @@ for (const m of matches) {
     }
   });
 }
+
+// A card's middle is drawn by CSS: every pip and face frame shows its suit,
+// and none of them touches a corner index, on a desktop and on a phone.
+for (const width of [1280, 390]) {
+  test.describe(`at ${width}px`, () => {
+    test.use({ viewport: { width, height: 900 } });
+    test('card pips are drawn and clear of the corners', async ({ page }) => {
+      await open(page, showdown.m);
+      await expect(handSections(page).first()).toBeVisible();
+      const report = await page.evaluate(() => {
+        const overlap = (a: DOMRect, b: DOMRect) =>
+          a.left < b.right &&
+          b.left < a.right &&
+          a.top < b.bottom &&
+          b.top < a.bottom;
+        const problems: string[] = [];
+        let middles = 0;
+        for (const card of document.querySelectorAll('[role="img"]')) {
+          const corners = [...card.querySelectorAll('[data-corner]')].map(c =>
+            c.getBoundingClientRect(),
+          );
+          for (const middle of card.querySelectorAll(
+            '[data-pip], [data-face]',
+          )) {
+            middles++;
+            const content = getComputedStyle(middle, '::after').content;
+            if (content === 'none' || content === '""' || content === 'normal')
+              problems.push(
+                `${card.getAttribute('aria-label')}: no suit drawn`,
+              );
+            const box = middle.getBoundingClientRect();
+            if (box.width === 0 || box.height === 0)
+              problems.push(`${card.getAttribute('aria-label')}: empty middle`);
+            if (corners.some(c => overlap(c, box)))
+              problems.push(`${card.getAttribute('aria-label')}: on a corner`);
+          }
+        }
+        return { middles, problems };
+      });
+      expect(report.middles).toBeGreaterThan(0);
+      expect(report.problems).toEqual([]);
+    });
+  });
+}

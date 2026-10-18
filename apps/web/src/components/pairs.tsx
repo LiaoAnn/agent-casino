@@ -27,36 +27,17 @@ export function BySeat({
 
 export type Pair = [string, ReactNode, string?];
 
-// Terms and values as a list: `rows` beside each other, `tiles` stacked in
-// a grid (the felt's plate). A pair's `className` styles its value in
-// `rows`, its whole tile in `tiles`.
+// Terms and values as a list, each value beside its term. A pair's
+// `className` styles its value.
 export function Pairs({
   items,
   label,
-  layout = 'rows',
   className,
 }: {
   items: Pair[];
   label?: string;
-  layout?: 'rows' | 'tiles';
   className?: string;
 }) {
-  if (layout === 'tiles') {
-    return (
-      <dl
-        aria-label={label}
-        className={cn('grid gap-3 text-ivory text-sm', className)}>
-        {items.map(([term, value, itemClass]) => (
-          <div
-            key={term}
-            className={cn('flex flex-col items-center gap-1', itemClass)}>
-            <dt className="text-mist text-xs">{term}</dt>
-            <dd className="tabular-nums">{value}</dd>
-          </div>
-        ))}
-      </dl>
-    );
-  }
   return (
     <dl
       aria-label={label}

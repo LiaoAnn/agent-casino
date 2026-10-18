@@ -53,7 +53,10 @@ export function MatchHand({
             />
           </Felt>
         </div>
-        <Steps title={title} events={hand.events} players={players} />
+        {/* Its own scroll on a wide screen, so the table stays in view. */}
+        <div className="min-w-0 lg:max-h-[36rem] lg:overflow-y-auto">
+          <Steps title={title} events={hand.events} players={players} />
+        </div>
       </div>
     </Panel>
   );

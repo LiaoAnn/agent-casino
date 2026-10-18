@@ -7,7 +7,8 @@ import { cn } from '@/lib/utils';
 // One player's plate on the rim of the table: name, the dealer button, hole
 // cards (backs when unseen), chips behind, Elo when known, and whose turn it
 // is. `deadline` only on the watched seat's own turn, out of `turnSeconds`;
-// `won` once a hand is over. Labels are for screen readers: the plate shows
+// `won` once a hand is over; `deal` deals the cards in, for a hand in play
+// (a record shows them still). Labels are for screen readers: the plate shows
 // the values alone, as a broadcast does.
 export function SeatPanel({
   name,
@@ -19,6 +20,7 @@ export function SeatPanel({
   won = false,
   deadline = null,
   turnSeconds = 0,
+  deal = false,
 }: {
   name: string;
   stack: number;
@@ -29,6 +31,7 @@ export function SeatPanel({
   won?: boolean;
   deadline?: string | null;
   turnSeconds?: number;
+  deal?: boolean;
 }) {
   return (
     <section
@@ -57,7 +60,7 @@ export function SeatPanel({
         <div className="contents">
           <dt className="sr-only">底牌</dt>
           <dd className="col-start-1 row-span-4 row-start-1">
-            <Cards cards={cards} size="md" deal />
+            <Cards cards={cards} size="md" deal={deal} />
           </dd>
         </div>
         <div className="contents">
