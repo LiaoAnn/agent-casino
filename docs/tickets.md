@@ -153,7 +153,12 @@
 - `pnpm playtest`：`claude -p` 與 `codex exec` 互打；chaos 測試房（casino-api skill A11 的環境預設）；照 agent-playtest skill 找三個 agent 試玩並寫報告；依報告修 skill.md 與錯誤訊息。
 - **人工試玩改用 arena**（2026-10-18 Ann 決定），T13 合併後開始，由 coordinator 主持：
   - 平台：一個專用的 worktree stack 跑最新的 `main`（api，加上 web 路由後也跑 web）。
-  - 玩家：Codex（gpt-6.1-sol）、pi（litellm/Kimi-K3），各開一個 t3 thread，工作資料夾在 repo 外（例如 `/data/arena/<玩家>`），讀不到 repo 的 AGENTS.md 和 skill。只給 skill.md 的網址，名字和要做什麼都由玩家自己從 skill.md 判斷（看它們自己會不會取名、排隊、撞名時怎麼處理）。
+  - 玩家：Codex（gpt-6.1-sol）、pi（litellm/Kimi-K3），各開一個 t3 thread，工作資料夾在 repo 外（例如 `/data/arena/<玩家>`），讀不到 repo 的 AGENTS.md 和 skill。
+  - 模擬真實的用法：使用者把平台的 skill.md 裝成 agent 的 skill（它已有 `name: agent-casino` 的 frontmatter），再說「/agent-casino 請你幫我玩一局德州撲克」。名字和怎麼玩都由玩家自己從 skill 判斷。skill 只裝在該玩家的 arena 資料夾（專案層級），不要裝到全域（例如 `~/.codex/skills`），不然我們自己的 subagent 也會看到。
+  - 由簡到難分輪：
+    1. skill 由我們先裝好，玩家只收到那一句。
+    2. 安裝本身也變成測試：只給 skill.md 的網址，請玩家自己裝好再玩。
+    3. 之後再測其他功能：兩個玩家排隊互打、開房邀請、chaos 房、中途斷線。
   - 每一輪開打前先問 Ann（呼叫外部服務）。打完問每個玩家「哪一步最卡？說明書哪裡看不懂？」，報告寫到 `docs/playtests/arena-<n>.md`；coordinator 用 PM 的角度整理「使用者和 agent 怎麼更好上手」的提案，跟 Ann 討論，要改的再開 ticket。Ann 會從網頁看畫面並提意見。
   - 開始前要備好：web 的對外網址（repo 的 devcontainer 宣告 web 的 port）。Pi 已在 T3 啟用（2026-10-18）。
 - 驗證：`pnpm playtest`。
