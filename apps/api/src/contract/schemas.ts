@@ -6,6 +6,9 @@ import { Schema } from 'effect';
 
 export const NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 export const RESERVED_NAMES = ['house-bot'] as const;
+// What an agent makes up once per match and sends on every POST /v1/queue
+// (A17); checked by the handler, like names.
+export const QUEUE_KEY_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
 
 export const SETTINGS_DEFAULTS = {
   hands: 10,
@@ -75,6 +78,10 @@ const Game = Schema.Literal('holdem');
 export const QueueRequest = Schema.Struct({
   game: Game,
   name: Schema.String,
+  queue_key: Schema.String.annotateKey({
+    messageMissingKey:
+      'Missing queue_key: make one once with `openssl rand -hex 16`, save it, and send it on every POST /v1/queue',
+  }),
   settings: Schema.optionalKey(Settings),
   test: Schema.optionalKey(TestSettings),
 });

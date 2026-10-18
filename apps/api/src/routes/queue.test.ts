@@ -121,7 +121,13 @@ const queue = (
   env: Bindings,
   name: string,
   options: Record<string, unknown> = {},
-) => post(env, { game: 'holdem', name, ...options });
+) =>
+  post(env, {
+    game: 'holdem',
+    name,
+    queue_key: `queue-key-${name.toLowerCase().padEnd(16, '_')}`,
+    ...options,
+  });
 const get = (env: Bindings, path: string, token: string) =>
   handle(
     new Request(`${BASE}${path}`, {
@@ -323,7 +329,10 @@ describe('POST /v1/queue (S1)', () => {
 
   it('rejects a request missing game', async () => {
     const { env, queueCall } = makeEnv();
-    await expectError(await post(env, { name: 'Alice' }), 'invalid_request');
+    await expectError(
+      await post(env, { name: 'Alice', queue_key: 'alice-queue-key-1' }),
+      'invalid_request',
+    );
     expect(queueCall).not.toHaveBeenCalled();
   });
 
@@ -480,5 +489,129 @@ describe('POST /v1/queue: opponent, settings and watch link (A16)', () => {
     expect(first.opponent_name).toBe('Bob');
     expect(bob.opponent_name).toBe('Alice');
     expect(first.watch_url).not.toBe(bob.watch_url);
+  });
+});
+
+describe('POST /v1/queue queue_key (A17)', () => {
+  const ALICE_KEY = 'alice-private-key-1';
+  const OTHER_KEY = 'other-private-key-2';
+
+  const conflictBody = async (response: Response) => {
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as ApiError;
+    expect(body).toMatchObject({
+      status: 'error',
+      code: 'name_in_use',
+      retryable: false,
+      message: expect.any(String),
+      hint: expect.any(String),
+    });
+    for (const field of ['room_id', 'token', 'watch_url', 'seat', 'queue_key'])
+      expect(body).not.toHaveProperty(field);
+    const text = JSON.stringify(body);
+    expect(text).not.toContain(ALICE_KEY);
+    expect(text).not.toContain(OTHER_KEY);
+    expect(body.hint).toMatch(/name/i);
+    expect(body.hint).toContain('queue_key');
+  };
+
+  it('rejects a missing key with instructions for generating one', async () => {
+    const { env, queueCall } = makeEnv();
+    const response = await post(env, { game: 'holdem', name: 'Alice' });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as ApiError;
+    expect(body).toMatchObject({
+      status: 'error',
+      code: 'invalid_request',
+      retryable: false,
+    });
+    expect(`${body.message} ${body.hint}`).toContain('openssl rand -hex 16');
+    expect(queueCall).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '',
+    'a'.repeat(15),
+    'a'.repeat(65),
+    'invalid key here!',
+    `${'a'.repeat(16)}.`,
+    `${'a'.repeat(16)}中`,
+    `${'a'.repeat(16)}\n`,
+  ])('rejects invalid queue_key %j before Matchmaker', async queue_key => {
+    const { env, queueCall } = makeEnv();
+    const response = await queue(env, 'Alice', { queue_key });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as ApiError;
+    expect(body).toMatchObject({
+      status: 'error',
+      code: 'invalid_request',
+      retryable: false,
+    });
+    expect(body.hint).toContain('openssl rand -hex 16');
+    if (queue_key.length > 0)
+      expect(JSON.stringify(body)).not.toContain(queue_key);
+    expect(queueCall).not.toHaveBeenCalled();
+  });
+
+  it.each(['A'.repeat(16), 'z'.repeat(64), 'Az09_-'.repeat(3)])(
+    'accepts boundary queue_key %s without echoing it',
+    async queue_key => {
+      const { env, queueCall } = makeEnv();
+      const response = await queue(env, 'Alice', { queue_key });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as typeof QueueResponse.Type;
+      expect(body.status).toBe('waiting');
+      expect(JSON.stringify(body)).not.toContain(queue_key);
+      expect(body).not.toHaveProperty('queue_key');
+      expect(queueCall.mock.calls[0]?.[1]).toMatchObject({
+        name: 'Alice',
+        queue_key,
+      });
+    },
+  );
+
+  it('rejects another key while waiting, preserves settings and lets the owner retrieve matched', async () => {
+    const { env } = makeEnv();
+    const settings = { hands: 3, turn_seconds: 10, starting_stack: 100 };
+    expect(
+      (
+        await decodeQueue(
+          await queue(env, 'Alice', { queue_key: ALICE_KEY, settings }),
+        )
+      ).status,
+    ).toBe('waiting');
+    const conflict = await queue(env, 'ALICE', {
+      queue_key: OTHER_KEY,
+      settings: { hands: 10 },
+    });
+    const bob = await decodeQueue(await queue(env, 'Bob', { settings }));
+    const alice = await decodeQueue(
+      await queue(env, 'Alice', { queue_key: ALICE_KEY }),
+    );
+    await conflictBody(conflict);
+    expect(alice.status).toBe('matched');
+    expect(bob.status).toBe('matched');
+    if (alice.status !== 'matched' || bob.status !== 'matched')
+      throw new Error('Expected a match');
+    expect(alice.room_id).toBe(bob.room_id);
+    expect(alice.settings).toEqual(settings);
+    expect(alice.seat).toBe(0);
+    expect(JSON.stringify(alice)).not.toContain(ALICE_KEY);
+    expect(
+      await decodeQueue(await queue(env, 'alice', { queue_key: ALICE_KEY })),
+    ).toEqual(alice);
+  });
+
+  it('denies the matched seat and watch link to another key but replays them for the owner', async () => {
+    const { env } = makeEnv();
+    const [alice] = await pair(env);
+    const conflict = await queue(env, 'ALICE', { queue_key: OTHER_KEY });
+    const again = await decodeQueue(await queue(env, 'alice'));
+    await conflictBody(conflict);
+    expect(again).toEqual(alice);
+    if (again.status !== 'matched') throw new Error('Expected a match');
+    expect(again.watch_url).toBe(alice.watch_url);
+    expect(JSON.stringify(again)).not.toContain('queue-key-alice');
+    expect(again).not.toHaveProperty('queue_key');
   });
 });

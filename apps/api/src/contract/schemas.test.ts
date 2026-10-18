@@ -16,6 +16,7 @@ import {
   MatchList,
   NAME_PATTERN,
   Name,
+  QUEUE_KEY_PATTERN,
   QueueRequest,
   QueueResponse,
   RESERVED_NAMES,
@@ -170,7 +171,13 @@ describe('primitives', () => {
 
 describe('requests', () => {
   it('decodes the skill request examples', () => {
-    expect(decodes(QueueRequest, { game: 'holdem', name: 'alice' })).toBe(true);
+    expect(
+      decodes(QueueRequest, {
+        queue_key: 'alice-queue-key-1',
+        game: 'holdem',
+        name: 'alice',
+      }),
+    ).toBe(true);
     expect(
       decodes(CreateRoomRequest, {
         game: 'holdem',
@@ -205,14 +212,26 @@ describe('requests', () => {
   });
 
   it('leaves name and invite code validation to the handlers', () => {
-    expect(decodes(QueueRequest, { game: 'holdem', name: 'a b' })).toBe(true);
+    expect(
+      decodes(QueueRequest, {
+        queue_key: 'alice-queue-key-1',
+        game: 'holdem',
+        name: 'a b',
+      }),
+    ).toBe(true);
     expect(decodes(JoinRequest, { name: 'bob', invite_code: 'nope' })).toBe(
       true,
     );
   });
 
   it('rejects unknown games and action types', () => {
-    expect(decodes(QueueRequest, { game: 'chess', name: 'alice' })).toBe(false);
+    expect(
+      decodes(QueueRequest, {
+        queue_key: 'alice-queue-key-1',
+        game: 'chess',
+        name: 'alice',
+      }),
+    ).toBe(false);
     expect(decodes(ActionRequest, { turn_id: 't_1', type: 'bet' })).toBe(false);
     expect(
       decodes(ActionRequest, { turn_id: 't_1', type: 'raise', amount: 8.5 }),
@@ -275,7 +294,12 @@ describe('requests', () => {
       }),
     ).toBe(false);
     expect(
-      decodes(QueueRequest, { game: 'holdem', name: 'alice', test: { seed } }),
+      decodes(QueueRequest, {
+        queue_key: 'alice-queue-key-1',
+        game: 'holdem',
+        name: 'alice',
+        test: { seed },
+      }),
     ).toBe(false);
   });
 });
@@ -740,5 +764,34 @@ describe('WatchResponse', () => {
     expect(decoded).not.toHaveProperty('seed');
     expect(decoded).not.toHaveProperty('turn_id');
     expect(decoded).not.toHaveProperty('legal_actions');
+  });
+});
+
+describe('queue_key contract (A17)', () => {
+  const request = { game: 'holdem', name: 'alice' };
+  it('requires a string queue_key while leaving format validation to the handler', () => {
+    expect(decodes(QueueRequest, request)).toBe(false);
+    for (const queue_key of [null, 123, {}, []])
+      expect(decodes(QueueRequest, { ...request, queue_key })).toBe(false);
+    for (const queue_key of ['alice-queue-key-1', '', 'bad key'])
+      expect(decodes(QueueRequest, { ...request, queue_key })).toBe(true);
+  });
+
+  it.each(['A'.repeat(16), 'a'.repeat(64), 'Az09_-'.repeat(3)])(
+    'accepts valid queue key %s',
+    queue_key => {
+      expect(QUEUE_KEY_PATTERN?.test(queue_key)).toBe(true);
+    },
+  );
+
+  it.each([
+    '',
+    'a'.repeat(15),
+    'a'.repeat(65),
+    `${'a'.repeat(16)} `,
+    `${'a'.repeat(16)}.`,
+    `${'a'.repeat(16)}中`,
+  ])('rejects invalid queue key %j', queue_key => {
+    expect(QUEUE_KEY_PATTERN?.test(queue_key)).toBe(false);
   });
 });

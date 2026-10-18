@@ -105,6 +105,8 @@ const ADVICE: Record<ErrorCode, string> = {
     'Illegal action. Read `message`, pick one of `legal_actions`, and resend with the same `turn_id` before the deadline.',
   match_over:
     'The match has ended. From a room endpoint, read `state` in the error and report the result. From `join`, that room is closed: queue or open a new room.',
+  name_in_use:
+    'This name is queued or was just matched with another `queue_key`. Resend with the `queue_key` you first queued with, or queue under another name.',
   not_found:
     'No such endpoint, or the wrong method. Check the Endpoints table above.',
   unavailable:

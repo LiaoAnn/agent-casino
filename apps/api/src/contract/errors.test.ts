@@ -39,6 +39,7 @@ describe('ERROR_STATUS', () => {
       stale_turn: 409,
       room_full: 409,
       match_over: 409,
+      name_in_use: 409,
       unavailable: 503,
       internal: 500,
     });
@@ -159,5 +160,27 @@ describe('apiErrors', () => {
     expect(
       decodes(schema, { ...errorBody('invalid_token'), status: 'ok' }),
     ).toBe(false);
+  });
+});
+
+describe('name_in_use (A17)', () => {
+  it('is a declared 409 error and is not retryable by default', () => {
+    expect(ERROR_CODES).toContain('name_in_use');
+    expect(ERROR_STATUS.name_in_use).toBe(409);
+    expect(
+      apiError(
+        'name_in_use',
+        'Name is in use',
+        'Use the original queue_key or another name',
+      ),
+    ).toMatchObject({
+      status: 'error',
+      code: 'name_in_use',
+      retryable: false,
+    });
+    const [schema] = apiErrors('name_in_use');
+    if (schema === undefined) throw new Error('no name_in_use schema');
+    expect(statusOf(schema)).toBe(409);
+    expect(decodes(schema, errorBody('name_in_use'))).toBe(true);
   });
 });

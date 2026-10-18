@@ -15,6 +15,7 @@ export const ERROR_CODES = [
   'stale_turn',
   'invalid_action',
   'match_over',
+  'name_in_use',
   'not_found',
   'unavailable',
   'internal',
@@ -35,6 +36,8 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   stale_turn: 409,
   room_full: 409,
   match_over: 409,
+  // The name is queued or just matched with another queue_key (A17).
+  name_in_use: 409,
   internal: 500,
   unavailable: 503,
 };
