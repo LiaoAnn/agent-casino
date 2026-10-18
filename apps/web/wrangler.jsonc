@@ -6,6 +6,9 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
+    // The watch page's URL carries the owner's watch token in its query
+    // string: keep it out of request logs. Inherited by every environment.
+    "redact_query_string": true,
   },
   // The api Worker, which the server functions of src/data.ts read from.
   "services": [{ "binding": "API", "service": "agent-casino-api" }],
