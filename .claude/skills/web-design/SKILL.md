@@ -20,7 +20,7 @@ description: Agent Casino 網頁的 design system：定位（給人看的轉播�
 
 1. **資訊用平面，氣氛用背景。** 籌碼、金額、底池、名字、Elo 都用清楚的平面字。氈面、金邊、暗角只用來營造氣氛，字不直接放在氈面上，要放在深色底板上。
 2. **賭場感來自配色、字型、光影，不靠裝飾堆疊。** 每個畫面只有一個「主角」金框（通常是牌桌），其他面板都用細線。
-3. **顏色不是唯一的訊號。** 勝、敗、棄牌、全下、逾時都要配文字或圖示（WCAG 1.4.1）。
+3. **顏色不是唯一的訊號。** 勝、敗、棄牌、全下、超時都要配文字或圖示（WCAG 1.4.1）。
 4. **文字對比 ≥ 4.5:1，大字和圖示 ≥ 3:1。** 只能用下面已經算過的配對。
 5. **動畫只用來幫人看懂剛發生什麼**，並且尊重 `prefers-reduced-motion`。
 6. **不做讓人上癮的演出。** 這裡沒有錢，也不引導人停留或回訪（見「不能做的事」）。
@@ -70,7 +70,7 @@ description: Agent Casino 網頁的 design system：定位（給人看的轉播�
 | `loss` | `red-400` | 「敗」＋ ▼ |
 | `fold` | `mist`，邊框用 `slate` | 「棄牌」＋刪除線 |
 | `allin` | `red-800` 底＋`ivory` 字 | 「ALL-IN」 |
-| `timeout` | #F59E0B | ⏱ ＋「逾時代打」 |
+| `timeout` | #F59E0B | ⏱ ＋「超時代打」（跟 api 用語一致） |
 
 ## 撲克牌
 
@@ -150,6 +150,20 @@ description: Agent Casino 網頁的 design system：定位（給人看的轉播�
   - 共用的 shadcn 元件放在 `ui/`。`Badge` 加上 `win`、`loss`、`fold`、`allin`、`timeout` 這幾種 variant；`Table` 用在排行榜和對局列表。
   - 自製的放在 `components/` 底下：`PlayingCard`、`ChipStack`、`Felt`、`SeatPanel`、`ActionLogEntry`。
 - 不加新的 UI 依賴。需要的 shadcn 元件（例如 `Skeleton`）照 shadcn 的做法複製進 `ui/`。
+
+## 寫新頁面（T29 之後）
+
+- 外框由 `__root.tsx` 自動套上，頁面只組合 `components/` 的元件：
+  - 標題：`PageTitle`、`SectionTitle`
+  - 面板：`Panel`；`tone="sunken"` 是放紀錄用的深色底
+  - 資料：`Pairs`、`BySeat`、`Cards`、`Badge`
+  - 狀態：`EmptyState`、`Notice`（錯誤）
+  - 牌桌：`PlayingCard`、`ChipStack`、`Felt`、`SeatPanel`、`ActionLogEntry`
+- 顏色只用 token class（例如 `bg-navy-800`、`text-gold-400`）。Tailwind 內建色票已經關掉，`design-tokens.test.ts` 會擋下 hex、具名顏色和 inline style 的顏色。
+- 圖示用 `aria-hidden` 的元素，再用 CSS `content` 畫出來。不要直接用偽元素，免得螢幕閱讀器念出來；e2e 比對 textContent 時也只會看到文字。
+- 頁面載入時不要做會移動位置的動畫，Playwright 會點空。`Panel` 的 `enter` 動畫只用在輪詢中才新出現的面板。
+- 長的值（種子、名字）要能斷行。`e2e/shell.spec.ts` 會檢查 390px 寬時整頁和內部容器都沒有橫向溢出。
+- 還沒做的：籌碼飛向底池或贏家的動畫、載入骨架。
 
 ## 已定的選擇（2026-10-18，Ann 看過草稿）
 
