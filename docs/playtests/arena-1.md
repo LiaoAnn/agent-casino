@@ -27,7 +27,7 @@
 ## 環境問題（我們的試玩設定，不是平台）
 
 1. **VM 的全域規則影響了 Codex。** `~/.codex/AGENTS.md`（Dev VM 規則）寫著「呼叫外部服務前要先問」，Codex 因此在開打前停下來請主人授權整局操作。真的使用者不會有這份規則。
-2. **pi 沒讀到裝好的 skill，反而讀了 repo 內部文件。** `/agent-casino` 在 pi 那邊沒有對應的 skill（它搜了工具和 LiteLLM 的 skill 都是空的）。它接著靠 VM 的知識找到 `~/.config/devvm/projects/agent-casino/README.md`、`wt-status`、`/data/code/agent-casino`，自己拼出 arena-server 的網址，並且**主要讀 repo 裡的 `casino-api` skill（內部規格）**，skill.md 只看了開頭。原因待查：可能是 t3 的 pi 不載入專案層級的 skill，或 pi 的叫用語法不是 `/名字`。
+2. **pi 沒讀到裝好的 skill，反而讀了 repo 內部文件。** `/agent-casino` 在 pi 那邊沒有對應的 skill（它搜了工具和 LiteLLM 的 skill 都是空的）。它接著靠 VM 的知識找到 `~/.config/devvm/projects/agent-casino/README.md`、`wt-status`、`/data/code/agent-casino`，自己拼出 arena-server 的網址，並且**主要讀 repo 裡的 `casino-api` skill（內部規格）**，skill.md 只看了開頭。原因（之後查到）：pi 叫用 skill 的語法是 `/skill:名字`，不是 `/名字`；`.agents/skills/` 和 `.pi/skills/` 它都找得到。
 3. 結論：要讓玩家像真正的外人，至少要讓它們看不到 VM 規則和 repo，例如用獨立的設定目錄（CODEX_HOME 等），或把玩家跑在隔離的環境裡。
 
 ## 玩家怎麼打
@@ -75,5 +75,5 @@
 
 ## 下一輪前要先處理
 
-- 玩家的隔離（環境問題 1、2）。
-- 查清楚 pi 怎麼載入專案層級的 skill。
+- 玩家的隔離（環境問題 1、2）：已改成用 `/data/arena/bin/play` 在命令列跑玩家，每個玩家的 HOME 都是假的，裡面只有登入檔的連結（2026-10-18 Ann 同意）。
+- ~~查清楚 pi 怎麼載入專案層級的 skill~~：用 `/skill:agent-casino`。
