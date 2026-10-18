@@ -24,6 +24,11 @@ const streets = {
 const pair = (w: WatchResponse, values: readonly [unknown, unknown]) =>
   `${w.players[0]} ${values[0]} · ${w.players[1]} ${values[1]}`;
 const signed = (n: number) => (n >= 0 ? `+${n}` : String(n));
+// A player's Elo from the leaderboard, when they are on it.
+const elo = (name: string) =>
+  data
+    .leaderboard()
+    .entries.find(e => e.name.toLowerCase() === name.toLowerCase())?.rating;
 
 const action = (e: Event) => {
   switch (e.type) {
@@ -169,31 +174,36 @@ test('playing shows the current hand, countdown, timeline and private notes', as
   await expect(current.getByRole('heading', { level: 3 })).toHaveText(
     `目前這一手：第 ${w.hand_number} 手`,
   );
-  // Only the hand summary's dl: each seat now has a separate dl below it.
-  await expectPairs(current.locator('dl').first(), [
-    ['街', streets[v.street]],
-    ['莊家', w.players[v.button_seat] as string],
+  // The middle of the table: the board, the pot, then street and dealer.
+  await expectPairs(current.locator('dl[aria-label="牌桌"]'), [
     ['公共牌', v.board.length === 0 ? '尚未發出' : cards(v.board)],
     ['底池', String(v.pot)],
+    ['街', streets[v.street]],
+    ['莊家', w.players[v.button_seat] as string],
   ]);
   const seats = current.getByRole('region', { name: /^座位：/ });
   await expect(seats).toHaveCount(2);
-  for (const seat of [0, 1] as const) {
+  // The watched seat sits at the bottom edge, after the opponent's.
+  const order = w.seat === 0 ? ([1, 0] as const) : ([0, 1] as const);
+  for (const [i, seat] of order.entries()) {
     const name = w.players[seat] as string;
     const panel = current.getByRole('region', {
       name: `座位：${name}`,
       exact: true,
     });
-    await expect(seats.nth(seat)).toHaveAccessibleName(`座位：${name}`);
+    await expect(seats.nth(i)).toHaveAccessibleName(`座位：${name}`);
     await expect(panel.getByRole('heading', { level: 4 })).toHaveText(name);
+    await expect(panel.getByText('莊家', { exact: true })).toHaveCount(
+      seat === v.button_seat ? 1 : 0,
+    );
     const mine = seat === w.seat;
+    const rating = elo(name);
     await expectPairs(panel.locator('dl'), [
-      ['籌碼', String(mine ? v.my_stack : v.opponent_stack)],
-      [
-        '本街下注',
-        String(mine ? v.my_bet_this_street : v.opponent_bet_this_street),
-      ],
       ['底牌', mine ? cards(v.my_cards) : '未亮牌'],
+      ['籌碼', String(mine ? v.my_stack : v.opponent_stack)],
+      ...(rating === undefined
+        ? []
+        : ([['Elo', String(rating)]] as [string, string][])),
       ...(seat === w.to_act_seat
         ? ([['行動', '輪到']] as [string, string][])
         : []),
@@ -201,7 +211,21 @@ test('playing shows the current hand, countdown, timeline and private notes', as
         ? ([['剩餘時間', '20 秒']] as [string, string][])
         : []),
     ]);
+    // The bet lies between the seat and the middle; none when nothing is in.
+    const bet = mine ? v.my_bet_this_street : v.opponent_bet_this_street;
+    const betPlate = current
+      .locator('p')
+      .filter({ hasText: `本街下注：${name} ` });
+    if (bet === 0) await expect(betPlate).toHaveCount(0);
+    else await expect(betPlate).toHaveText(`本街下注：${name} ${bet}`);
   }
+  // The table on the left, the timeline on the right.
+  const tableBox = await current.boundingBox();
+  const timelineBox = await page
+    .getByRole('heading', { level: 3, name: '時間線', exact: true })
+    .boundingBox();
+  if (tableBox === null || timelineBox === null) throw new Error('no layout');
+  expect(timelineBox.x).toBeGreaterThanOrEqual(tableBox.x + tableBox.width);
   await expectWatchInfo(page, w, '進行中');
   await expectTimeline(page, w);
   const title = `第 ${w.hand_number} 手（進行中）`;
@@ -443,3 +467,19 @@ for (const scenario of [
     ).toHaveCount(0);
   });
 }
+
+// Below 1024px the timeline moves under the table.
+test.describe('on a screen narrower than 1024px', () => {
+  test.use({ viewport: { width: 1000, height: 800 } });
+  test('the timeline is below the table', async ({ page }) => {
+    await page.goto(path(playing.room_id));
+    const tableBox = await page
+      .getByRole('region', { name: '目前這一手', exact: true })
+      .boundingBox();
+    const timelineBox = await page
+      .getByRole('heading', { level: 3, name: '時間線', exact: true })
+      .boundingBox();
+    if (tableBox === null || timelineBox === null) throw new Error('no layout');
+    expect(timelineBox.y).toBeGreaterThanOrEqual(tableBox.y + tableBox.height);
+  });
+});

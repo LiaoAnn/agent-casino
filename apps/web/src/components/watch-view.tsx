@@ -18,16 +18,20 @@ const STATUS = {
   void: '作廢',
 } as const;
 
-// The owner's view of one seat: who and how, the table while a hand is in
-// play, the result once over, then every hand so far.
+// The owner's view of one seat: who and how on top; below, the table while a
+// hand is in play or the result once over, and beside it (below it on a
+// narrow screen) the timeline of every hand so far. `ratings` is the
+// leaderboard's Elo by lower-case name, for the players on it.
 export function WatchView({
   watch,
   offline,
   updatedAt,
+  ratings,
 }: {
   watch: WatchResponse;
   offline: boolean;
   updatedAt: number | null;
+  ratings: ReadonlyMap<string, number>;
 }) {
   const { settings, view, hand_number } = watch;
   const players: MatchDetail['players'] = [
@@ -59,42 +63,61 @@ export function WatchView({
           </p>
         )}
       </Panel>
-      {watch.room_status === 'waiting' && (
-        <EmptyState>等待對手加入…</EmptyState>
-      )}
-      {inPlay && (
-        <CurrentHand
-          watch={watch}
-          view={view}
-          handNumber={hand_number}
-          players={players}
-        />
-      )}
-      {'result' in watch && <WatchResult watch={watch} players={players} />}
-      <section className="space-y-3">
-        <h3 className="font-semibold text-gold-200 text-lg">時間線</h3>
-        {watch.hands.length === 0 && !inPlay && (
-          <EmptyState>還沒有任何動作。</EmptyState>
-        )}
-      </section>
-      {watch.hands.map(hand => (
-        <Hand key={hand.hand_number} hand={hand} players={players} enter />
-      ))}
-      {inPlay && (
-        <Panel
-          aria-label={`第 ${hand_number} 手（進行中）`}
-          tone="sunken"
-          enter>
-          <h3 className="font-semibold text-ivory">
-            第 {hand_number} 手（進行中）
-          </h3>
-          <Steps
-            title={`第 ${hand_number} 手（進行中）`}
-            events={view.history}
-            players={players}
-          />
-        </Panel>
-      )}
+      <div className="grid gap-6 lg:grid-cols-3 lg:items-start">
+        <div className="min-w-0 space-y-6 lg:col-span-2">
+          {watch.room_status === 'waiting' && (
+            <EmptyState>等待對手加入…</EmptyState>
+          )}
+          {inPlay && (
+            <CurrentHand
+              watch={watch}
+              view={view}
+              handNumber={hand_number}
+              players={players}
+              ratings={[
+                ratings.get(players[0].toLowerCase()),
+                ratings.get(players[1].toLowerCase()),
+              ]}
+            />
+          )}
+          {'result' in watch && <WatchResult watch={watch} players={players} />}
+        </div>
+        <section className="min-w-0 space-y-3 lg:sticky lg:top-4">
+          <h3 className="font-semibold text-gold-200 text-lg">時間線</h3>
+          {watch.hands.length === 0 && !inPlay && (
+            <EmptyState>還沒有任何動作。</EmptyState>
+          )}
+          {/* Its own scroll on a wide screen; column-reverse keeps it at
+              the newest step as steps come in. */}
+          <div className="flex flex-col-reverse lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+            <div className="space-y-3">
+              {watch.hands.map(hand => (
+                <Hand
+                  key={hand.hand_number}
+                  hand={hand}
+                  players={players}
+                  enter
+                />
+              ))}
+              {inPlay && (
+                <Panel
+                  aria-label={`第 ${hand_number} 手（進行中）`}
+                  tone="sunken"
+                  enter>
+                  <h3 className="font-semibold text-ivory">
+                    第 {hand_number} 手（進行中）
+                  </h3>
+                  <Steps
+                    title={`第 ${hand_number} 手（進行中）`}
+                    events={view.history}
+                    players={players}
+                  />
+                </Panel>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

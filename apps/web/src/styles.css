@@ -72,12 +72,14 @@
   --allin: var(--red-800);
   --timeout: #f59e0b;
 
-  /* Playing cards: four-colour suits on the card face. */
+  /* Playing cards: traditional two colours on the card face, spades and
+     clubs black, hearts and diamonds red. */
   --card-face: #f8f5ec;
-  --suit-spade: #111827;
-  --suit-heart: #c81e2e;
-  --suit-diamond: #1d4ed8;
-  --suit-club: #15803d;
+  --suit-black: #111827;
+  --suit-red: #c81e2e;
+
+  /* Chip denominations: 1 white, 5 red, 25 green, 100 black and gold. */
+  --chip-green: #15803d;
 
   /* Leaderboard medals. */
   --medal-gold: var(--gold-400);
@@ -135,10 +137,10 @@
   --color-timeout: var(--timeout);
 
   --color-card-face: var(--card-face);
-  --color-suit-spade: var(--suit-spade);
-  --color-suit-heart: var(--suit-heart);
-  --color-suit-diamond: var(--suit-diamond);
-  --color-suit-club: var(--suit-club);
+  --color-suit-black: var(--suit-black);
+  --color-suit-red: var(--suit-red);
+
+  --color-chip-green: var(--chip-green);
 
   --color-medal-gold: var(--medal-gold);
   --color-medal-silver: var(--medal-silver);

@@ -1,21 +1,60 @@
-// A few flat chips beside an amount: more chips for more, five at most. The
+import { cn } from '@/lib/utils';
+
+// Chip colours by denomination (web-design skill).
+const CHIPS = [
+  [100, 'border-gold-400 bg-navy-950'],
+  [25, 'border-ivory/70 bg-chip-green'],
+  [5, 'border-ivory/70 bg-red-500'],
+  [1, 'border-slate bg-ivory'],
+] as const;
+
+const MAX_CHIPS = 6;
+
+// The chips that make up `amount`, biggest first, as few as possible; only
+// the first six are drawn.
+function chipsOf(amount: number) {
+  const chips: string[] = [];
+  let left = amount;
+  for (const [value, colour] of CHIPS) {
+    while (left >= value && chips.length < MAX_CHIPS) {
+      chips.push(colour);
+      left -= value;
+    }
+  }
+  return chips;
+}
+
+// A stack of flat chips beside an amount, taller for more, six at most. The
 // chips are decoration; the number says how much.
-export function ChipStack({ amount }: { amount: number }) {
-  const chips = Math.min(5, Math.ceil(Math.log2(amount + 1) / 2));
+export function ChipStack({
+  amount,
+  className,
+}: {
+  amount: number;
+  className?: string;
+}) {
+  const chips = chipsOf(amount);
   return (
-    <span className="inline-flex items-center gap-2">
-      {chips > 0 && (
-        <span aria-hidden="true" className="inline-flex pl-2.5">
-          {Array.from({ length: chips }, (_, i) => (
+    <span className="inline-flex items-end gap-2">
+      {chips.length > 0 && (
+        <span
+          aria-hidden="true"
+          className="inline-flex flex-col-reverse items-center pt-[3px]">
+          {chips.map((colour, i) => (
             <span
-              // biome-ignore lint/suspicious/noArrayIndexKey: identical chips
+              // biome-ignore lint/suspicious/noArrayIndexKey: a stack's chips have no identity
               key={i}
-              className="-ml-2.5 size-4 rounded-full border-2 border-navy-950 border-dashed bg-gold-400"
+              className={cn(
+                '-mt-[3px] h-[7px] w-5 rounded-[50%] border border-dashed',
+                colour,
+              )}
             />
           ))}
         </span>
       )}
-      <span className="tabular-nums">{amount}</span>
+      <span className={cn('tabular-nums leading-none', className)}>
+        {amount}
+      </span>
     </span>
   );
 }
