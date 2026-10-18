@@ -3,8 +3,10 @@ import { apiError } from '../contract/errors';
 import { SETTINGS_DEFAULTS } from '../contract/schemas';
 import {
   MatchQueue,
+  type MatchQueueOptions,
   type OpenMatch,
   type QueueInput,
+  type QueueStorage,
   type Seated,
 } from './pairing';
 
@@ -82,10 +84,20 @@ const persistentFixture = () => {
   return { clock, openMatch, queue: recreate(), recreate };
 };
 
+const withKey = (
+  input: Omit<QueueInput, 'queue_key'> & { queue_key?: string },
+): QueueInput => ({
+  queue_key: `queue-key-${input.name.toLowerCase().padEnd(16, '_')}`,
+  ...input,
+});
+
 // Attach a rejection handler while another request is being arranged. The
 // original promise still rejects when awaited, including against the RED stub.
-const start = (queue: MatchQueue, input: QueueInput) => {
-  const pending = queue.queue(input);
+const start = (
+  queue: MatchQueue,
+  input: Omit<QueueInput, 'queue_key'> & { queue_key?: string },
+) => {
+  const pending = queue.queue(withKey(input));
   void pending.catch(() => {});
   return pending;
 };
@@ -235,9 +247,9 @@ describe('MatchQueue (A2)', () => {
       waitMs: WAIT_MS,
       isBanned: async name => banned.has(name.toLowerCase()),
     });
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     banned.add('alice');
-    expect(await queue.queue({ name: 'Bob' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Bob' }))).toEqual(waiting);
     expect(openMatch).not.toHaveBeenCalled();
   });
 
@@ -270,11 +282,11 @@ describe('MatchQueue (A2)', () => {
         releaseCarol = resolve;
       });
     });
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     const dave = start(queue, { name: 'Dave' });
     await opening;
     const carol = { name: 'Carol' };
-    expect(await queue.queue(carol)).toEqual(waiting);
+    expect(await queue.queue(withKey(carol))).toEqual(waiting);
     const eve = start(queue, { name: 'Eve' });
     await carolOpening;
     const failed = {
@@ -288,8 +300,8 @@ describe('MatchQueue (A2)', () => {
     // Restore Alice first, then Carol, so the banned waiter is encountered first.
     banned.add('alice');
     const bob = { name: 'Bob' };
-    expect(await queue.queue(bob)).toEqual(matched(1));
-    expect(await queue.queue(carol)).toEqual(matched(0));
+    expect(await queue.queue(withKey(bob))).toEqual(matched(1));
+    expect(await queue.queue(withKey(carol))).toEqual(matched(0));
     expect(openMatch.mock.calls).toEqual([
       [{ name: 'Alice' }, { name: 'Dave' }],
       [carol, { name: 'Eve' }],
@@ -303,9 +315,9 @@ describe('MatchQueue (A2)', () => {
       .mockResolvedValue(false);
     const openMatch = vi.fn<OpenMatch>().mockResolvedValue(opened);
     const queue = new MatchQueue(openMatch, { waitMs: WAIT_MS, isBanned });
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     isBanned.mockRejectedValueOnce(new Error('D1 unavailable'));
-    expect(await queue.queue({ name: 'Bob' })).toMatchObject({
+    expect(await queue.queue(withKey({ name: 'Bob' }))).toMatchObject({
       ok: false,
       error: { code: 'unavailable' },
     });
@@ -314,18 +326,18 @@ describe('MatchQueue (A2)', () => {
 
   it('replays both matched results after recreation without opening another match', async () => {
     const { queue, recreate, clock, openMatch } = persistentFixture();
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     clock.ms = 1_000;
-    const bob = await queue.queue({ name: 'Bob' });
-    const alice = await queue.queue({ name: 'Alice' });
+    const bob = await queue.queue(withKey({ name: 'Bob' }));
+    const alice = await queue.queue(withKey({ name: 'Alice' }));
     expect([alice, bob]).toEqual([matched(0), matched(1)]);
 
     clock.ms += 30_000;
     const restored = recreate();
     clock.ms += HOLD_MS - 30_000 - 1;
     const replayed = await Promise.all([
-      restored.queue({ name: 'Alice' }),
-      restored.queue({ name: 'Bob' }),
+      restored.queue(withKey({ name: 'Alice' })),
+      restored.queue(withKey({ name: 'Bob' })),
     ]);
     expect(replayed).toEqual([alice, bob]);
     expect(openMatch).toHaveBeenCalledTimes(1);
@@ -333,14 +345,14 @@ describe('MatchQueue (A2)', () => {
 
   it('expires matched results after recreation using the original pairing time', async () => {
     const { queue, recreate, clock, openMatch } = persistentFixture();
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     clock.ms = 1_000;
-    expect(await queue.queue({ name: 'Bob' })).toEqual(matched(1));
+    expect(await queue.queue(withKey({ name: 'Bob' }))).toEqual(matched(1));
 
     clock.ms += 30_000;
     const restored = recreate();
     clock.ms += HOLD_MS - 30_000 + 1;
-    expect(await restored.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await restored.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     expect(openMatch).toHaveBeenCalledTimes(1);
   });
 
@@ -348,31 +360,31 @@ describe('MatchQueue (A2)', () => {
     const { queue, recreate, clock, openMatch } = persistentFixture();
     const alice = { name: 'Alice' };
     const bob = { name: 'Bob' };
-    expect(await queue.queue(alice)).toEqual(waiting);
+    expect(await queue.queue(withKey(alice))).toEqual(waiting);
 
     clock.ms += 30_000;
     const restored = recreate();
     clock.ms += HOLD_MS - 30_000 - 1;
-    expect(await restored.queue(bob)).toEqual(matched(1));
-    expect(await restored.queue(alice)).toEqual(matched(0));
+    expect(await restored.queue(withKey(bob))).toEqual(matched(1));
+    expect(await restored.queue(withKey(alice))).toEqual(matched(0));
     expect(openMatch).toHaveBeenCalledExactlyOnceWith(alice, bob);
   });
 
   it('expires a retained waiter after recreation using the original hold period', async () => {
     const { queue, recreate, clock, openMatch } = persistentFixture();
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
 
     clock.ms += 30_000;
     const restored = recreate();
     clock.ms += HOLD_MS - 30_000 + 1;
-    expect(await restored.queue({ name: 'Bob' })).toEqual(waiting);
+    expect(await restored.queue(withKey({ name: 'Bob' }))).toEqual(waiting);
     expect(openMatch).not.toHaveBeenCalled();
   });
 
   it('holds a lone request until waitMs, then returns the exact waiting hint', async () => {
     const { queue, openMatch } = fixture();
     const started = performance.now();
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     expect(performance.now() - started).toBeGreaterThanOrEqual(WAIT_MS - 5);
     expect(openMatch).not.toHaveBeenCalled();
   });
@@ -382,7 +394,10 @@ describe('MatchQueue (A2)', () => {
     const first = { name: 'AlIce' };
     const second = { name: 'bOB' };
     expect(
-      await Promise.all([queue.queue(first), queue.queue(second)]),
+      await Promise.all([
+        queue.queue(withKey(first)),
+        queue.queue(withKey(second)),
+      ]),
     ).toEqual([matched(0), matched(1)]);
     expect(openMatch).toHaveBeenCalledExactlyOnceWith(first, second);
   });
@@ -393,8 +408,8 @@ describe('MatchQueue (A2)', () => {
     clock.ms += 1_000;
     expect(await alice).toEqual(waiting);
     clock.ms += HOLD_MS - 1;
-    expect(await queue.queue({ name: 'Bob' })).toEqual(matched(1));
-    expect(await queue.queue({ name: 'Alice' })).toEqual(matched(0));
+    expect(await queue.queue(withKey({ name: 'Bob' }))).toEqual(matched(1));
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(matched(0));
   });
 
   it('wakes an outstanding long poll as soon as an opponent arrives', async () => {
@@ -402,43 +417,43 @@ describe('MatchQueue (A2)', () => {
       waitMs: 60_000,
     });
     const alice = start(queue, { name: 'Alice' });
-    expect(await queue.queue({ name: 'Bob' })).toEqual(matched(1));
+    expect(await queue.queue(withKey({ name: 'Bob' }))).toEqual(matched(1));
     expect(await alice).toEqual(matched(0));
   });
 
   it('expires queue eligibility 45 seconds after waiting is returned', async () => {
     const { queue, clock, openMatch } = fixture();
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     clock.ms += HOLD_MS + 1;
-    expect(await queue.queue({ name: 'Bob' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Bob' }))).toEqual(waiting);
     expect(openMatch).not.toHaveBeenCalled();
   });
 
   it('replays matched results for 45 seconds from pairing, then queues anew', async () => {
     const { queue, clock, openMatch } = fixture();
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     clock.ms = HOLD_MS - 1;
     const [alice, bob] = await Promise.all([
-      queue.queue({ name: 'Alice' }),
-      queue.queue({ name: 'Bob' }),
+      queue.queue(withKey({ name: 'Alice' })),
+      queue.queue(withKey({ name: 'Bob' })),
     ]);
     expect([alice, bob]).toEqual([matched(0), matched(1)]);
     clock.ms += HOLD_MS - 1;
-    expect(await queue.queue({ name: 'ALICE' })).toEqual(alice);
-    expect(await queue.queue({ name: 'BOB' })).toEqual(bob);
+    expect(await queue.queue(withKey({ name: 'ALICE' }))).toEqual(alice);
+    expect(await queue.queue(withKey({ name: 'BOB' }))).toEqual(bob);
     expect(openMatch).toHaveBeenCalledTimes(1);
     clock.ms += 2;
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     expect(openMatch).toHaveBeenCalledTimes(1);
   });
 
   it('treats case variants as one person renewing their wait', async () => {
     const { queue, openMatch } = fixture();
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
-    expect(await queue.queue({ name: 'ALICE' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'ALICE' }))).toEqual(waiting);
     expect(openMatch).not.toHaveBeenCalled();
-    expect(await queue.queue({ name: 'Bob' })).toEqual(matched(1));
-    expect(await queue.queue({ name: 'alice' })).toEqual(matched(0));
+    expect(await queue.queue(withKey({ name: 'Bob' }))).toEqual(matched(1));
+    expect(await queue.queue(withKey({ name: 'alice' }))).toEqual(matched(0));
     expect(openMatch).toHaveBeenCalledTimes(1);
   });
 
@@ -446,7 +461,7 @@ describe('MatchQueue (A2)', () => {
     const { queue, openMatch } = fixture();
     const a = start(queue, { name: 'Alice' });
     const duplicate = start(queue, { name: 'ALICE' });
-    expect(await queue.queue({ name: 'Bob' })).toEqual(matched(1));
+    expect(await queue.queue(withKey({ name: 'Bob' }))).toEqual(matched(1));
     expect(await Promise.all([a, duplicate])).toEqual([matched(0), matched(0)]);
     expect(openMatch).toHaveBeenCalledTimes(1);
   });
@@ -475,8 +490,8 @@ describe('MatchQueue (A2)', () => {
       const { queue, openMatch } = fixture();
       expect(
         await Promise.all([
-          queue.queue({ name: 'Alice', ...a }),
-          queue.queue({ name: 'Bob', ...b }),
+          queue.queue(withKey({ name: 'Alice', ...a })),
+          queue.queue(withKey({ name: 'Bob', ...b })),
         ]),
       ).toEqual([waiting, waiting]);
       expect(openMatch).not.toHaveBeenCalled();
@@ -487,8 +502,8 @@ describe('MatchQueue (A2)', () => {
     const { queue } = fixture();
     expect(
       await Promise.all([
-        queue.queue({ name: 'Alice' }),
-        queue.queue({ name: 'Bob', settings: SETTINGS_DEFAULTS }),
+        queue.queue(withKey({ name: 'Alice' })),
+        queue.queue(withKey({ name: 'Bob', settings: SETTINGS_DEFAULTS })),
       ]),
     ).toEqual([matched(0), matched(1)]);
   });
@@ -501,10 +516,9 @@ describe('MatchQueue (A2)', () => {
     };
     const a = { name: 'Alice', ...options };
     const b = { name: 'Bob', ...structuredClone(options) };
-    expect(await Promise.all([queue.queue(a), queue.queue(b)])).toEqual([
-      matched(0),
-      matched(1),
-    ]);
+    expect(
+      await Promise.all([queue.queue(withKey(a)), queue.queue(withKey(b))]),
+    ).toEqual([matched(0), matched(1)]);
     expect(openMatch).toHaveBeenCalledExactlyOnceWith(a, b);
   });
 
@@ -515,10 +529,10 @@ describe('MatchQueue (A2)', () => {
       error: apiError('unavailable', 'Try again', 'Call POST /v1/queue again'),
     };
     openMatch.mockResolvedValueOnce(failed);
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
-    expect(await queue.queue({ name: 'Bob' })).toEqual(failed);
-    expect(await queue.queue({ name: 'Carol' })).toEqual(matched(1));
-    expect(await queue.queue({ name: 'Alice' })).toEqual(matched(0));
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Bob' }))).toEqual(failed);
+    expect(await queue.queue(withKey({ name: 'Carol' }))).toEqual(matched(1));
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(matched(0));
     expect(openMatch.mock.calls).toEqual([
       [{ name: 'Alice' }, { name: 'Bob' }],
       [{ name: 'Alice' }, { name: 'Carol' }],
@@ -534,7 +548,7 @@ describe('MatchQueue (A2)', () => {
           release = resolve;
         }),
     );
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     const bob = start(queue, { name: 'Bob' });
     await vi.waitFor(() => expect(openMatch).toHaveBeenCalledTimes(1), {
       timeout: 300,
@@ -550,7 +564,7 @@ describe('MatchQueue (A2)', () => {
       matched(1),
       matched(0),
     ]);
-    expect(await queue.queue({ name: 'Alice' })).toEqual(matched(0));
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(matched(0));
   });
 
   it('deduplicates retries after opening fails so Alice joins only one successful room', async () => {
@@ -566,12 +580,12 @@ describe('MatchQueue (A2)', () => {
         release = resolve;
       });
     });
-    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(waiting);
     const bob = start(queue, { name: 'Bob' });
     await opening;
     const firstRetry = start(queue, { name: 'ALICE' });
     const secondRetry = start(queue, { name: 'ALICE' });
-    expect(await queue.queue({ name: 'Carol' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Carol' }))).toEqual(waiting);
     expect(openMatch).toHaveBeenCalledTimes(1);
     const failed = {
       ok: false as const,
@@ -585,7 +599,7 @@ describe('MatchQueue (A2)', () => {
       value: { status: 'matched', room_id: ROOM },
     });
     expect(second).toEqual(first);
-    expect(await queue.queue({ name: 'Dave' })).toEqual(waiting);
+    expect(await queue.queue(withKey({ name: 'Dave' }))).toEqual(waiting);
     const aliceOpenings = openMatch.mock.calls.filter(players =>
       players.some(player => player.name.toLowerCase() === 'alice'),
     );
@@ -595,4 +609,232 @@ describe('MatchQueue (A2)', () => {
       openMatch.mock.calls[1]?.map(player => player.name.toLowerCase()).sort(),
     ).toEqual(['alice', 'carol']);
   });
+});
+
+describe('MatchQueue queue_key ownership (A17)', () => {
+  const ALICE_KEY = 'alice-private-key-1';
+  const OTHER_KEY = 'other-private-key-2';
+  const alice = { name: 'Alice', queue_key: ALICE_KEY };
+  const impostor = { name: 'ALICE', queue_key: OTHER_KEY };
+  const bob = { name: 'Bob', queue_key: 'bob-private-key-01' };
+
+  it('does not give a removed long poll the match of another key with the same name', async () => {
+    vi.useFakeTimers();
+    try {
+      const checks: { name: string; resolve: (banned: boolean) => void }[] = [];
+      const openMatch = vi.fn<OpenMatch>().mockResolvedValue(opened);
+      const queue = new MatchQueue(openMatch, {
+        waitMs: WAIT_MS,
+        isBanned: name =>
+          new Promise<boolean>(resolve => checks.push({ name, resolve })),
+      });
+      const original = start(queue, alice);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const carol = start(queue, {
+        name: 'Carol',
+        queue_key: 'carol-private-key-1',
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(checks.map(check => check.name)).toEqual(['Alice']);
+      checks[0]?.resolve(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(openMatch).not.toHaveBeenCalled();
+
+      // This request passed the handler before the ban; only Carol is retained.
+      const replacement = start(queue, impostor);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(checks.map(check => check.name)).toEqual(['Alice', 'Carol']);
+      checks[1]?.resolve(false);
+      await vi.advanceTimersByTimeAsync(WAIT_MS);
+
+      const replacementMatch = await replacement;
+      expect(replacementMatch).toEqual(matched(1));
+      expect(await carol).toEqual(matched(0));
+      expect(openMatch).toHaveBeenCalledExactlyOnceWith(
+        { name: 'Carol' },
+        { name: 'ALICE' },
+      );
+      const originalAnswer = await original;
+      expect.soft(originalAnswer).not.toEqual(replacementMatch);
+      expect(JSON.stringify(originalAnswer)).not.toContain(ROOM);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('discards legacy storage without queue keys instead of failing or replaying old matches', async () => {
+    const legacyRoom = 'r_legacy0001';
+    const results = await Promise.all(
+      [alice, { ...bob, queue_key: OTHER_KEY }].map(async input => {
+        const storage: QueueStorage = new MemoryQueueStorage();
+        await storage.put('queue', {
+          waiting: [
+            {
+              key: 'alice',
+              input: { name: 'Alice' },
+              pairingKey: JSON.stringify({ settings: SETTINGS_DEFAULTS }),
+              expiresAt: HOLD_MS,
+            },
+          ],
+          pairings: [
+            {
+              keys: ['bob', 'dave'],
+              at: 0,
+              matched: [0, 1].map(seat => ({
+                ...matched(seat as 0 | 1).value,
+                room_id: legacyRoom,
+                token: `legacy-token-${seat}`,
+              })),
+            },
+          ],
+        });
+        const options: MatchQueueOptions = {
+          storage,
+          waitMs: WAIT_MS,
+          holdMs: HOLD_MS,
+          now: () => 1_000,
+        };
+        const queue = new MatchQueue(
+          vi.fn<OpenMatch>().mockResolvedValue(opened),
+          options,
+        );
+        return queue.queue(input);
+      }),
+    );
+    for (const result of results) {
+      expect(result).toMatchObject({ ok: true });
+      expect(
+        result.ok && ['waiting', 'matched'].includes(result.value.status),
+      ).toBe(true);
+      expect(JSON.stringify(result)).not.toContain(legacyRoom);
+      expect(JSON.stringify(result)).not.toContain('legacy-token-');
+    }
+  });
+
+  const expectConflict = (answer: unknown) => {
+    expect(answer).toMatchObject({
+      ok: false,
+      error: { status: 'error', code: 'name_in_use', retryable: false },
+    });
+    const serialized = JSON.stringify(answer);
+    for (const field of [
+      'room_id',
+      'token',
+      'watch_url',
+      'seat',
+      ALICE_KEY,
+      OTHER_KEY,
+    ])
+      expect(serialized).not.toContain(field);
+  };
+
+  it('rejects another key during a long poll without disturbing the original caller', async () => {
+    const { queue, openMatch } = fixture();
+    const pending = start(queue, alice);
+    const conflict = await queue.queue(impostor);
+    const opponent = await queue.queue(bob);
+    const original = await pending;
+    expectConflict(conflict);
+    expect(opponent).toEqual(matched(1));
+    expect(original).toEqual(matched(0));
+    expect(openMatch).toHaveBeenCalledExactlyOnceWith(
+      { name: 'Alice' },
+      { name: 'Bob' },
+    );
+  });
+
+  it('retains waiting settings and test options when another key tries to replace them', async () => {
+    const { queue, openMatch } = fixture();
+    const options = {
+      settings: { ...SETTINGS_DEFAULTS, hands: 3 },
+      test: { seed: '00'.repeat(32) },
+    };
+    expect(await queue.queue({ ...alice, ...options })).toEqual(waiting);
+    const conflict = await queue.queue({
+      ...impostor,
+      settings: { ...SETTINGS_DEFAULTS, hands: 10 },
+      test: { seed: '01'.repeat(32) },
+    });
+    const opponent = await queue.queue({ ...bob, ...options });
+    const original = await queue.queue(alice);
+    expectConflict(conflict);
+    expect(opponent).toEqual(matched(1));
+    expect(original).toEqual(matched(0));
+    expect(openMatch).toHaveBeenCalledExactlyOnceWith(
+      { name: 'Alice', ...options },
+      { name: 'Bob', ...options },
+    );
+  });
+
+  it('same key renews waiting eligibility and replays the exact matched including watch_url', async () => {
+    const { queue, clock, openMatch } = fixture();
+    expect(await queue.queue(alice)).toEqual(waiting);
+    clock.ms = HOLD_MS - 1;
+    expect(await queue.queue({ ...alice, name: 'ALICE' })).toEqual(waiting);
+    clock.ms += HOLD_MS - 1;
+    expect(await queue.queue(bob)).toEqual(matched(1));
+    const first = await queue.queue(alice);
+    expect(first).toEqual(matched(0));
+    expect(await queue.queue({ ...alice, name: 'alice' })).toEqual(first);
+    expect(JSON.stringify(first)).not.toContain(ALICE_KEY);
+    expect(openMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects another key after matching and preserves the owner result', async () => {
+    const { queue, clock, openMatch } = fixture();
+    expect(await queue.queue(alice)).toEqual(waiting);
+    expect(await queue.queue(bob)).toEqual(matched(1));
+    clock.ms = HOLD_MS - 1;
+    const conflict = await queue.queue(impostor);
+    const original = await queue.queue(alice);
+    expectConflict(conflict);
+    expect(original).toEqual(matched(0));
+    expect(openMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['waiting', 'matched'] as const)(
+    'a rejected key does not renew %s eligibility; a new key can queue after expiry',
+    async status => {
+      const { queue, clock, openMatch } = fixture();
+      expect(await queue.queue(alice)).toEqual(waiting);
+      if (status === 'matched')
+        expect(await queue.queue(bob)).toEqual(matched(1));
+      const openedBefore = openMatch.mock.calls.length;
+      clock.ms = HOLD_MS - 1;
+      const conflict = await queue.queue(impostor);
+      clock.ms = HOLD_MS + 1;
+      const renewed = await queue.queue(impostor);
+      expectConflict(conflict);
+      expect(renewed).toEqual(waiting);
+      expect(openMatch).toHaveBeenCalledTimes(openedBefore);
+      expect(
+        await queue.queue({ name: 'Carol', queue_key: 'carol-private-key-1' }),
+      ).toEqual(matched(1));
+      expect(await queue.queue(impostor)).toEqual(matched(0));
+      expect(openMatch.mock.calls.at(-1)).toEqual([
+        { name: 'ALICE' },
+        { name: 'Carol' },
+      ]);
+    },
+  );
+
+  it.each(['waiting', 'matched'] as const)(
+    'restores %s ownership from storage and rejects another key',
+    async status => {
+      const { queue, recreate, clock, openMatch } = persistentFixture();
+      expect(await queue.queue(alice)).toEqual(waiting);
+      if (status === 'matched')
+        expect(await queue.queue(bob)).toEqual(matched(1));
+      clock.ms = HOLD_MS - 1;
+      const restored = recreate();
+      const conflict = await restored.queue(impostor);
+      if (status === 'waiting')
+        expect(await restored.queue(bob)).toEqual(matched(1));
+      const original = await restored.queue(alice);
+      expectConflict(conflict);
+      expect(original).toEqual(matched(0));
+      expect(openMatch).toHaveBeenCalledTimes(1);
+    },
+  );
 });

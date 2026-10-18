@@ -57,7 +57,11 @@ const EXPECTED: Record<
   }
 > = {
   'skill.skill': { route: 'GET /skill.md', auth: 'none', codes: [] },
-  'lobby.queue': { route: 'POST /v1/queue', auth: 'none', codes: NAME_CODES },
+  'lobby.queue': {
+    route: 'POST /v1/queue',
+    auth: 'none',
+    codes: [...NAME_CODES, 'name_in_use'],
+  },
   'lobby.createRoom': {
     route: 'POST /v1/rooms',
     auth: 'none',

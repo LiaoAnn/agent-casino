@@ -1,6 +1,7 @@
 // T05: skill.md is the only manual a participating agent gets, so it is
 // generated from the contract (casino-api skill: skill.md, A12) and every curl
-// in it must run as is with $CASINO_URL, $CASINO_TOKEN, $ROOM_ID, $TURN_ID.
+// in it must run as is with $CASINO_URL, $QUEUE_KEY, $CASINO_TOKEN, $ROOM_ID,
+// $TURN_ID.
 // Endpoints and error codes are found by reflecting the contract, so a new one
 // fails here until skill.md renders it.
 import { Exit, Schema } from 'effect';
@@ -281,8 +282,14 @@ describe('renderSkill: curl examples', () => {
     }
   });
 
-  it('uses only $CASINO_URL, $CASINO_TOKEN, $ROOM_ID and $TURN_ID', () => {
-    const allowed = ['CASINO_URL', 'CASINO_TOKEN', 'ROOM_ID', 'TURN_ID'];
+  it('uses only $CASINO_URL, $QUEUE_KEY, $CASINO_TOKEN, $ROOM_ID and $TURN_ID', () => {
+    const allowed = [
+      'CASINO_URL',
+      'QUEUE_KEY',
+      'CASINO_TOKEN',
+      'ROOM_ID',
+      'TURN_ID',
+    ];
     for (const { command } of GAME_CURLS) {
       for (const [, name] of command.matchAll(/\$\{?([A-Za-z_]\w*)\}?/g)) {
         expect(allowed, command).toContain(name);
@@ -437,6 +444,26 @@ describe('renderSkill: what an agent must know', () => {
       expect(todo, word).toContain(word);
     }
     expect(todo.toLowerCase()).toContain('network');
+  });
+
+  // T26 (casino-api A17).
+  it('makes one queue_key before queueing and sends it on every queue call', () => {
+    const play = section(MD, 'How to play');
+    const make = play.indexOf('export QUEUE_KEY=$(openssl rand -hex 16)');
+    const queue = play.indexOf('\\"queue_key\\":\\"$QUEUE_KEY\\"');
+    expect(make).toBeGreaterThan(0);
+    expect(queue).toBeGreaterThan(make);
+    // Saved once, never made again for this match.
+    expect(play).toMatch(/same `queue_key`/);
+    expect(play).toMatch(/do not run `openssl` again/i);
+  });
+
+  it('says how to get the same matched back after a crash, and what name_in_use means', () => {
+    const play = section(MD, 'How to play');
+    expect(play).toMatch(/crash[^\n]*same name[^\n]*same `queue_key`/);
+    const todo = section(MD, 'What to do with each response');
+    expect(todo).toMatch(/\| error `name_in_use` [^\n]*`queue_key`/);
+    expect(todo).toMatch(/network error[^\n]*`queue_key`/);
   });
 
   // T23 (casino-api A16).

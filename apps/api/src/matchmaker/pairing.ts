@@ -27,7 +27,13 @@ export interface QueueInput {
   settings?: typeof Settings.Type;
   // Only where ALLOW_TEST_ROOMS=true; the handler drops it otherwise.
   test?: typeof TestSettings.Type;
+  // Made up by the agent (A17): later calls of this name count as the same
+  // person only with the same key. Never leaves the Matchmaker.
+  queue_key: string;
 }
+
+// What a room is opened with: the queue input without its queue_key.
+type RoomInput = Omit<QueueInput, 'queue_key'>;
 
 // One seat of a fresh room, as `matched` shows it (A16 adds the opponent,
 // the settings and the owner's watch link).
@@ -40,8 +46,8 @@ type Result<T, C extends ApiError['code']> =
 // Opens a room for a pair: `first` (queued first) in seat 0, `second` in
 // seat 1. Answers both seats, in seat order.
 export type OpenMatch = (
-  first: QueueInput,
-  second: QueueInput,
+  first: RoomInput,
+  second: RoomInput,
 ) => Promise<Result<[Seated, Seated], 'unavailable'>>;
 
 // What the queue needs from DurableObjectStorage.
@@ -72,6 +78,17 @@ const WAITING: Answer = {
   status: 'waiting',
   hint: 'No opponent yet. Call POST /v1/queue again',
 };
+
+// Someone else has this name in the queue or a fresh match (A17). Says
+// nothing about the room.
+const NAME_IN_USE = (name: string) =>
+  apiError(
+    'name_in_use',
+    `The name ${name} is already queued or was just matched with another queue_key`,
+    'Resend POST /v1/queue with the queue_key you first queued with, or queue under another name',
+  );
+
+const roomInput = ({ queue_key: _, ...input }: QueueInput): RoomInput => input;
 
 const matchedAnswer = (seated: Seated): Matched => ({
   status: 'matched',
@@ -109,6 +126,8 @@ interface Entry {
 // Two names taken out of the queue for one room.
 interface Pairing {
   keys: [string, string];
+  // Each seat's queue_key, in the order of keys.
+  queueKeys: [string, string];
   // Epoch ms when the pair was made; answers are replayed for holdMs.
   at: number;
   // Both seats' answers, or undefined if the room could not be opened.
@@ -122,12 +141,17 @@ interface Saved {
   waiting: Omit<Entry, 'polls'>[];
   pairings: {
     keys: [string, string];
+    queueKeys: [string, string];
     at: number;
     matched: [Matched, Matched];
   }[];
 }
 
 const STORAGE_KEY = 'queue';
+
+// Whether this seat of the pairing was queued with this queue_key (A17).
+const ownedBy = (pairing: Pairing, key: string, queueKey: string) =>
+  pairing.queueKeys[pairing.keys.indexOf(key)] === queueKey;
 
 const memoryStorage = (): QueueStorage => {
   const data = new Map<string, unknown>();
@@ -162,12 +186,17 @@ export class MatchQueue {
     this.#isBanned = options.isBanned ?? (async () => false);
   }
 
-  async queue(input: QueueInput): Promise<Result<Answer, 'unavailable'>> {
+  async queue(
+    input: QueueInput,
+  ): Promise<Result<Answer, 'unavailable' | 'name_in_use'>> {
     const key = input.name.toLowerCase();
     await this.#load();
     this.#prune();
     const pairing = this.#pairings.get(key);
     if (pairing) {
+      if (!ownedBy(pairing, key, input.queue_key)) {
+        return { ok: false, error: NAME_IN_USE(input.name) };
+      }
       const answer = await this.#answerOf(pairing, key);
       if (answer) return { ok: true, value: answer };
       // The room couldn't be opened: start over from what is there now.
@@ -175,6 +204,9 @@ export class MatchQueue {
     }
 
     let entry = this.#waiting.get(key);
+    if (entry && entry.input.queue_key !== input.queue_key) {
+      return { ok: false, error: NAME_IN_USE(input.name) };
+    }
     if (entry) {
       // The same person waiting on: their latest settings count.
       entry.input = input;
@@ -244,12 +276,17 @@ export class MatchQueue {
 
   #load() {
     this.#loaded ??= this.#storage.get<Saved>(STORAGE_KEY).then(saved => {
+      // Saved before queue_key (T26): nobody could claim them, so they are
+      // dropped as if expired.
       for (const entry of saved?.waiting ?? []) {
+        if (entry.input.queue_key === undefined) continue;
         this.#waiting.set(entry.key, { ...entry, polls: 0 });
       }
-      for (const { keys, at, matched } of saved?.pairings ?? []) {
+      for (const { keys, queueKeys, at, matched } of saved?.pairings ?? []) {
+        if (queueKeys === undefined) continue;
         const pairing = {
           keys,
+          queueKeys,
           at,
           answers: Promise.resolve(matched),
           matched,
@@ -266,8 +303,8 @@ export class MatchQueue {
       waiting: [...this.#waiting.values()].map(
         ({ polls: _, ...entry }) => entry,
       ),
-      pairings: [...pairings].flatMap(({ keys, at, matched }) =>
-        matched ? [{ keys, at, matched }] : [],
+      pairings: [...pairings].flatMap(({ keys, queueKeys, at, matched }) =>
+        matched ? [{ keys, queueKeys, at, matched }] : [],
       ),
     };
     return this.#storage.put(STORAGE_KEY, saved);
@@ -290,6 +327,7 @@ export class MatchQueue {
     const opened = Promise.withResolvers<[Matched, Matched] | undefined>();
     const pairing: Pairing = {
       keys: [first.key, second.key],
+      queueKeys: [first.input.queue_key, second.input.queue_key],
       at: this.#now(),
       answers: opened.promise,
     };
@@ -316,7 +354,10 @@ export class MatchQueue {
     };
     let result: Awaited<ReturnType<OpenMatch>>;
     try {
-      result = await this.#openMatch(first.input, second.input);
+      result = await this.#openMatch(
+        roomInput(first.input),
+        roomInput(second.input),
+      );
     } catch (error) {
       await unpair();
       throw error;
@@ -348,8 +389,10 @@ export class MatchQueue {
     });
     try {
       for (;;) {
+        // Someone else with this name, if this entry was dropped meanwhile
+        // (banned) and the name queued anew with another key.
         const pairing = this.#pairings.get(entry.key);
-        if (pairing) {
+        if (pairing && ownedBy(pairing, entry.key, entry.input.queue_key)) {
           const answer = await this.#answerOf(pairing, entry.key);
           if (answer) return { ok: true, value: answer };
           continue;

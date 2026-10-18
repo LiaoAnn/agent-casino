@@ -170,7 +170,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
       auth: 'none',
       method: 'POST',
       path: '/v1/queue',
-      body: { game: 'holdem', name: 'alice' },
+      body: { game: 'holdem', name: 'alice', queue_key: 'alice-queue-key-1' },
     },
     {
       name: 'lobby.createRoom',
@@ -340,7 +340,7 @@ describe('bad request input answers 400 invalid_request', () => {
 
   it('valid JSON missing a required field (name)', async () => {
     const body = await expectError(
-      await queue({ body: { game: 'holdem' } }),
+      await queue({ body: { game: 'holdem', queue_key: 'alice-queue-key-1' } }),
       'invalid_request',
     );
     expect(body.retryable).toBe(false);
@@ -348,7 +348,9 @@ describe('bad request input answers 400 invalid_request', () => {
 
   it('a field of the wrong type, naming the field in message', async () => {
     const body = await expectError(
-      await queue({ body: { game: 'holdem', name: 5 } }),
+      await queue({
+        body: { game: 'holdem', name: 5, queue_key: 'alice-queue-key-1' },
+      }),
       'invalid_request',
     );
     expect(body.retryable).toBe(false);
@@ -358,7 +360,11 @@ describe('bad request input answers 400 invalid_request', () => {
   it('a JSON body sent as form data (curl -d) tells to set Content-Type', async () => {
     const body = await expectError(
       await queue({
-        rawBody: JSON.stringify({ game: 'holdem', name: 'alice' }),
+        rawBody: JSON.stringify({
+          game: 'holdem',
+          name: 'alice',
+          queue_key: 'alice-queue-key-1',
+        }),
         contentType: 'application/x-www-form-urlencoded',
       }),
       'invalid_request',

@@ -82,13 +82,21 @@ play() {
   return 1
 }
 
-# queue <name> <out file>: queues until matched.
+# A fresh queue_key (A17): 32 hex characters, as skill.md makes it.
+queue_key() { od -An -N16 -tx1 /dev/urandom | tr -d ' \n'; }
+
+# queue_body <name> <queue_key>
+queue_body() {
+  echo "{\"game\":\"holdem\",\"name\":\"$1\",\"queue_key\":\"$2\",\"settings\":$SETTINGS}"
+}
+
+# queue <name> <queue_key> <out file>: queues until matched.
 queue() {
   local r
   for _ in $(seq 1 10); do
-    r=$(post /v1/queue "{\"game\":\"holdem\",\"name\":\"$1\",\"settings\":$SETTINGS}")
+    r=$(post /v1/queue "$(queue_body "$1" "$2")")
     case $(jq -r .status <<<"$r") in
-      matched) echo "$r" >"$2"; return 0 ;;
+      matched) echo "$r" >"$3"; return 0 ;;
       waiting) ;;
       *) echo "$r" >&2; return 1 ;;
     esac
@@ -123,14 +131,29 @@ check "GET /v1/matches/{id} of the house-bot match" \
 # --- two players queue and play each other --------------------------------
 a="e2e-a-$RUN"
 b="e2e-b-$RUN"
-queue "$a" "$TMP/qa" &
+key_a=$(queue_key)
+key_b=$(queue_key)
+r=$(post /v1/queue "$(queue_body "$a" short)" -w '\n%{http_code}')
+check "POST /v1/queue with a bad queue_key: 400 invalid_request" \
+  '.[0].code == "invalid_request" and .[1] == 400' \
+  "$(jq -s . <<<"$r")"
+queue "$a" "$key_a" "$TMP/qa" &
 qa=$!
 sleep 2
-queue "$b" "$TMP/qb" || fail "POST /v1/queue pairs $b"
+queue "$b" "$key_b" "$TMP/qb" || fail "POST /v1/queue pairs $b"
 wait $qa || fail "POST /v1/queue pairs $a"
 check "both queued players got the same room" \
   '.[0].room_id == .[1].room_id and .[0].seat == 0 and .[1].seat == 1' \
   "$(jq -s . "$TMP/qa" "$TMP/qb")"
+# Someone who knows $a's name, but not the queue_key, gets nothing (A17).
+r=$(post /v1/queue "$(queue_body "$a" "$(queue_key)")" -w '\n%{http_code}')
+check "POST /v1/queue with $a's name and another queue_key: 409 name_in_use" \
+  '.[0].code == "name_in_use" and .[1] == 409
+   and (.[0] | has("room_id") or has("token") or has("watch_url") | not)' \
+  "$(jq -s . <<<"$r")"
+check "POST /v1/queue again with $a's queue_key: the same matched" \
+  '.[0] == .[1]' \
+  "$(jq -s . "$TMP/qa" <(post /v1/queue "$(queue_body "$a" "$key_a")"))"
 pair_room=$(jq -r .room_id "$TMP/qa")
 play "$pair_room" "$(jq -r .token "$TMP/qa")" "$TMP/a" &
 pa=$!

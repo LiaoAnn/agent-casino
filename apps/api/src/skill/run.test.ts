@@ -4,13 +4,15 @@
 // back here, where it becomes a Request to the Worker's handle() with real
 // referees, the real queue and a real local D1. Each response must decode
 // with its endpoint's schemas, and $ROOM_ID, $CASINO_TOKEN and $TURN_ID come
-// from the responses before, as A12 says.
+// from the responses before, as A12 says. $QUEUE_KEY comes from running the
+// block that makes it (A17).
 import { execFileSync } from 'node:child_process';
 import { Exit, Schema } from 'effect';
 import { HttpApi } from 'effect/http-api';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { handle } from '../app';
 import { CasinoApi } from '../contract/api';
+import { QUEUE_KEY_PATTERN } from '../contract/schemas';
 import { startTestD1, type TestD1 } from '../db/test-d1';
 import { matchQueueIn, type QueueInput } from '../matchmaker/pairing';
 import { RatingWriter } from '../matchmaker/ratings';
@@ -127,6 +129,15 @@ const curlsOf = (block: string, vars: Record<string, string>): string[][] => {
     .map(chunk => chunk.split('\0').filter(arg => arg !== ''));
 };
 
+// The value a block without curl exports as $QUEUE_KEY, if it does.
+const queueKeyOf = (block: string) =>
+  execFileSync('bash', ['-c', `${block}\nprintf '\\0%s' "$QUEUE_KEY"`], {
+    env: { PATH: process.env.PATH ?? '', HOME: '/nonexistent' },
+  })
+    .toString()
+    .split('\0')
+    .at(-1);
+
 // curl's argv (only the options skill.md uses) as a Request.
 const requestOf = (argv: string[]) => {
   let method = 'GET';
@@ -165,7 +176,13 @@ describe('skill.md examples, run against the API', () => {
     for (const block of bashBlocks(md)) {
       // The export lines show example values; the real ones come from the
       // responses, as an agent would copy them.
-      if (!block.includes('curl')) continue;
+      if (!block.includes('curl')) {
+        if (block.includes('QUEUE_KEY=')) {
+          vars.QUEUE_KEY = queueKeyOf(block) ?? '';
+          expect(vars.QUEUE_KEY).toMatch(QUEUE_KEY_PATTERN);
+        }
+        continue;
+      }
       const script = block.replaceAll(EXAMPLE_INVITE, invite || EXAMPLE_INVITE);
       for (const argv of curlsOf(script, vars)) {
         const request = requestOf(argv);
@@ -220,6 +237,7 @@ describe('skill.md examples, run against the API', () => {
       ['skill.skill', 200],
       ['skill.skill', 200],
     ]);
+    expect(vars.QUEUE_KEY).toBeDefined();
     expect(tokens).toHaveLength(2);
     expect(ran[0]?.body).toMatchObject({ status: 'waiting' });
     expect(ran[3]?.body).toMatchObject({ status: 'your_turn' });

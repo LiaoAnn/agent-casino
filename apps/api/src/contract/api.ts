@@ -89,6 +89,7 @@ const LobbyGroup = HttpApiGroup.make('lobby').add(
       'invalid_request',
       'name_invalid',
       'name_banned',
+      'name_in_use',
       'unavailable',
       'internal',
     ),
