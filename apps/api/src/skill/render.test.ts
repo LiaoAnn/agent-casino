@@ -779,6 +779,128 @@ describe('renderSkill: what an agent must know', () => {
     expect(todo).toMatch(/\| `waiting` from `POST \/v1\/queue` [^\n]*owner/);
   });
 
+  // T32 S4: keep the owner informed without blocking queueing or play.
+  describe.each([undefined, 'https://web.casino.test'])(
+    'queue progress updates (web URL: %s)',
+    webUrl => {
+      const md = renderSkill(BASE_URL, webUrl);
+      const play = section(md, 'How to play');
+      const step1 = play.slice(0, play.indexOf('### Step 2'));
+      const items =
+        step1.match(/^[-*] [^\n]*(?:\n(?![-*] |#{1,6} |```)[^\n]*)*/gm) ?? [];
+      const waiting =
+        items.find(item => /"status"\s*:\s*"waiting"/.test(item)) ?? '';
+      const matched =
+        items.find(item => /"status"\s*:\s*"matched"/.test(item)) ?? '';
+
+      it('announces the chosen name to the owner before the first queue call', () => {
+        const queueCall = fenced(step1, 'bash').find(block =>
+          block.includes('"$CASINO_URL/v1/queue"'),
+        );
+        expect(queueCall).toBeDefined();
+        const beforeQueue = step1.slice(0, step1.indexOf(queueCall ?? ''));
+        const announcement = beforeQueue
+          .split(/\n\s*\n/)
+          .find(
+            paragraph => /owner/i.test(paragraph) && /queu/i.test(paragraph),
+          );
+        expect(
+          announcement,
+          'announcement before the first queue call',
+        ).toBeDefined();
+        expect(announcement ?? '').toMatch(/(?:before|first|start)/i);
+        expect(announcement ?? '').toMatch(
+          /(?:tell|say|inform|notify|announce)/i,
+        );
+        expect(announcement ?? '').toMatch(/(?:name|queueing as|queuing as)/i);
+      });
+
+      it('reports both progress fields in one sentence on every waiting response', () => {
+        expect(waiting, 'Step 1 waiting response item').not.toBe('');
+        expect.soft(waiting).toMatch(/(?:each|every|whenever)/i);
+        expect.soft(waiting).toContain('owner');
+        expect.soft(waiting).toMatch(/(?:one|single|1)[ -]sentence/i);
+        expect.soft(waiting).toContain('waited_seconds');
+        expect.soft(waiting).toContain('queue_size');
+      });
+
+      it('immediately queues again after the update without waiting for an owner reply', () => {
+        expect(waiting, 'Step 1 waiting response item').not.toBe('');
+        expect.soft(waiting).toContain('POST /v1/queue');
+        expect.soft(waiting).toMatch(/(?:immediately|right away)/i);
+        expect
+          .soft(waiting)
+          .toMatch(
+            /(?:do not|don't|without|never)[^.!\n]*(?:(?:wait|pause)[^.!\n]*(?:repl|response|answer)|stop)/i,
+          );
+      });
+
+      it('tells the owner the opponent name and hands over watch_url when matched', () => {
+        expect(matched, 'Step 1 matched response item').not.toBe('');
+        expect.soft(matched).toContain('opponent_name');
+        expect.soft(matched).toContain('watch_url');
+        expect.soft(matched).toContain('owner');
+        expect.soft(matched).toMatch(/(?:tell|say|inform|notify|announce)/i);
+        expect.soft(matched).toMatch(/(?:give|send|share|hand|return)/i);
+      });
+
+      it('keeps progress updates brief without delaying calls or missing a deadline', () => {
+        const updates = step1
+          .split(/\n\s*\n/)
+          .find(
+            paragraph =>
+              /(?:updates?|reports?|messages?)/i.test(paragraph) &&
+              /deadline/i.test(paragraph),
+          );
+        expect(
+          updates,
+          'Step 1 timing rule for progress updates',
+        ).toBeDefined();
+        expect.soft(updates ?? '').toMatch(/(?:short|brief|concise)/i);
+        expect
+          .soft(updates ?? '')
+          .toMatch(
+            /(?:do not|don't|never|must not|cannot|can't)[^.!\n]*delay[^.!\n]*(?:call|request)/i,
+          );
+        expect
+          .soft(updates ?? '')
+          .toMatch(
+            /(?:do not|don't|never|must not|cannot|can't)[^.!\n]*miss[^.!\n]*deadline/i,
+          );
+      });
+
+      it('includes the brief update and immediate retry in the queue waiting table row', () => {
+        const todo = section(md, 'What to do with each response');
+        const row =
+          lines(todo).find(line =>
+            /^\| `waiting` from `POST \/v1\/queue`\s*\|/.test(line),
+          ) ?? '';
+        expect(row, 'queue waiting response table row').not.toBe('');
+        expect.soft(row).toContain('owner');
+        expect.soft(row).toMatch(/(?:one|single|1)[ -]sentence/i);
+        expect.soft(row).toMatch(/(?:immediately|right away)/i);
+        expect.soft(row).toMatch(/(?:call|retry|repeat|queue again)/i);
+        expect.soft(row).toMatch(/sentence[\s\S]*(?:immediately|right away)/i);
+      });
+
+      it('preserves the 180-second owner decision and the no-questions match rule', () => {
+        const decision =
+          items.find(
+            item => item.includes('waited_seconds') && item.includes('180'),
+          ) ?? '';
+        expect(decision).toContain('owner');
+        expect(decision).toMatch(/(?:stop|pause)/i);
+        expect(decision).toMatch(/(?:ask|whether|choose|decid)/i);
+        expect(decision).toContain('keep waiting');
+        expect(decision).toContain('house-bot');
+        expect(decision).toContain('unrated');
+        expect(section(md, 'What this is')).toContain(
+          'Do not stop to ask your owner anything during the match',
+        );
+      });
+    },
+  );
+
   // T32 S3: stopping the queue needs only local cleanup, outside runnable examples.
   it.each([undefined, 'https://web.casino.test'])(
     'explains stop cleanup in the 180-second queue item (web URL: %s)',
