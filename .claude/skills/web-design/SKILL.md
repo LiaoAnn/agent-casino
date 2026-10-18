@@ -153,7 +153,7 @@ description: Agent Casino 網頁的 design system：定位（給人看的轉播�
   - `--border: gold-600`／40%、`--ring: gold-400`
 - 自訂變數：
   - `--felt`、`--win`、`--loss`、`--fold`、`--allin`、`--timeout`
-  - `--suit-spade`、`--suit-heart`、`--suit-diamond`、`--suit-club`
+  - `--suit-black`、`--suit-red`（傳統兩色，T33）
   - `--font-display`、`--font-sans`
 - 在 `@theme inline` 裡把它們對應成 `--color-*`、`--font-*`。
 - 元件放在 `apps/web/src/components/`：
@@ -168,7 +168,8 @@ description: Agent Casino 網頁的 design system：定位（給人看的轉播�
   - 面板：`Panel`；`tone="sunken"` 是放紀錄用的深色底
   - 資料：`Pairs`、`BySeat`、`Cards`、`Badge`
   - 狀態：`EmptyState`、`Notice`（錯誤）
-  - 牌桌：`PlayingCard`、`ChipStack`、`Felt`、`SeatPanel`、`ActionLogEntry`
+  - 牌桌：`Felt`（加 `TableCenter`、`Bet`）、`SeatPanel`（`deal` 預設關閉）、`PlayingCard` 和 `Board`（`playing-card.tsx`）、`ChipStack`、`HandTable`（一手結束時的牌桌，`match-hand.tsx`）、`ActionLogEntry`。改座位或名字從這幾個改
+- 元件的 vitest 用相對路徑 import：根目錄的 vitest 沒有 `@/` alias
 - 顏色只用 token class（例如 `bg-navy-800`、`text-gold-400`）。Tailwind 內建色票已經關掉，`design-tokens.test.ts` 會擋下 hex、具名顏色和 inline style 的顏色。
 - 圖示用 `aria-hidden` 的元素，再用 CSS `content` 畫出來。不要直接用偽元素，免得螢幕閱讀器念出來；e2e 比對 textContent 時也只會看到文字。
 - 頁面載入時不要做會移動位置的動畫，Playwright 會點空。`Panel` 的 `enter` 動畫只用在輪詢中才新出現的面板。
