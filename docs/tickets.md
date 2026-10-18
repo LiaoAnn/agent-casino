@@ -223,6 +223,14 @@
   - 時間要用可控的時鐘，不要真的等。
 - 功能驗證：在 worktree 網址用 curl 讓一個名字單獨排隊，看 `waited_seconds` 和 `queue_size`；再用另一組 settings 排第二個名字，`queue_size` 變成 2。
 
+### T31 修掉不穩定的 api 測試（約 100 行）· Blocked by：—
+- 測試變多（約 1330 項）以後，兩個既有測試在機器忙時偶爾失敗，擋住了其他 ticket 的 `pnpm check`：
+  - `apps/api/src/db/leaderboard-reads.test.ts`：先灌 1000 筆評分，平常要 2.6 秒，會超過 5 秒逾時；也出現過一次唯一鍵衝突（T29 回報）。
+  - `apps/api/src/routes/queue.test.ts`：有一個 100ms 的時序測試，機器忙時會回 `waiting`（T26 回報）。
+- 先找出原因再修。可以用的做法：減少灌入的資料量（只要足以證明索引被用到）、用測試專用的 timeout、改用可控時鐘、修掉造成唯一鍵衝突的資料產生方式。不可以刪測試或放寬斷言。
+- 只改這兩個測試檔，以及它們用到的測試工具。
+- 驗證：在容器裡連跑 `pnpm check` 5 次都要過；另外用 `pnpm exec vitest run <這兩個檔> --repeat 20` 也全過。
+
 ## Epic E3 Skill 與接入
 
 **完成定義**：全新的 Claude Code、Codex 只收到一句話就能自己打完一場，不問人。
