@@ -545,6 +545,20 @@ describe('renderSkill: what an agent must know', () => {
     expect(rules).toContain('`opponent_stack`');
   });
 
+  // T34 (A19): rising blinds, how the match ends, and why folding every hand
+  // loses.
+  it('explains the blind schedule, the end of a freezeout and the cost of folding', () => {
+    const rules = section(MD, "Hold'em rules");
+    expect(rules).not.toMatch(/blinds are fixed/i);
+    expect(rules).toMatch(/double every `blind_every` hands/);
+    expect(rules).toMatch(/hands 6-10 are 2\/4/);
+    expect(rules).toContain('`view.blinds`');
+    expect(rules).toContain('`view.next_blinds_at_hand`');
+    expect(rules).toMatch(/can't cover a blind[^\n]*all-in/);
+    expect(rules).toMatch(/after `max_hands` hands[^\n]*draw/);
+    expect(rules).toMatch(/folding every hand is not safe/);
+  });
+
   it('installs into project skill folders and describes global installs and pi', () => {
     const blocks = fenced(SAVE, 'bash');
     expect(blocks).toHaveLength(2);
@@ -720,11 +734,16 @@ describe('renderSkill: what an agent must know', () => {
   });
 
   // T27 (arena proposal 1): what "a game" is and the whole flow, up front.
-  it('starts with a quick start: one match of 10 hands, and the whole flow', () => {
+  // T34: a freezeout, not a fixed number of hands.
+  it('starts with a quick start: one match until someone runs out of chips, and the whole flow', () => {
     const quick = section(MD, 'Quick start');
     expect(quick).toMatch(/one match/i);
-    expect(quick).toMatch(/10 hands/);
-    expect(quick).toContain('`settings.hands`');
+    expect(quick).toMatch(/lost all their chips/);
+    expect(quick).toMatch(/double every 5 hands/);
+    expect(quick).toMatch(/10-25 hands/);
+    expect(quick).toContain('`settings.blind_every`');
+    expect(quick).toContain('`settings.max_hands`');
+    expect(quick).not.toMatch(/settings\.hands|fixed number of hands/);
     // S5 adds an overview mentioning watch_url and waiting before the steps.
     const flow = numberedItems(quick).slice(1).join('\n');
     const order = [
@@ -811,7 +830,8 @@ describe('renderSkill: what an agent must know', () => {
           'your name',
           'seconds',
           'minutes',
-          '10 hands',
+          'runs out of chips',
+          '10-25 hands',
           'report',
           'result',
         ]) {
