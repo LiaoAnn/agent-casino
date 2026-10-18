@@ -589,6 +589,9 @@ describe('renderSkill: what an agent must know', () => {
     expect(crash).toMatch(/`wait`[^\n]*`state`/);
     expect(crash).toMatch(/plays for you/);
     expect(crash).toMatch(/same name[^\n]*same `queue_key`[^\n]*`matched`/);
+    // After the save block moved the queue_key, the queue example can't
+    // find it any more: a saved token means wait, not queue.
+    expect(crash).toMatch(/token is saved[^\n]*do not queue again/i);
   });
 });
 
