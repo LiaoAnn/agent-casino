@@ -53,9 +53,8 @@ export function WatchView({
       <Panel>
         <Pairs items={info} label="觀戰資訊" />
         {offline && (
-          <p
-            role="status"
-            className="text-red-400 text-sm before:mr-2 before:content-['⚠']">
+          <p role="status" className="text-red-400 text-sm">
+            <span aria-hidden="true" className="mr-2 before:content-['⚠']" />
             暫時連不上，稍後自動重試。
           </p>
         )}

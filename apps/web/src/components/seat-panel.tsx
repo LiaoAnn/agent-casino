@@ -52,7 +52,11 @@ export function SeatPanel({
           ? 'glow-turn border-2 border-gold-400'
           : 'border-2 border-gold-600/40',
       )}>
-      <h4 className="font-semibold text-ivory text-lg">{name}</h4>
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="font-semibold text-ivory text-lg">{name}</h4>
+        {/* No chips behind, all in the pot: nothing left to bet. */}
+        {stack === 0 && <Badge variant="allin">ALL-IN</Badge>}
+      </div>
       <Pairs items={items} />
     </section>
   );

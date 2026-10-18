@@ -85,7 +85,7 @@ function Rank({ rank }: { rank: number }) {
   return (
     <span
       className={cn(
-        'inline-flex size-8 items-center justify-center font-bold font-display text-lg tabular-nums',
+        'inline-flex size-9 items-center justify-center font-bold font-display text-xl tabular-nums',
         medal === undefined
           ? 'text-mist'
           : cn('rounded-full text-navy-950', medal),

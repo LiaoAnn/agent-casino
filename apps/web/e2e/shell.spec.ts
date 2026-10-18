@@ -43,6 +43,7 @@ for (const path of [
       return {
         cinzel: loaded('Cinzel'),
         inter: loaded('Inter'),
+        body: getComputedStyle(document.body).fontFamily,
         title: getComputedStyle(document.querySelector('header a') as Element)
           .fontFamily,
       };
@@ -50,6 +51,7 @@ for (const path of [
     expect(fonts.cinzel).toBe(true);
     expect(fonts.inter).toBe(true);
     expect(fonts.title).toMatch(/^"?Cinzel"?,/);
+    expect(fonts.body).toMatch(/^"?Inter"?,/);
     expect([...origins]).toEqual([new URL(page.url()).origin]);
   });
 }

@@ -20,7 +20,14 @@ const PALETTE =
   'slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|mauve|olive|mist|taupe';
 
 const HEX = /#[0-9a-fA-F]{3,8}\b/g;
-const COLOR_FUNCTION = /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/g;
+const COLOR_FUNCTION = /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/g;
+// `text-[white]`, `[color:red]`: a CSS colour keyword in an arbitrary value.
+const NAMED =
+  'black|white|red|green|blue|yellow|orange|purple|pink|gray|grey|silver|gold|navy|maroon|teal|aqua|cyan|magenta|fuchsia|lime|olive|brown|crimson|ivory|tomato|coral|salmon|violet|indigo|khaki|beige|tan';
+const NAMED_ARBITRARY = new RegExp(`\\[(?:[a-z-]+:)?(?:${NAMED})\\]`, 'g');
+// `style={{ color: 'red' }}`: colours belong in classes, from the tokens.
+const STYLE_COLOR =
+  /\b(?:color|background(?:Color)?|border(?:[A-Z][a-z]+)?Color|fill|stroke|outlineColor)\s*:\s*['"`](?!var\()/g;
 // `bg-zinc-400`, `text-red-500/80`, `border-white`: a Tailwind colour name,
 // with a shade or as black/white.
 const PALETTE_CLASS = new RegExp(
@@ -32,6 +39,8 @@ function hardcodedColors(source: string): string[] {
   const found = [
     ...[...source.matchAll(HEX)].map(m => m[0]),
     ...[...source.matchAll(COLOR_FUNCTION)].map(m => m[0]),
+    ...[...source.matchAll(NAMED_ARBITRARY)].map(m => m[0]),
+    ...[...source.matchAll(STYLE_COLOR)].map(m => m[0]),
     ...[...source.matchAll(PALETTE_CLASS)]
       .filter(m => !tokens.has(m[1] as string))
       .map(m => m[0]),
@@ -64,12 +73,20 @@ describe('hardcodedColors', () => {
     ]);
   });
 
+  it('finds colour keywords, color() and inline style colours', () => {
+    expect(
+      hardcodedColors(
+        `<p style={{ color: 'red' }} className="text-[white] bg-[color(display-p3_1_0_0)] [border-color:navy]">`,
+      ),
+    ).toEqual(['color(', '[white]', '[border-color:navy]', "color: '"]);
+  });
+
   it('accepts design tokens and non-colour utilities', () => {
     expect(tokens).toContain('navy-800');
     expect(tokens).toContain('red-400');
     expect(
       hardcodedColors(
-        `<p className="bg-navy-800 text-red-400 text-mist border-gold-600/40 text-sm border-2 ring-ring z-10 grid-cols-2 gap-x-6 text-suit-heart">`,
+        `<p className="bg-navy-800 text-red-400 text-mist border-gold-600/40 text-sm border-2 ring-ring z-10 grid-cols-2 gap-x-6 text-suit-heart" style={{ animationDelay: '80ms', color: 'var(--ivory)' }}>`,
       ),
     ).toEqual([]);
   });

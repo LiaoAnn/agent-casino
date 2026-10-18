@@ -10,14 +10,16 @@ const SUIT_COLOR = {
 } as const;
 
 const SIZE = {
-  sm: 'h-12 w-9 text-xs after:text-base',
-  md: 'h-16 w-12 text-sm after:text-2xl',
+  sm: 'h-12 w-9 text-xs',
+  md: 'h-16 w-12 text-sm',
 } as const;
+
+const PIP = { sm: 'text-base', md: 'text-2xl' } as const;
 
 type Size = keyof typeof SIZE;
 
 // One face-up card in four colours. Its text is just `A♠`, in the corner;
-// the big suit in the middle is drawn by CSS. `dealIndex` deals it in with
+// the big suit in the middle is drawn by CSS and hidden from screen readers. `dealIndex` deals it in with
 // a short move and flip, 80 ms after the card before it.
 function PlayingCard({
   card,
@@ -31,7 +33,6 @@ function PlayingCard({
   const { rank, suit, symbol } = parseCard(card);
   return (
     <span
-      data-symbol={symbol}
       style={
         dealIndex === undefined
           ? undefined
@@ -39,7 +40,6 @@ function PlayingCard({
       }
       className={cn(
         'relative inline-flex shrink-0 flex-col items-start rounded-[6px] bg-card-face px-1 py-0.5 font-bold leading-none card-shadow',
-        'after:absolute after:inset-0 after:flex after:items-center after:justify-center after:pt-2 after:content-[attr(data-symbol)]',
         SIZE[size],
         SUIT_COLOR[suit],
         dealIndex !== undefined &&
@@ -47,6 +47,14 @@ function PlayingCard({
       )}>
       <span>{rank}</span>
       <span>{symbol}</span>
+      <span
+        aria-hidden="true"
+        data-symbol={symbol}
+        className={cn(
+          'absolute inset-0 flex items-center justify-center pt-2 after:content-[attr(data-symbol)]',
+          PIP[size],
+        )}
+      />
     </span>
   );
 }
