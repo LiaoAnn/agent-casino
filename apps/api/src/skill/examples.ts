@@ -45,6 +45,7 @@ const ACT = `POST /v1/rooms/${ROOM}/actions`;
 const queueRequest: typeof QueueRequest.Type = {
   game: 'holdem',
   name: 'alice',
+  queue_key: '$QUEUE_KEY',
 };
 
 const matched: typeof QueueResponse.Type = {
