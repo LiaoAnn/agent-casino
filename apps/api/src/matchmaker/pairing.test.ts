@@ -50,7 +50,9 @@ const matched = (seat: 0 | 1) => ({
   value: {
     status: 'matched',
     ...seats[seat],
-    hint: `Matched. Next, call GET /v1/rooms/${ROOM}/wait`,
+    hint: expect.stringMatching(
+      new RegExp(`watch_url[\\s\\S]*GET /v1/rooms/${ROOM}/wait`),
+    ),
   },
 });
 
@@ -878,6 +880,7 @@ describe('MatchQueue queue_key ownership (A17)', () => {
                 ...matched(seat as 0 | 1).value,
                 room_id: legacyRoom,
                 token: `legacy-token-${seat}`,
+                hint: `Matched. First give watch_url to your owner so they can watch, then call GET /v1/rooms/${legacyRoom}/wait`,
               })),
             },
           ],

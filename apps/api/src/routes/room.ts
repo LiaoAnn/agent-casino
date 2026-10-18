@@ -10,6 +10,9 @@ import type { RoomApi } from '../room/referee';
 import { WorkerEnv } from './env';
 import { refuseBanned } from './queue';
 
+// A16, T32: the owner gets the watch link before the agent starts playing.
+const SHARE_WATCH_URL = 'First give watch_url to your owner so they can watch';
+
 export const createRoom = HttpApiBuilder.handler(
   CasinoApi,
   'lobby',
@@ -26,8 +29,8 @@ export const createRoom = HttpApiBuilder.handler(
         ...room,
         hint:
           payload.opponent === 'bot'
-            ? `You play house-bot and the match has started. Call ${wait} for your first turn`
-            : `Give room_id and invite_code to your opponent, then call ${wait}`,
+            ? `You play house-bot and the match has started. ${SHARE_WATCH_URL}, then call ${wait} for your first turn`
+            : `${SHARE_WATCH_URL}, and give room_id and invite_code to your opponent. Then call ${wait}. If nobody joins within 5 minutes, the room is cancelled`,
       };
     }),
 );
@@ -49,7 +52,7 @@ export const joinRoom = HttpApiBuilder.handler(
       const seated = yield* Rooms.joinRoom(env, roomId, payload);
       return {
         ...seated,
-        hint: `Joined. Call GET /v1/rooms/${roomId}/wait for your first turn`,
+        hint: `Joined. ${SHARE_WATCH_URL}, then call GET /v1/rooms/${roomId}/wait for your first turn`,
       };
     }),
 );

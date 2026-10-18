@@ -26,6 +26,7 @@ import {
 } from '../holdem/match';
 import { dealHand } from '../holdem/shuffle';
 import { viewFor } from '../holdem/view';
+import { matchQueueIn } from '../matchmaker/pairing';
 import { RoomReferee, type RoomStorage } from '../room/referee';
 import {
   signRoomToken,
@@ -54,6 +55,14 @@ const ADMIN_KEY = 'test-admin-key';
 const NEVER_CREATED = 'r_zzzzz99999';
 // Reference HMAC-SHA256 shuffle, hand 1: Kc Ts 8h Tc Ac 9h Js 7d 7h.
 const SEED = '0000000000000000000000000000000000000000000000000000000000003039';
+
+const expectWatchBeforeWait = (hint: string, roomId: string) => {
+  const waitPath = `GET /v1/rooms/${roomId}/wait`;
+  expect.soft(hint).toContain('watch_url');
+  expect.soft(hint.toLowerCase()).toContain('owner');
+  expect.soft(hint).toContain(waitPath);
+  expect.soft(hint.indexOf('watch_url')).toBeLessThan(hint.indexOf(waitPath));
+};
 
 // --- Fakes ------------------------------------------------------------------
 
@@ -332,6 +341,39 @@ describe('banned names cannot create or join rooms (A9)', () => {
 
 // --- POST /v1/rooms ---------------------------------------------------------
 
+describe('POST /v1/queue matched hints (T32)', () => {
+  it('both seats share watch_url with their owner before calling wait', async () => {
+    const { env } = makeEnv();
+    const queue = matchQueueIn(env, { waitMs: 1 });
+    Object.assign(env, {
+      MATCHMAKER: {
+        idFromName: (name: string) => name,
+        get: () => queue,
+      },
+    });
+    const enqueue = (name: string) =>
+      post(env, '/v1/queue', {
+        game: 'holdem',
+        name,
+        queue_key: `${name}-private-queue-key`,
+      });
+    expect(await (await enqueue('alice')).json()).toMatchObject({
+      status: 'waiting',
+    });
+    for (const name of ['bob', 'alice']) {
+      const response = await enqueue(name);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        status: string;
+        hint: string;
+        room_id: string;
+      };
+      expect(body.status).toBe('matched');
+      expectWatchBeforeWait(body.hint, body.room_id);
+    }
+  });
+});
+
 describe('POST /v1/rooms', () => {
   it('answers 200 with room_id, invite_code, seat 0, token and hint', async () => {
     const { env } = makeEnv();
@@ -349,6 +391,20 @@ describe('POST /v1/rooms', () => {
     expect(room.hint).toContain('room_id');
     expect(room.hint).toContain('invite_code');
     expect(room.hint.toLowerCase()).toContain('opponent');
+  });
+
+  it('hint shares watch_url with the owner before wait and explains cancellation after 5 minutes', async () => {
+    const { env } = makeEnv();
+    const room = await createRoom(env);
+    expectWatchBeforeWait(room.hint, room.room_id);
+    expect.soft(room.hint).toContain('5 minutes');
+    expect.soft(room.hint).toContain('cancelled');
+  });
+
+  it('the bot room hint shares watch_url with the owner before wait', async () => {
+    const { env } = makeEnv();
+    const room = await createRoom(env, { opponent: 'bot' });
+    expectWatchBeforeWait(room.hint, room.room_id);
   });
 
   it('two creates give different room_ids', async () => {
@@ -594,6 +650,7 @@ describe('POST /v1/rooms/{room_id}/join', () => {
     expect(joined.room_id).toBe(room.room_id);
     expect(joined.seat).toBe(1);
     expect(joined.hint).toContain(`GET /v1/rooms/${room.room_id}/wait`);
+    expectWatchBeforeWait(joined.hint, room.room_id);
   });
 
   it('the token is a room token for that room, seat 1 and the name', async () => {
