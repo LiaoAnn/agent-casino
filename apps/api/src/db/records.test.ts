@@ -9,7 +9,7 @@ import {
   type MatchState,
   startMatch,
 } from '../holdem/match';
-import { mulberry32 } from '../holdem/shuffle';
+import { dealHand, mulberry32 } from '../holdem/shuffle';
 import { getMatch } from './queries';
 import { type MatchRecordInput, recordMatch } from './records';
 import { startTestD1, type TestD1 } from './test-d1';
@@ -342,7 +342,10 @@ describe('recordMatch: long matches', () => {
     });
     const expected = hands.map(h => ({
       ...h,
-      hole_cards: h.ended_by === 'fold' ? null : h.hole_cards,
+      hole_cards:
+        h.ended_by === 'fold'
+          ? dealHand(match.seed, h.hand_number).holeCards
+          : h.hole_cards,
     }));
 
     const result = await recordMatch(testD1.db, match);
@@ -373,5 +376,15 @@ describe('recordMatch: long matches', () => {
     const match = playedHands(11, 200);
     const result = await recordMatch(testD1.db, match);
     expect(result.rated).toBe(true);
+    const detail = await getMatch(testD1.db, match.match_id);
+    expect(detail).not.toBeNull();
+    expect(match.hands.some(h => h.ended_by === 'fold')).toBe(true);
+    expect(match.hands.some(h => h.ended_by === 'showdown')).toBe(true);
+    expect(detail?.hands).toStrictEqual(
+      (JSON.parse(JSON.stringify(match.hands)) as HandRecord[]).map(hand => ({
+        ...hand,
+        hole_cards: dealHand(match.seed, hand.hand_number).holeCards,
+      })),
+    );
   }, 30_000);
 });

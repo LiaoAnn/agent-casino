@@ -88,23 +88,19 @@ const handPairs = (m: MatchDetail, h: MatchHand): [string, string][] => [
   ...(h.board.length > 0
     ? [['公共牌', h.board.map(card).join(' ')] as [string, string]]
     : []),
-  ...(h.hole_cards === null
-    ? []
-    : [
-        [
-          '底牌',
-          pairText(
-            m,
-            h.hole_cards.map(hole => hole.map(card).join(' ')) as [
-              string,
-              string,
-            ],
-          ),
-        ] as [string, string],
-      ]),
+  [
+    '底牌',
+    pairText(
+      m,
+      h.hole_cards.map(hole => hole.map(card).join(' ')) as [string, string],
+    ),
+  ],
   ['結果', handResult(m, h)],
   ['籌碼', pairText(m, h.stacks)],
 ];
+
+const holeText = (m: MatchDetail, h: MatchHand) =>
+  `${m.players[0]} ${h.hole_cards[0].map(card).join(' ')} · ${m.players[1]} ${h.hole_cards[1].map(card).join(' ')}`;
 
 const STREETS = {
   preflop: '翻牌前',
@@ -192,8 +188,6 @@ test('the fake data covers the cases this page must show', () => {
   );
   expect(empty?.result).toBe('cancelled');
   expect(rated).toBeDefined();
-  expect(fold.h.hole_cards).toBeNull();
-  expect(showdown.h.hole_cards).not.toBeNull();
   expect(split.h.ended_by).toBe('showdown');
   expect(hands.some(({ h }) => h.events.some(e => !e.timeout))).toBe(true);
   // Both signs of an Elo change, so the +/- formatting is exercised.
@@ -209,20 +203,19 @@ test('shows a showdown hand step by step', async ({ page }) => {
   await open(page, m);
   const section = handSection(page, h.hand_number);
   await expectHand(page, m, h);
-  const [hole0, hole1] = h.hole_cards ?? [[], []];
-  await expect(section).toContainText(
-    `${m.players[0]} ${hole0.map(card).join(' ')} · ${m.players[1]} ${hole1.map(card).join(' ')}`,
-  );
+  await expect(section).toContainText(holeText(m, h));
   await expect(section).toContainText(h.board.map(card).join(' '));
   await expect(section).toContainText('（攤牌）');
 });
 
-test('shows a fold hand step by step without hole cards', async ({ page }) => {
+test('shows a fold hand step by step with both hole cards', async ({
+  page,
+}) => {
   const { m, h } = fold;
   await open(page, m);
   const section = handSection(page, h.hand_number);
   await expectHand(page, m, h);
-  await expect(section.locator('dt', { hasText: '底牌' })).toHaveCount(0);
+  await expect(section).toContainText(holeText(m, h));
   await expect(section).toContainText('（對手棄牌）');
   await expect(steps(section, h.hand_number).last()).toContainText('棄牌');
 });
@@ -320,7 +313,7 @@ for (const id of ['r_zzzzzzzzzz', 'nope']) {
   });
 }
 
-// Every hand of every match, in full. Fold hands must never show hole cards.
+// Every hand of every match, in full, both players' hole cards included.
 for (const m of matches) {
   test(`renders match ${m.match_id} in full`, async ({ page }) => {
     const response = await open(page, m);
@@ -335,11 +328,6 @@ for (const m of matches) {
     );
     for (const h of m.hands) {
       await expectHand(page, m, h);
-      if (h.ended_by === 'fold') {
-        await expect(
-          handSection(page, h.hand_number).locator('dt', { hasText: '底牌' }),
-        ).toHaveCount(0);
-      }
     }
   });
 }

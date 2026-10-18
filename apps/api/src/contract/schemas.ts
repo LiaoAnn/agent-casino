@@ -165,8 +165,10 @@ const View = Schema.Struct({
 });
 
 const EndedBy = Schema.Literals(['fold', 'showdown']);
-// Both players' hole cards, only when the hand went to showdown.
-const ShownCards = Schema.NullOr(Schema.Tuple([HoleCards, HoleCards]));
+// Both players' hole cards, by seat.
+const BothHoleCards = Schema.Tuple([HoleCards, HoleCards]);
+// During a match, only when the hand went to showdown.
+const ShownCards = Schema.NullOr(BothHoleCards);
 
 const LastHand = Schema.Struct({
   hand_number: Schema.Int,
@@ -280,7 +282,8 @@ export const MatchHand = Schema.Struct({
   hand_number: Schema.Int,
   button_seat: Seat,
   board: Board,
-  hole_cards: ShownCards,
+  // Every hand: the seed is public once the match is over (A13).
+  hole_cards: BothHoleCards,
   events: Schema.Array(HistoryEntry),
   winner_seat: Schema.NullOr(Seat),
   pot: NonNegativeInt,

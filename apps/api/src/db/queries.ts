@@ -6,6 +6,7 @@ import type {
   MatchHand,
   MatchList,
 } from '../contract/schemas';
+import { dealHand } from '../holdem/shuffle';
 import type { Db } from './client';
 import { bans, matchEvents, matches, matchHands, ratings } from './schema';
 
@@ -124,8 +125,10 @@ export async function getMatch(
       hand_number: hand.handNumber,
       button_seat: hand.buttonSeat,
       board: hand.board,
-      // recordMatch stores none for folded hands (A13).
-      hole_cards: hand.holeCards,
+      // recordMatch stores none for folded hands; the public seed deals them
+      // again (A13).
+      hole_cards:
+        hand.holeCards ?? dealHand(row.seed, hand.handNumber).holeCards,
       events: eventsByHand.get(hand.handNumber) ?? [],
       winner_seat: hand.winnerSeat,
       pot: hand.pot,

@@ -410,7 +410,10 @@ describe('responses', () => {
         hand_number: 1,
         button_seat: 0,
         board: [],
-        hole_cards: null,
+        hole_cards: [
+          ['As', 'Qd'],
+          ['9h', '9d'],
+        ],
         events: [
           { seat: 0, street: 'preflop', type: 'post_blind', amount: 1 },
           { seat: 1, street: 'preflop', type: 'post_blind', amount: 2 },
@@ -429,6 +432,36 @@ describe('responses', () => {
     expect(decodes(MatchDetail, { ...detail, seed: '0'.repeat(64) })).toBe(
       true,
     );
+  });
+
+  it.each(['fold', 'showdown'])(
+    'rejects null hole cards in a public %s hand',
+    ended_by => {
+      expect(
+        decodes(MatchDetail, {
+          ...detail,
+          hands: detail.hands.map(hand => ({
+            ...hand,
+            ended_by,
+            hole_cards: null,
+          })),
+        }),
+      ).toBe(false);
+    },
+  );
+
+  it('still decodes null hole cards in the last folded hand of a playing room', () => {
+    expect(
+      decodes(RoomStatus, {
+        ...yourTurn,
+        last_hand: {
+          ...yourTurn.last_hand,
+          ended_by: 'fold',
+          board: [],
+          hole_cards: null,
+        },
+      }),
+    ).toBe(true);
   });
 
   it.each(BAD_SEEDS)(

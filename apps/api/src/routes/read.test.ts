@@ -14,7 +14,7 @@ import {
   type MatchState,
   startMatch,
 } from '../holdem/match';
-import { mulberry32 } from '../holdem/shuffle';
+import { dealHand, mulberry32 } from '../holdem/shuffle';
 import type { Bindings } from './env';
 
 let testD1: TestD1;
@@ -495,7 +495,7 @@ describe('GET /v1/matches/{match_id}', () => {
     ]);
   });
 
-  it('never shows hole cards of a hand that ended by fold', async () => {
+  it('reconstructs folded hole cards from the seed and preserves stored showdown cards', async () => {
     const folded = hand(2, {
       ended_by: 'fold',
       board: [],
@@ -512,20 +512,28 @@ describe('GET /v1/matches/{match_id}', () => {
     const { hands } = await matchDetail(match.match_id);
     expect(hands.map(h => [h.hand_number, h.ended_by, h.hole_cards])).toEqual([
       [1, 'showdown', hand(1).hole_cards],
-      [2, 'fold', null],
+      [2, 'fold', dealHand(match.seed, 2).holeCards],
       [3, 'showdown', hand(3).hole_cards],
     ]);
-    expect(hands[1]).toStrictEqual({ ...folded, hole_cards: null });
+    expect(hands[1]).toStrictEqual({
+      ...folded,
+      hole_cards: dealHand(match.seed, 2).holeCards,
+    });
   });
 
   it('returns the hands of a match played by the engine', async () => {
-    const match = playedMatch(7, 30);
+    const match = playedMatch(11, 30);
     await recordMatch(testD1.db, match);
     const detail = await matchDetail(match.match_id);
     expect(detail.seed).toBe(match.seed);
     const expected = (
       JSON.parse(JSON.stringify(match.hands)) as HandRecord[]
-    ).map(h => (h.ended_by === 'fold' ? { ...h, hole_cards: null } : h));
+    ).map(h => ({
+      ...h,
+      hole_cards: dealHand(match.seed, h.hand_number).holeCards,
+    }));
+    expect(match.hands.some(h => h.ended_by === 'fold')).toBe(true);
+    expect(match.hands.some(h => h.ended_by === 'showdown')).toBe(true);
     expect(detail.hands).toStrictEqual(expected);
   });
 
