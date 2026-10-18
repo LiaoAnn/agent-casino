@@ -216,6 +216,79 @@ test('playing polls at least three times over about ten seconds', async ({
   expect(requests.length).toBeGreaterThanOrEqual(3);
 });
 
+test('playing stops polling after a poll reports the match has finished', async ({
+  page,
+}) => {
+  await page.goto(path(playing.room_id));
+  await expectWatchInfo(page, playing, '進行中');
+  await page.waitForLoadState('networkidle');
+  let polls = 0;
+  await page.route('**/_serverFn/**', async route => {
+    const request = route.request();
+    expect(request.method()).toBe('POST');
+    const body = request.postData();
+    expect(body).toContain(playing.room_id);
+    if (body === null) throw new Error('poll needs a POST body');
+    polls++;
+    await route.continue({
+      postData: body.replaceAll(playing.room_id, finished.room_id),
+    });
+  });
+  const response = page.waitForResponse(r => serverFn(r.url()));
+  await page.clock.runFor(3_000);
+  await (await response).finished();
+  expect(polls).toBe(1);
+  await expectWatchInfo(page, finished, '已結束');
+  await expect(
+    page.getByRole('region', { name: '結果', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: '目前這一手', exact: true }),
+  ).toHaveCount(0);
+  await expectNoPolling(page);
+  expect(polls).toBe(1);
+});
+
+test('playing retries after a temporary connection failure and clears its status on recovery', async ({
+  page,
+}) => {
+  await page.goto(path(playing.room_id));
+  await expectWatchInfo(page, playing, '進行中');
+  await page.waitForLoadState('networkidle');
+  let polls = 0;
+  await page.route('**/_serverFn/**', async route => {
+    expect(route.request().method()).toBe('POST');
+    polls++;
+    if (polls === 1) {
+      await route.abort();
+    } else {
+      await route.continue();
+    }
+  });
+  const failure = page.waitForEvent('requestfailed', {
+    predicate: request => serverFn(request.url()),
+  });
+  await page.clock.runFor(3_000);
+  await failure;
+  const status = page.getByRole('status').filter({
+    hasText: '暫時連不上，稍後自動重試。',
+  });
+  await expect(status).toHaveText('暫時連不上，稍後自動重試。');
+  await expectWatchInfo(page, playing, '進行中');
+  expect(polls).toBe(1);
+  await page.waitForLoadState('networkidle');
+
+  for (let i = 0; i < 2; i++) {
+    const response = page.waitForResponse(r => serverFn(r.url()));
+    await page.clock.runFor(3_000);
+    await (await response).finished();
+    await expect(status).toHaveCount(0);
+    await expectWatchInfo(page, playing, '進行中');
+    await page.waitForLoadState('networkidle');
+    expect(polls).toBe(i + 2);
+  }
+});
+
 test('finished shows results, all hole cards and notes, stops polling and links to its match', async ({
   page,
 }) => {
