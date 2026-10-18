@@ -120,13 +120,19 @@ jq -r '
 present=$(jq '[range(2) as $s | [.hands[].events[] | select(.seat == $s and .type != "post_blind")]
   | length > 0 and (last | .timeout | not)] | all' <<<"$detail")
 
-# And each agent got the server's own match_over answer: its log holds that
-# response, which names this run's opponent, so it can't come from skill.md or
-# from the agent's own words.
+# And each agent got the server's own match_over answer: the output of one of
+# its commands (not its own messages) holds a match_over that names this run's
+# opponent, so it can't come from skill.md either.
 # got_match_over <log> <opponent>
 got_match_over() {
-  local q='\\*"'
-  grep -qE "${q}status${q}: ?${q}match_over${q}, ?${q}room_status${q}: ?${q}finished${q}, ?${q}opponent_name${q}: ?${q}$2${q}" "$1"
+  jq -e -n -R --arg opp "$2" '
+    [ inputs | fromjson? | objects | (select(.type == "user") | .message.content[]? | select(.type == "tool_result")
+             | .content | if type == "array" then map(.text? // "") | join("\n") else . end),
+            (select(.type == "item.completed" and .item.type == "command_execution")
+             | .item.aggregated_output) ]
+    | map(strings | select(test("\"status\"\\s*:\\s*\"match_over\"")
+        and test("\"opponent_name\"\\s*:\\s*\"" + $opp + "\"")))
+    | length > 0' "$1" >/dev/null
 }
 seen_claude=no seen_codex=no
 got_match_over "$OUT/$claude_name.jsonl" "$codex_name" && seen_claude=yes
