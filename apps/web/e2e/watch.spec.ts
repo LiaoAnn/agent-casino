@@ -112,6 +112,14 @@ const expectTimeline = async (page: Page, w: WatchResponse) => {
 if (playing.deadline === null || playing.view === null)
   throw new Error('playing fixture needs a view and deadline');
 const clockTime = new Date(Date.parse(playing.deadline) - 20_000);
+const localTime = (time: Date) =>
+  new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Taipei',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(time);
 test.beforeEach(async ({ page }) => {
   await page.clock.install({ time: clockTime });
   await page.clock.pauseAt(clockTime);
@@ -121,6 +129,7 @@ const expectWatchInfo = async (
   page: Page,
   w: WatchResponse,
   status: string,
+  updatedAt = clockTime,
 ) => {
   await expect(page.getByRole('heading', { level: 2 })).toHaveText(
     `${w.players[0]} vs ${w.players[1] ?? '（等待對手）'}`,
@@ -132,6 +141,7 @@ const expectWatchInfo = async (
       '設定',
       `${w.settings.hands} 手 · 每步 ${w.settings.turn_seconds} 秒 · 起始籌碼 ${w.settings.starting_stack}`,
     ],
+    ['最後更新', localTime(updatedAt)],
   ]);
 };
 const serverFn = (url: string) =>
@@ -155,30 +165,44 @@ test('playing shows the current hand, countdown, timeline and private notes', as
   const v = w.view;
   if (v === null) throw new Error('no playing view');
   await page.goto(path(w.room_id));
-  await expectWatchInfo(page, w, '進行中');
   const current = page.getByRole('region', { name: '目前這一手', exact: true });
   await expect(current.getByRole('heading', { level: 3 })).toHaveText(
     `目前這一手：第 ${w.hand_number} 手`,
   );
-  const seatValues = (mine: number, opponent: number): [number, number] =>
-    w.seat === 0 ? [mine, opponent] : [opponent, mine];
-  await expectPairs(current.locator('dl'), [
+  // Only the hand summary's dl: each seat now has a separate dl below it.
+  await expectPairs(current.locator('dl').first(), [
     ['街', streets[v.street]],
     ['莊家', w.players[v.button_seat] as string],
     ['公共牌', v.board.length === 0 ? '尚未發出' : cards(v.board)],
     ['底池', String(v.pot)],
-    ['底牌', cards(v.my_cards)],
-    [
-      '本街下注',
-      pair(w, seatValues(v.my_bet_this_street, v.opponent_bet_this_street)),
-    ],
-    ['籌碼', pair(w, seatValues(v.my_stack, v.opponent_stack))],
-    [
-      '輪到',
-      w.to_act_seat === null ? '—' : (w.players[w.to_act_seat] as string),
-    ],
-    ['剩餘時間', '20 秒'],
   ]);
+  const seats = current.getByRole('region', { name: /^座位：/ });
+  await expect(seats).toHaveCount(2);
+  for (const seat of [0, 1] as const) {
+    const name = w.players[seat] as string;
+    const panel = current.getByRole('region', {
+      name: `座位：${name}`,
+      exact: true,
+    });
+    await expect(seats.nth(seat)).toHaveAccessibleName(`座位：${name}`);
+    await expect(panel.getByRole('heading', { level: 4 })).toHaveText(name);
+    const mine = seat === w.seat;
+    await expectPairs(panel.locator('dl'), [
+      ['籌碼', String(mine ? v.my_stack : v.opponent_stack)],
+      [
+        '本街下注',
+        String(mine ? v.my_bet_this_street : v.opponent_bet_this_street),
+      ],
+      ['底牌', mine ? cards(v.my_cards) : '未亮牌'],
+      ...(seat === w.to_act_seat
+        ? ([['行動', '輪到']] as [string, string][])
+        : []),
+      ...(mine && w.deadline !== null
+        ? ([['剩餘時間', '20 秒']] as [string, string][])
+        : []),
+    ]);
+  }
+  await expectWatchInfo(page, w, '進行中');
   await expectTimeline(page, w);
   const title = `第 ${w.hand_number} 手（進行中）`;
   const section = page.getByRole('region', { name: title, exact: true });
@@ -188,7 +212,11 @@ test('playing shows the current hand, countdown, timeline and private notes', as
   await expect(
     page.getByRole('region', { name: '結果', exact: true }),
   ).toHaveCount(0);
-  const remaining = current.locator('dd').last();
+  const remaining = current
+    .getByRole('region', { name: `座位：${w.players[w.seat]}`, exact: true })
+    .locator('dt')
+    .filter({ hasText: /^剩餘時間$/ })
+    .locator('xpath=following-sibling::dd[1]');
   await page.clock.runFor(5_000);
   await expect(remaining).toHaveText('15 秒');
   await page.clock.runFor(16_000);
@@ -223,6 +251,10 @@ test('playing stops polling after a poll reports the match has finished', async 
   await expectWatchInfo(page, playing, '進行中');
   await page.waitForLoadState('networkidle');
   let polls = 0;
+  let releaseResponse = () => {};
+  const responseGate = new Promise<void>(resolve => {
+    releaseResponse = resolve;
+  });
   await page.route('**/_serverFn/**', async route => {
     const request = route.request();
     expect(request.method()).toBe('POST');
@@ -230,15 +262,18 @@ test('playing stops polling after a poll reports the match has finished', async 
     expect(body).toContain(playing.room_id);
     if (body === null) throw new Error('poll needs a POST body');
     polls++;
+    await responseGate;
     await route.continue({
       postData: body.replaceAll(playing.room_id, finished.room_id),
     });
   });
   const response = page.waitForResponse(r => serverFn(r.url()));
   await page.clock.runFor(3_000);
+  releaseResponse();
   await (await response).finished();
   expect(polls).toBe(1);
-  await expectWatchInfo(page, finished, '已結束');
+  const updatedAt = new Date(clockTime.getTime() + 3_000);
+  await expectWatchInfo(page, finished, '已結束', updatedAt);
   await expect(
     page.getByRole('region', { name: '結果', exact: true }),
   ).toBeVisible();
@@ -246,6 +281,7 @@ test('playing stops polling after a poll reports the match has finished', async 
     page.getByRole('region', { name: '目前這一手', exact: true }),
   ).toHaveCount(0);
   await expectNoPolling(page);
+  await expectWatchInfo(page, finished, '已結束', updatedAt);
   expect(polls).toBe(1);
 });
 
@@ -256,12 +292,14 @@ test('playing retries after a temporary connection failure and clears its status
   await expectWatchInfo(page, playing, '進行中');
   await page.waitForLoadState('networkidle');
   let polls = 0;
+  let responseGate = Promise.resolve();
   await page.route('**/_serverFn/**', async route => {
     expect(route.request().method()).toBe('POST');
     polls++;
     if (polls === 1) {
       await route.abort();
     } else {
+      await responseGate;
       await route.continue();
     }
   });
@@ -279,11 +317,21 @@ test('playing retries after a temporary connection failure and clears its status
   await page.waitForLoadState('networkidle');
 
   for (let i = 0; i < 2; i++) {
+    let releaseResponse = () => {};
+    responseGate = new Promise<void>(resolve => {
+      releaseResponse = resolve;
+    });
     const response = page.waitForResponse(r => serverFn(r.url()));
     await page.clock.runFor(3_000);
+    releaseResponse();
     await (await response).finished();
     await expect(status).toHaveCount(0);
-    await expectWatchInfo(page, playing, '進行中');
+    await expectWatchInfo(
+      page,
+      playing,
+      '進行中',
+      new Date(clockTime.getTime() + (i + 2) * 3_000),
+    );
     await page.waitForLoadState('networkidle');
     expect(polls).toBe(i + 2);
   }
@@ -327,6 +375,7 @@ test('finished shows results, all hole cards and notes, stops polling and links 
     0,
   );
   await expectNoPolling(page);
+  await expectWatchInfo(page, w, '已結束');
   const link = page.getByRole('link', { name: '完整對局紀錄', exact: true });
   await expect(link).toHaveAttribute('href', `/matches/${w.match_id}`);
   const match = data.match(w.match_id);
@@ -373,6 +422,7 @@ for (const scenario of errors) {
     await expect(
       page.getByRole('link', { name: '回首頁', exact: true }),
     ).toHaveAttribute('href', '/');
+    await expect(page.locator('dl[aria-label="觀戰資訊"]')).toHaveCount(0);
     await expectNoPolling(page);
   });
 }

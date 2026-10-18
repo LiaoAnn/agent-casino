@@ -120,7 +120,7 @@ export const getMatch = createServerFn({ method: 'GET' })
 // The test token of the fake watch links (VITE_FAKE_DATA=1).
 const FAKE_WATCH_TOKEN = 'fake-watch-token';
 
-export type WatchResult =
+export type WatchData =
   | WatchResponse
   | { error: 'invalid_token' | 'room_not_found' };
 
@@ -128,7 +128,7 @@ export type WatchResult =
 // the token stays out of the server function's URL.
 export const getWatch = createServerFn({ method: 'POST' })
   .validator((input: { roomId: string; token: string }) => input)
-  .handler(async ({ data: { roomId, token } }): Promise<WatchResult> => {
+  .handler(async ({ data: { roomId, token } }): Promise<WatchData> => {
     // No token, no request: it could only be refused.
     if (token === '') return { error: 'invalid_token' };
     if (useFake) {

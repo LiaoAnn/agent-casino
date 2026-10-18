@@ -3,10 +3,12 @@ import type {
   WatchResponse,
 } from '@agent-casino/api/src/contract/schemas';
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { type ReactNode, useEffect, useState } from 'react';
-import { bySeat, Hand, Pairs, Steps } from '@/components/hand';
-import { getWatch, type WatchResult } from '@/data';
-import { formatCards, formatSigned, resultLabel } from '@/lib/format';
+import { useEffect, useState } from 'react';
+import { CurrentHand } from '@/components/current-hand';
+import { Hand, Pairs, Steps } from '@/components/hand';
+import { WatchResult } from '@/components/watch-result';
+import { getWatch, type WatchData } from '@/data';
+import { formatClock } from '@/lib/format';
 
 // Each poll is a Durable Object request (docs/cost.md 6b): every 2.5 s while
 // the match is on, never once it is over.
@@ -40,7 +42,7 @@ function WatchPage() {
   );
 }
 
-const over = (watch: WatchResult) =>
+const over = (watch: WatchData) =>
   'error' in watch ||
   watch.room_status === 'finished' ||
   watch.room_status === 'void';
@@ -52,10 +54,14 @@ function Watch({
 }: {
   roomId: string;
   token: string;
-  initial: WatchResult;
+  initial: WatchData;
 }) {
   const [watch, setWatch] = useState(initial);
   const [offline, setOffline] = useState(false);
+  // When the data on screen was fetched; set in the browser only, so the
+  // server's render and the page's hydration agree.
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  useEffect(() => setUpdatedAt(Date.now()), []);
   // Bumped after every poll, so the next one is scheduled only once the
   // previous one has answered.
   const [polls, setPolls] = useState(0);
@@ -69,6 +75,7 @@ function Watch({
         const next = await getWatch({ data: { roomId, token } });
         if (cancelled) return;
         setWatch(next);
+        setUpdatedAt(Date.now());
         setOffline(false);
       } catch {
         if (!cancelled) setOffline(true);
@@ -83,7 +90,7 @@ function Watch({
   }, [done, polls, roomId, token]);
 
   if ('error' in watch) return <WatchError code={watch.error} />;
-  return <WatchView watch={watch} offline={offline} />;
+  return <WatchView watch={watch} offline={offline} updatedAt={updatedAt} />;
 }
 
 const STATUS = {
@@ -93,19 +100,14 @@ const STATUS = {
   void: '作廢',
 } as const;
 
-const STREETS = {
-  preflop: '翻牌前',
-  flop: '翻牌',
-  turn: '轉牌',
-  river: '河牌',
-} as const;
-
 function WatchView({
   watch,
   offline,
+  updatedAt,
 }: {
   watch: WatchResponse;
   offline: boolean;
+  updatedAt: number | null;
 }) {
   const { settings, view, hand_number } = watch;
   const players: MatchDetail['players'] = [
@@ -119,6 +121,7 @@ function WatchView({
       '設定',
       `${settings.hands} 手 · 每步 ${settings.turn_seconds} 秒 · 起始籌碼 ${settings.starting_stack}`,
     ],
+    ['最後更新', updatedAt === null ? '' : formatClock(updatedAt)],
   ];
   const inPlay =
     watch.room_status === 'playing' && view !== null && hand_number !== null;
@@ -146,7 +149,7 @@ function WatchView({
           players={players}
         />
       )}
-      {'result' in watch && <Result watch={watch} players={players} />}
+      {'result' in watch && <WatchResult watch={watch} players={players} />}
       <section className="space-y-3">
         <h3 className="font-semibold">時間線</h3>
         {watch.hands.length === 0 && !inPlay && (
@@ -169,93 +172,6 @@ function WatchView({
         </section>
       )}
     </div>
-  );
-}
-
-function CurrentHand({
-  watch,
-  view,
-  handNumber,
-  players,
-}: {
-  watch: WatchResponse;
-  view: NonNullable<WatchResponse['view']>;
-  handNumber: number;
-  players: MatchDetail['players'];
-}) {
-  // The view is the watched seat's: "my" and "opponent" in seat order.
-  const seats = (mine: number, theirs: number): [number, number] =>
-    watch.seat === 0 ? [mine, theirs] : [theirs, mine];
-  const items: [string, ReactNode][] = [
-    ['街', STREETS[view.street]],
-    ['莊家', players[view.button_seat]],
-    ['公共牌', view.board.length > 0 ? formatCards(view.board) : '尚未發出'],
-    ['底池', String(view.pot)],
-    ['底牌', formatCards(view.my_cards)],
-    [
-      '本街下注',
-      bySeat(
-        players,
-        seats(view.my_bet_this_street, view.opponent_bet_this_street),
-      ),
-    ],
-    ['籌碼', bySeat(players, seats(view.my_stack, view.opponent_stack))],
-    ['輪到', watch.to_act_seat === null ? '—' : players[watch.to_act_seat]],
-  ];
-  if (watch.deadline !== null) {
-    items.push(['剩餘時間', <Remaining key="t" deadline={watch.deadline} />]);
-  }
-  return (
-    <section aria-label="目前這一手" className="space-y-3">
-      <h3 className="font-semibold">目前這一手：第 {handNumber} 手</h3>
-      <Pairs items={items} />
-    </section>
-  );
-}
-
-// Seconds left until `deadline`, counted in the browser only: the server's
-// clock would not match the page's by the time it hydrates.
-function Remaining({ deadline }: { deadline: string }) {
-  const [now, setNow] = useState<number | null>(null);
-  useEffect(() => {
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  if (now === null) return null;
-  return `${Math.max(0, Math.ceil((Date.parse(deadline) - now) / 1000))} 秒`;
-}
-
-function Result({
-  watch,
-  players,
-}: {
-  watch: Extract<WatchResponse, { result: unknown }>;
-  players: MatchDetail['players'];
-}) {
-  const items: [string, string][] = [
-    ['結果', resultLabel({ players, result: watch.result })],
-    ['最終籌碼', bySeat(players, watch.final_stacks)],
-  ];
-  if (watch.ratings !== null) {
-    items.push([
-      'Elo',
-      watch.ratings
-        .map(r => `${r.name} ${r.rating} (${formatSigned(r.change)})`)
-        .join(' · '),
-    ]);
-  }
-  return (
-    <section aria-label="結果" className="space-y-3">
-      <h3 className="font-semibold">結果</h3>
-      <Pairs items={items} />
-      <Link
-        to="/matches/$matchId"
-        params={{ matchId: watch.match_id }}
-        className="inline-block text-sm underline underline-offset-4">
-        完整對局紀錄
-      </Link>
-    </section>
   );
 }
 

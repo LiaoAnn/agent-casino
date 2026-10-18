@@ -3,8 +3,8 @@ import type {
   WatchResponse,
 } from '@agent-casino/api/src/contract/schemas';
 import type { ReactNode } from 'react';
-import { Badge } from '@/components/ui/badge';
-import { eventLabel, formatCards } from '@/lib/format';
+import { ActionLogEntry } from '@/components/action-log-entry';
+import { formatCards } from '@/lib/format';
 
 // `alice 41 · Bob 39`
 export const bySeat = (
@@ -35,7 +35,7 @@ export function Pairs({
 
 // A finished hand of a match record, or of a watch link: there the
 // opponent's cards may be unknown and the watched seat's steps carry notes.
-type HandRecord = WatchResponse['hands'][number];
+export type HandRecord = WatchResponse['hands'][number];
 
 const holeCards = (cards: readonly string[] | null) =>
   cards === null ? '未亮牌' : formatCards(cards);
@@ -92,20 +92,7 @@ export function Steps({
       {events.map((event, i) => (
         // Events have no id; their order is fixed.
         // biome-ignore lint/suspicious/noArrayIndexKey: see above
-        <li key={i}>
-          {eventLabel(event, players)}
-          {event.timeout && (
-            <>
-              {' '}
-              <Badge>超時代打</Badge>
-            </>
-          )}
-          {event.note !== undefined && (
-            <blockquote className="mt-1 mb-2 whitespace-pre-wrap border-l-2 pl-3 text-muted-foreground">
-              {event.note}
-            </blockquote>
-          )}
-        </li>
+        <ActionLogEntry key={i} event={event} players={players} />
       ))}
     </ol>
   );
