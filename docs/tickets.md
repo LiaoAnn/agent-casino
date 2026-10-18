@@ -30,10 +30,10 @@
 | 4 | T08、T09、T10 | 3 |
 | 5 | T11、T12 | 2 |
 | 6 | T13 | 1 |
-| 7 | T14 ★ | 1 + 3 個試玩 agent |
+| 7 | T14 ★（arena）、T21 | 2 + 試玩 agent |
 | 8 | T15 ★🔒 | 1 + 3 個試玩 agent |
 
-最長的一條路是 T01 → T02 → T04 → T09 → T11 → T13 → T14 → T15，共 8 步；其他 ticket 都在旁邊同時進行。
+最長的一條路是 T01 → T02 → T04 → T09 → T11 → T13 → T14 → T15，共 8 步（T21 跟 T14 同時進行）；其他 ticket 都在旁邊同時進行。
 
 ## Epic E0 地基
 
@@ -134,9 +134,16 @@
 - 只改：`apps/api/src/matchmaker/`、`apps/api/src/routes/queue.ts`，以及 `apps/api/src/routes/room.ts` 的 `createRoom`、`joinRoom` 加停權檢查（只加這個）。
 - 驗證：`pnpm test:api`。同時排 2 人進同一房；只有 1 人時 30 秒回 `waiting`；同時結束兩場，Elo 不會互相覆蓋；停權的名字排隊、開房、進房都回 `name_banned`。
 
-### T13 串起來與測試環境（約 800 行）· Blocked by：T05、T08、T10、T11、T12
-- 房間結束 → 重播比對 → `recordMatch()`；內建機器人 `house-bot` 進房（casino-api skill A1）；網頁改接真 API；`scripts/e2e.sh`；skill.md 範例實打檢查；部署到 Cloudflare 測試環境。
-- 驗證：`pnpm e2e --target=staging` 與 `pnpm test:skill` 全過。
+### T13 串起來（約 700 行）· Blocked by：T05、T08、T10、T11、T12
+- 房間結束 → 重播比對 → 經 Matchmaker 寫入（`recordMatch()`）；內建機器人 `house-bot` 進房（casino-api skill A1）；網頁改接真 API；`scripts/e2e.sh`（`pnpm e2e --target=local` 打本機 dev server，`--target=staging|prod` 留介面給 T21）；skill.md 範例實打檢查。
+- 不碰 Cloudflare（2026-10-18 Ann 決定把部署拆成 T21）。
+- 驗證：`pnpm e2e --target=local` 與 `pnpm test:skill` 全過。
+- 功能驗證：在 worktree 網址用 curl 跟 `house-bot` 打完一場 10 手、兩個 curl 玩家排隊打完一場，網頁（`web-<wt>`）上看得到這兩場和排行榜變動。
+
+### T21 部署測試環境（約 200 行）· Blocked by：T13
+- Cloudflare 測試環境：wrangler 登入（device flow，scope 要加 D1）、建 D1 並套 migration、設 `TOKEN_SECRET`、`ADMIN_KEY`、部署 api 和 web 兩個 Worker（web 用 service binding 接 api）、`ALLOW_TEST_ROOMS=true`。
+- 每一個會呼叫 Cloudflare 的指令都要先問 Ann。
+- 驗證：`pnpm e2e --target=staging` 全過。
 - 功能驗證：在測試環境用 curl 跟 `house-bot` 打完一場 10 手，網頁上看得到這場。
 
 ## Epic E3 Skill 與接入
@@ -190,7 +197,7 @@
 
 **完成定義**：正式環境可用，三個 agent 試玩通過。
 
-### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14
+### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21
 - 正式環境部署（人同意後）、管理員金鑰、試玩發現的小修正。
 - 驗證：`pnpm e2e --target=prod`。
 - 功能驗證：三個 agent 在正式環境各打一場 10 手局。
