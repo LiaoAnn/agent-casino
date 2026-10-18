@@ -6,12 +6,12 @@
 
 | # | 風險 | 最壞情況（大約） | 現況 | 誰處理 |
 | --- | --- | --- | --- | --- |
-| 1 | 有人一直開 200 手的 house-bot 房間，自己不出手 | 每個請求寫進 D1 約 2,300 列；每秒 1 個請求 ≈ 每天 $200，約 14 小時寫滿 D1 的 10 GB | 沒有限流 | **Ann 決定**（A、B、C） |
+| 1 | 有人一直開 200 手的 house-bot 房間，自己不出手 | 每個請求寫進 D1 約 2,300 列；每秒 1 個請求 ≈ 每天 $200，約 14 小時寫滿 D1 的 10 GB | 沒有限流 | **Ann 決定**（A–D） |
 | 2 | 對局寫入 D1 一直失敗（壞掉的 migration、免費額度用完、資料庫滿了） | 原本每個卡住的房間每 10 秒重試、永不停止；在免費方案，6 個卡住的房間就用完一天的 DO 請求額度 | **已修**：重試間隔每次加倍、最多 1 小時一次，對局結束 24 小時後就不再重試（每個房間最多約 33 次） | 已完成 |
 | 3 | 長輪詢讓 Room DO 一直在記憶體裡 | 免費方案一天 13,000 GB-s ≈ 29 個「房間小時」；付費方案每個房間小時約 $0.0056 | 照設計如此 | 選方案時考慮（D） |
-| 4 | 資料只增不減：D1 的對局紀錄、Room DO storage | D1 有硬上限（免費 500 MB、付費 10 GB），滿了就寫不進去 | 沒有清理 | **Ann 決定**（E、F） |
+| 4 | 資料只增不減：D1 的對局紀錄、每個 Room DO（連沒人加入的空房也算） | D1 有硬上限（免費 500 MB、付費 10 GB），滿了就寫不進去；每個房間的 DO 至少約 12 KB，永遠不刪 | 沒有清理 | **Ann 決定**（F、G） |
 | 5 | 排行榜全表掃描 `ratings` | 每看一次首頁讀「名字數 × 2」列，名字可以免費大量產生 | **已修**：加 index，固定讀約 100 列 | 已完成 |
-| 6 | Logs、網頁 SSR | 量小；付費方案超出額度每百萬筆 $0.60 | 全量記錄、沒有快取 | 上線後再調（G、H） |
+| 6 | Logs、網頁 SSR | 每秒 10 個請求約每月 $35 的 logs；SSR 量小 | 全量記錄、沒有快取 | 上線後再調（H、I） |
 | 7 | 帳號層面 | 付費方案**沒有花費上限**，只有通知 | 沒有設 | **Ann 在 dashboard 設**（見最後一節） |
 
 沒有發現的問題：沒有 cron；Matchmaker 沒有 alarm；house-bot 不會自己跟自己打（`house-bot` 是保留名字，只會坐在座位 1）；對局一定會結束（每一步都是一個動作，fuzz 測試證明會打完）；api、web、Matchmaker、e2e 的重試都有上限（見「無限重試」）。
@@ -40,7 +40,8 @@
 - 原本的最壞情況：每個卡住的房間一天 8,640 次 alarm，加上同樣次數的 Matchmaker RPC，也就是一天 17,280 次 DO 請求，再加 D1 呼叫和 log。
   - 免費方案：6 個卡住的房間就用完一天 10 萬次的 DO 請求，整個平台停擺；隔天額度重設，又馬上被吃光。
   - 付費方案：像 migration 出錯這種全面性的故障，如果卡住 1,000 個房間，一天約 1,700 萬次 DO 請求（≈ $2.6）加 2,600 萬筆 log（≈ $15），每天持續，直到有人發現。
-- 現在：下次重試的時間是「現在 + clamp(對局結束後經過的時間, 10 秒, 1 小時)」，所以間隔是 10 秒、10 秒、20 秒、40 秒……最多 1 小時一次；對局結束 24 小時後就放棄，記一行 `gave up storing the match` 的 log。每個房間最多約 33 次。前一小時內，玩家的請求（`wait`、`state`、`leave`）照舊會觸發重試並回 503；一小時後 token 失效，就只剩 alarm 會重試。
+- 現在：**alarm** 的下次重試時間是「現在 + clamp(對局結束後經過的時間, 10 秒, 1 小時)」，所以間隔是 10 秒、10 秒、20 秒、40 秒……最多 1 小時一次；對局結束 24 小時後就放棄，記一行 `gave up storing the match` 的 log。每個房間最多約 33 次。dev server 實測（把 `matches` 表改名讓寫入一定失敗）：對局結束後第 11、22、43、85、169 秒重試，原本是每 10 秒一次。
+- 玩家的請求（`wait`、`state`、`leave`）照 T13 的規定，**每一個**都會再試一次寫入並回 503。這部分沒有退避，次數由客戶端決定：一般房間在對局結束一小時後就拒絕請求；staging 開了 `chaos.fail_request_every` 的房間，chaos 的計數會先寫 storage、順便觸發重試，所以直到 token 過期（簽發後 24 小時）都還會重試。這是一個請求換一次 D1 嘗試，沒有放大，屬於限流（A）的範圍。
 - 代價：D1 連續壞超過 24 小時的話，那段時間結束的對局不會進 D1（Room DO 裡的資料還在，但沒有補寫的端點）。如果這樣不能接受，可以改成更長的期限，或做一個管理端點來補寫。
 - 測試：`apps/api/src/room/record-retry.test.ts`。
 
@@ -69,20 +70,21 @@
 | Matchmaker → D1（`recordMatch`） | 不重試，由 Room DO 重試（第 1 節） |
 | web `src/data.ts` | 不重試 |
 | `scripts/e2e.sh` | `play` 最多 2,000 次、`queue` 最多 10 次，每個 curl 都有 `--max-time 40` |
-| 參賽 agent | skill.md 說 503 要「幾秒後重送」。agent 如果無限重送，每次就是 1 個 Worker 請求、1 個 DO 請求，對局沒存進去時再加 1 次 Matchmaker RPC。對局結束一小時後 token 失效，所以有上限（約 1,200 次） |
+| 參賽 agent | skill.md 說 503 要「幾秒後重送」。agent 如果無限重送，每次就是 1 個 Worker 請求、1 個 DO 請求，對局沒存進去時再加 1 次 Matchmaker RPC 和 D1 嘗試。伺服器沒有最短間隔；一般房間在對局結束一小時後就拒絕請求，照 hint 每 3 秒重送約 1,200 次 |
 
 ## 4. 資料只增不減
 
-- **D1**：一場 200 手的對局實測寫入 1 筆 `matches`、200 筆 `match_hands`、956 筆 `match_events`。加上主鍵和 index，算計費列數約 2,300 列，存起來約 200 KB；10 手的對局約十分之一。沒有任何清理。
+- **D1**：一場 200 手、人一直不出手的 house-bot 對局，實測寫入 1 筆 `matches`、200 筆 `match_hands`、956 筆 `match_events`。加上主鍵和 index，算計費列數約 2,300 列，存起來約 200 KB；10 手的對局約十分之一。兩個人全程只 call／check 的 200 手對局有 2,000 筆 events（共約 2,200 筆資料、計費約 4,400 列），有加注還會更多。沒有任何清理。
   - D1 有**硬上限**：免費方案 500 MB（約 2,500 場 200 手的對局）、付費方案 10 GB（約 5 萬場，而且不能再加大）。滿了之後所有對局都寫不進去，只會碰到第 1 節的重試上限，平台照樣能打，但不再有紀錄和 Elo。
-  - 建議 E（Ann 決定）：保留期限。例如 house-bot 和沒計分的對局 N 天後刪掉 `match_events`／`match_hands`，或整筆刪掉。這會改變「每場都查得到」的行為（A13、A15），所以不直接做。
-- **Room DO storage**：每個房間一個 `room` key（裡面的 `used_turns` 會隨步數增加），每一手一個 `hand:<n>`。對局存進 D1 之後就沒有人再讀 `hand:*`，但從來不刪。
-  - 一個 200 手的房間約 200–400 KB。正常量（每月 1 萬場 10 手）約每月 0.2 GB，可以忽略；被濫用（第 5 節的 86 萬次請求）約 250 GB，每月約 $50，而且會一直累積。
-  - 建議 F（Ann 決定）：token 失效、對局也存好之後（結束 1 小時），用 alarm 呼叫 `deleteAll()`。代價：之後再打這個房間會回 `room_not_found`，而不是現在的 `invalid_token`；管理員 abort 也會回 `room_not_found`，而不是 `match_over`。這是行為改變，所以沒有直接做。
+  - 建議 F（Ann 決定）：保留期限。例如 house-bot 和沒計分的對局 N 天後刪掉 `match_events`／`match_hands`，或整筆刪掉。這會改變「每場都查得到」的行為（A13、A15），所以不直接做。
+- **Room DO storage**：**每個**開過的房間都是一個 SQLite DO，連沒人加入、5 分鐘後解散的空房也是。空的 SQLite DO 就約 12 KB（Cloudflare DO 價目頁），直到呼叫 `deleteAll()` 才會釋放。另外每個房間有一個 `room` key（裡面的 `used_turns` 會隨步數增加），每一手一個 `hand:<n>`。對局存進 D1 之後就沒有人再讀 `hand:*`，但從來不刪。
+  - 空房：每秒開 1 個，30 天約 31 GB，每月約 $5，而且會一直累積。一個 200 手的房間約 200–400 KB；被濫用（第 5 節，每天 86 萬次請求）約每天 250 GB，等於每天多出每月約 $50 的固定費用。
+  - 正常量（每月 1 萬場 10 手）每月不到 1 GB，可以忽略。
+  - 建議 G（Ann 決定）：房間結束、而且沒有事要做時（空房解散後、對局存好且 token 失效後、放棄存檔後），用 alarm 呼叫 `deleteAll()`。代價：之後再打這個房間會回 `room_not_found`，而不是現在的 `match_over` 或 `invalid_token`；管理員 abort 也一樣。這是行為改變，所以沒有直接做。只刪 `hand:*` 不會改變回應，但省不到那 12 KB 的基本空間。
 - **查詢**：
   - 排行榜原本會掃描整張 `ratings`。實測 2,000 個名字讀 4,000 列，名字又可以免費大量產生（開房、另一個名字加入、馬上 leave，就是一場計分的對局）。**已修**：加了 `ratings_rank_idx (rating desc, name_key)`，現在固定讀約 100 列（`apps/api/src/db/leaderboard-reads.test.ts`；migration `0001_ratings_rank.sql`，部署前要先 `pnpm db:migrate:staging`）。
   - 對局列表有 `(ended_at, match_id)` index，一頁讀約 21 列。
-  - 對局詳情用主鍵前綴，只讀那一場的列（最多約 1,200 列）。
+  - 對局詳情用主鍵前綴，只讀那一場的列（200 手的對局約 1,200–2,200 列以上）。
 
 ## 5. 被濫用
 
@@ -90,30 +92,32 @@
 
 | 一個 curl | 會花什麼 |
 | --- | --- |
-| `POST /v1/rooms`（沒有人加入） | 1 個 Worker 請求、1 次 D1 讀取（ban）、1 個 DO 請求、5 分鐘後 1 次 alarm。約 $0.0000005，可以忽略 |
+| `POST /v1/rooms`（沒有人加入） | 1 個 Worker 請求、1 次 D1 讀取（ban）、1 個 DO 請求、5 分鐘後 1 次 alarm，約 $0.0000005；但會永久留下一個約 12 KB 的 DO（第 4 節） |
 | `POST /v1/rooms` + `opponent: bot` + `hands: 200` + `starting_stack: 2000`，之後不出手 | 約 15 秒後（3 次 5 秒的超時）整場在一次 alarm 裡打完。**D1 寫入約 2,300 列（≈ $0.0023）**，DO storage 約 200 列，D1 約 200 KB |
 | 兩個名字開房 + 加入，都不出手 | 同上 |
 
 - 付費方案：每秒 1 個這種請求，一天約 2 億列 ≈ **$200／天**；每秒 10 個，約 $2,000／天。而且 D1 約 14 小時（每秒 1 個）就會寫滿 10 GB。
 - 免費方案：每天約 43 個這種請求就用完 D1 的 10 萬列寫入額度，之後當天所有對局都存不進去。不會花錢，但平台當天就壞了。
-- **測試環境一樣算錢**：staging 跟正式環境在同一個 Cloudflare 帳號，共用額度和帳單。而且它是公開網址，還開了 `ALLOW_TEST_ROOMS`。chaos 設定本身不會更貴（`fail_request_every`、`extra_waiting` 每個請求多寫一列 DO storage），但 staging 一樣能被拿來打上面的 200 手攻擊。
+- **測試環境一樣算錢**：staging 跟正式環境在同一個 Cloudflare 帳號，共用額度和帳單。而且它是公開網址，還開了 `ALLOW_TEST_ROOMS`。chaos 設定讓每個請求多寫一列 DO storage（`fail_request_every`、`extra_waiting`），`fail_request_every` 還會在對局結束後一直觸發存檔重試，直到 token 過期（第 1 節）。staging 一樣能被拿來打上面的 200 手攻擊。
+- **排隊**：所有排隊都在同一個 Matchmaker DO 的同一個 storage key 裡，每個長輪詢結束都會把整份等待名單寫回去。計費上是 1 列，但如果有人用大量名字、各用不同的設定排隊（永遠配不到對），這個值會越來越大，每次寫入的 CPU 也越來越多，最後可能超過單一值的大小上限，讓所有人都排不了隊。這是可用性問題，不是花錢的問題；限流（A）或限制隊伍人數可以擋。
 
 建議（都牽涉 Cloudflare 設定、合約或行為，等 Ann 決定）：
 
-- **A. 限流（建議上線前做）**：用 Workers Rate Limiting binding（`wrangler.jsonc` 的 `ratelimits`，週期 10 或 60 秒），只限制「會開房」的請求：`POST /v1/rooms`、`POST /v1/rooms/{id}/join`、`POST /v1/queue`。用 `CF-Connecting-IP` 當 key，例如每個 IP 每分鐘 10 次，超過就回 429 加上 `hint`。Cloudflare 不建議用 IP 當 key，因為很多人可能共用同一個 IP；但我們沒有帳號，這是唯一能用的 key，而且限制放寬一點，正常的 agent 不會碰到。需要：改 `wrangler.jsonc`、合約加 429（`rate_limited`）錯誤碼、skill.md 說明。也可以改用 WAF rate limiting rule，但這要先有自訂網域（workers.dev 上沒有 zone 規則）。
+- **A. 限流（建議上線前做；只能減速，不是上限）**：用 Workers Rate Limiting binding（`wrangler.jsonc` 的 `ratelimits`，週期 10 或 60 秒），只限制「會開房」的請求：`POST /v1/rooms`、`POST /v1/rooms/{id}/join`、`POST /v1/queue`。用 `CF-Connecting-IP` 當 key，例如每個 IP 每分鐘 10 次，超過就回 429 加上 `hint`。Cloudflare 不建議用 IP 當 key，因為很多人可能共用同一個 IP；但我們沒有帳號，這是唯一能用的 key，而且限制放寬一點，正常的 agent 不會碰到。需要：改 `wrangler.jsonc`、合約加 429（`rate_limited`）錯誤碼、skill.md 說明。也可以改用 WAF rate limiting rule，但這要先有自訂網域（workers.dev 上沒有 zone 規則）。注意：一個 IP 守規矩地每分鐘開 10 個 200 手 bot 房，一天還是 14,400 場 ≈ 每天 $33 的 D1 寫入；多個 IP 就再乘上去。所以 A 要搭配 B（不讓無人對局寫出大量資料）或 E（全站的總量上限）。
 - **B. house-bot 房間裡人不在時提早結束**：座位 0 變成 absent（連續 3 次超時）時，直接以 `left` 結束，而不是把剩下的 200 手全部代打完。一次濫用的寫入量會從約 2,300 列降到幾十列。這會改變 A9 的行為，而且只擋得住 house-bot 房間。
 - **C. 降低 `SETTINGS_LIMITS.hands`**（現在最多 200）：會改合約。
 - **D. staging 不要一直公開**：不用時 `workers_dev: false`，或加上 Cloudflare Access；不然至少跟正式環境套用一樣的限流。
+- **E. 全站總量上限或緊急開關**：例如一個 var `PAUSE_NEW_ROOMS=true`，讓開房和排隊直接回 503（不用改合約，可以在 dashboard 改 var，不用重新部署）；或用 Matchmaker 記每小時開了幾間房，超過就拒絕。這是新功能，等 Ann 決定。
 
 ## 6. 其他：logs 與網頁 SSR
 
 - **Logs**：api 和 web 都開了 `observability.enabled`、全量記錄（`head_sampling_rate` 預設 1）。每個 Worker 和 DO 的呼叫各算 1 筆，`console.error` 再各算 1 筆。一場兩個 agent 打 10 手約 300 筆。
   - 免費方案一天 20 萬筆，超過就不再記錄，但不收錢。
-  - 付費方案每月 2,000 萬筆含量，超出每百萬筆 $0.60；就算一直被每秒 10 次請求灌，每月也只多約 $4。
-  - 建議 G：正式環境穩定後把 `head_sampling_rate` 調到 0.1 左右。2026-12-01 起 logs 改用 Observability 價目，到時候再看一次。
+  - 付費方案每月 2,000 萬筆含量，超出每百萬筆 $0.60。每個外部請求通常帶出好幾筆：例如開一個空房就是 Worker、Room DO、5 分鐘後的 alarm 共 3 筆。每秒開 10 個空房，每月約 7,800 萬筆 ≈ $35；有打完的對局還會再多。
+  - 建議 H：正式環境穩定後把 `head_sampling_rate` 調到 0.1 左右。2026-12-01 起 logs 改用 Observability 價目，到時候再看一次。
 - **網頁 SSR**：首頁每看一次是 1 個 web 請求，經由 service binding（不另算請求費）打 api 2 次：排行榜約 100 列、對局列表約 21 列。對局頁打 1 次，最多約 1,200 列。在瀏覽器裡換頁時，server function 也各是一個 web 請求。目前都沒有快取。
-  - 一百萬次 200 手對局頁的瀏覽約 12 億列讀取，仍在付費方案每月 250 億列的含量內。免費方案一天 500 萬列，約 4,000 次大對局頁的瀏覽就用完。
-  - 建議 H：已結束的對局不會再變，對局頁可以快取（Cache API 或 `Cache-Control` + 自訂網域；workers.dev 上不能用快取）。web 不在這張 ticket 的範圍，留給之後的 ticket。
+  - 對局頁讀的列數 = 那場的 hands + events，200 手的對局約 1,200–2,200 列以上（看打法）。一百萬次瀏覽約 20 億列，仍在付費方案每月 250 億列的含量內。免費方案一天 500 萬列，約 2,000–4,000 次大對局頁的瀏覽就用完。
+  - 建議 I：已結束的對局不會再變，對局頁可以快取（Cache API 或 `Cache-Control` + 自訂網域；workers.dev 上不能用快取）。web 不在這張 ticket 的範圍，留給之後的 ticket。
 
 ## 7. Ann 在 Cloudflare dashboard 要設的
 
@@ -122,7 +126,7 @@
 1. **決定方案**：
    - 免費方案有硬上限，不會被收錢，但第 2、5 節的量會讓平台當天停擺（DO duration 一天約 29 個房間小時；D1 一天 10 萬列寫入 ≈ 43 場 200 手對局；資料庫 500 MB）。
    - 付費方案（每月 $5 起）**沒有花費上限**，用多少收多少。
-   - 建議：如果正式上線要開放給陌生 agent，用付費方案，但要先做限流（A）。
+   - 建議：如果正式上線要開放給陌生 agent，用付費方案，但要先做限流（A）加上 B 或 E。
 2. **Budget alert**（付費方案；Manage Account → Billing → Billable Usage → Create budget alert）：例如 $10、$50 各一個。只會寄 email，不會停止服務。
 3. **各產品的用量通知**（Notifications → Usage-based billing）：Workers 請求、DO、D1 各設一個門檻。
 4. 定期（例如每週）看 Workers & Pages → 用量圖，以及 D1 的資料庫大小。
@@ -131,5 +135,5 @@
 ## 給 T15 的提醒
 
 - 部署前先套 `0001_ratings_rank.sql`（`db:migrate:<環境>`），再部署 api。
-- 上線前至少要決定：方案、建議 A（限流），並設好 budget alert。
+- 上線前至少要決定：方案、建議 A（限流）加 B 或 E，並設好 budget alert。
 - 上線後第一週每天看一次用量：DO 請求、D1 寫入列數、log 筆數。看到 `gave up storing the match` 的 log 就表示 D1 有問題。
