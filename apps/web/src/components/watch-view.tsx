@@ -5,6 +5,7 @@ import type {
 import { CurrentHand } from '@/components/current-hand';
 import { EmptyState } from '@/components/empty-state';
 import { Hand, Steps } from '@/components/hand';
+import { HandTable } from '@/components/match-hand';
 import { Notice } from '@/components/notice';
 import { type Pair, Pairs } from '@/components/pairs';
 import { PageTitle, Panel } from '@/components/panel';
@@ -19,8 +20,9 @@ const STATUS = {
 } as const;
 
 // The owner's view of one seat: who and how on top; below, the table while a
-// hand is in play or the result once over, and beside it (below it on a
-// narrow screen) the timeline of every hand so far. `ratings` is the
+// hand is in play, or once over the result and the table as the last hand
+// ended; beside it (below it on a narrow screen) the timeline of every hand
+// so far. `ratings` is the
 // leaderboard's Elo by lower-case name, for the players on it.
 export function WatchView({
   watch,
@@ -47,6 +49,11 @@ export function WatchView({
     ],
     ['最後更新', updatedAt === null ? '' : formatClock(updatedAt)],
   ];
+  const seatRatings = [
+    ratings.get(players[0].toLowerCase()),
+    ratings.get(players[1].toLowerCase()),
+  ] as const;
+  const last = watch.hands.at(-1);
   const inPlay =
     watch.room_status === 'playing' && view !== null && hand_number !== null;
   return (
@@ -74,13 +81,24 @@ export function WatchView({
               view={view}
               handNumber={hand_number}
               players={players}
-              ratings={[
-                ratings.get(players[0].toLowerCase()),
-                ratings.get(players[1].toLowerCase()),
-              ]}
+              ratings={seatRatings}
             />
           )}
           {'result' in watch && <WatchResult watch={watch} players={players} />}
+          {/* Once over, the table stays, as the last hand ended. */}
+          {!inPlay && last !== undefined && (
+            <section aria-label="最後一手" className="space-y-4">
+              <h3 className="font-semibold text-ivory text-lg">
+                最後一手：第 {last.hand_number} 手
+              </h3>
+              <HandTable
+                hand={last}
+                players={players}
+                ratings={seatRatings}
+                bottom={watch.seat}
+              />
+            </section>
+          )}
         </div>
         <section className="min-w-0 space-y-3 lg:sticky lg:top-4">
           <h3 className="font-semibold text-gold-200 text-lg">時間線</h3>

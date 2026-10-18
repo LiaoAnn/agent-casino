@@ -137,7 +137,7 @@ export function PlayingCard({
       )}>
       <span
         data-corner
-        className="absolute top-[0.25em] left-[0.2em] flex flex-col items-center tracking-tighter">
+        className="absolute top-[0.25em] left-[0.15em] flex flex-col items-center tracking-tighter">
         <span>{rank}</span>
         <span>{symbol}</span>
       </span>
@@ -146,7 +146,7 @@ export function PlayingCard({
         data-corner
         data-rank={rank}
         data-symbol={symbol}
-        className="absolute right-[0.2em] bottom-[0.25em] flex rotate-180 flex-col items-center tracking-tighter before:content-[attr(data-rank)] after:content-[attr(data-symbol)]"
+        className="absolute right-[0.15em] bottom-[0.25em] flex rotate-180 flex-col items-center tracking-tighter before:content-[attr(data-rank)] after:content-[attr(data-symbol)]"
       />
       {size === 'md' &&
         (face ? (
@@ -159,7 +159,7 @@ export function PlayingCard({
         ) : (
           <span
             aria-hidden="true"
-            className="absolute inset-x-[33%] inset-y-[17%]">
+            className="absolute inset-x-[35%] inset-y-[17%]">
             {PIPS[rank]?.map(([x, y]) => (
               <span
                 key={`${x},${y}`}

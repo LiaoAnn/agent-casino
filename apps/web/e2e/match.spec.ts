@@ -374,44 +374,64 @@ for (const m of matches) {
 
 // A card's middle is drawn by CSS: every pip and face frame shows its suit,
 // and none of them touches a corner index, on a desktop and on a phone.
+// Every match is opened, so every rank is seen.
 for (const width of [1280, 390]) {
   test.describe(`at ${width}px`, () => {
     test.use({ viewport: { width, height: 900 } });
     test('card pips are drawn and clear of the corners', async ({ page }) => {
-      await open(page, showdown.m);
-      await expect(handSections(page).first()).toBeVisible();
-      const report = await page.evaluate(() => {
-        const overlap = (a: DOMRect, b: DOMRect) =>
-          a.left < b.right &&
-          b.left < a.right &&
-          a.top < b.bottom &&
-          b.top < a.bottom;
-        const problems: string[] = [];
-        let middles = 0;
-        for (const card of document.querySelectorAll('[role="img"]')) {
-          const corners = [...card.querySelectorAll('[data-corner]')].map(c =>
-            c.getBoundingClientRect(),
-          );
-          for (const middle of card.querySelectorAll(
-            '[data-pip], [data-face]',
-          )) {
-            middles++;
-            const content = getComputedStyle(middle, '::after').content;
-            if (content === 'none' || content === '""' || content === 'normal')
-              problems.push(
-                `${card.getAttribute('aria-label')}: no suit drawn`,
-              );
-            const box = middle.getBoundingClientRect();
-            if (box.width === 0 || box.height === 0)
-              problems.push(`${card.getAttribute('aria-label')}: empty middle`);
-            if (corners.some(c => overlap(c, box)))
-              problems.push(`${card.getAttribute('aria-label')}: on a corner`);
+      test.setTimeout(120_000);
+      const ranks = new Set<string>();
+      const problems: string[] = [];
+      for (const m of matches.filter(m => m.hands.length > 0)) {
+        await open(page, m);
+        await expect(handSections(page).first()).toBeVisible();
+        const report = await page.evaluate(() => {
+          const overlap = (a: DOMRect, b: DOMRect) =>
+            a.left < b.right &&
+            b.left < a.right &&
+            a.top < b.bottom &&
+            b.top < a.bottom;
+          const problems: string[] = [];
+          const ranks: string[] = [];
+          for (const card of document.querySelectorAll('[role="img"]')) {
+            const name = card.getAttribute('aria-label') ?? '';
+            const middles = card.querySelectorAll('[data-pip], [data-face]');
+            if (middles.length > 0) ranks.push(name.split(' ')[1] ?? '');
+            const corners = [...card.querySelectorAll('[data-corner]')].map(c =>
+              c.getBoundingClientRect(),
+            );
+            for (const middle of middles) {
+              const content = getComputedStyle(middle, '::after').content;
+              if (['none', '""', 'normal'].includes(content))
+                problems.push(`${name}: no suit drawn`);
+              const box = middle.getBoundingClientRect();
+              if (box.width === 0 || box.height === 0)
+                problems.push(`${name}: empty middle`);
+              if (corners.some(c => overlap(c, box)))
+                problems.push(`${name}: on a corner`);
+            }
           }
-        }
-        return { middles, problems };
-      });
-      expect(report.middles).toBeGreaterThan(0);
-      expect(report.problems).toEqual([]);
+          return { problems, ranks };
+        });
+        for (const r of report.ranks) ranks.add(r);
+        problems.push(...report.problems);
+      }
+      expect([...ranks].sort()).toEqual([
+        '10',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        '8',
+        '9',
+        'A',
+        'J',
+        'K',
+        'Q',
+      ]);
+      expect([...new Set(problems)]).toEqual([]);
     });
   });
 }

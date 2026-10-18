@@ -398,6 +398,22 @@ test('finished shows results, all hole cards and notes, stops polling and links 
   await expect(page.getByRole('region', { name: /（進行中）$/ })).toHaveCount(
     0,
   );
+  // The table stays, as the last hand ended, the watched seat at the bottom.
+  const last = w.hands.at(-1);
+  if (last === undefined) throw new Error('finished fixture has no hands');
+  const lastTable = page.getByRole('region', { name: '最後一手', exact: true });
+  await expect(lastTable.getByRole('heading', { level: 3 })).toHaveText(
+    `最後一手：第 ${last.hand_number} 手`,
+  );
+  await expect(lastTable.getByRole('region', { name: /^座位：/ })).toHaveText([
+    new RegExp(`^${w.players[w.seat === 0 ? 1 : 0]}`),
+    new RegExp(`^${w.players[w.seat]}`),
+  ]);
+  await expect(lastTable.locator('dl[aria-label="牌桌"] dd').last()).toHaveText(
+    last.winner_seat === null
+      ? `平分底池 ${last.pot}`
+      : `${w.players[last.winner_seat]} 贏得 ${last.pot}（${last.ended_by === 'showdown' ? '攤牌' : '對手棄牌'}）`,
+  );
   await expectNoPolling(page);
   await expectWatchInfo(page, w, '已結束');
   const link = page.getByRole('link', { name: '完整對局紀錄', exact: true });
