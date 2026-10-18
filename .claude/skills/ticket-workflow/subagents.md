@@ -16,6 +16,7 @@
 
 - `pnpm check` 要跟這個 export 在同一個容器 shell 裡跑，不然 knip 會吃光記憶體：`T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "export KNIP_DISABLE_RAW_TRANSFER=1; pnpm check"`。
 - `tmux kill-session` 不會停掉容器裡的程序（pnpm、wrangler、workerd、vite）。用完另外跑 `T3CODE_WORKTREE_PATH=<path> wt-exec pkill -f <名稱>`（不要寫在 `bash -lc` 裡，會殺到自己），再用 `docker stats --no-stream` 確認容器回到十幾 MB。
+- 主 agent 用 `task_cancel` 取消你時，你在容器裡開的 `pnpm check`（vitest、workerd）會變成孤兒繼續跑。主 agent 取消後要自己 `wt-exec pkill -f vitest`、`pkill -f workerd`。
 
 ## 不要鑽牛角尖
 
