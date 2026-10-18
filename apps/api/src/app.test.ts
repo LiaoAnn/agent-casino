@@ -23,6 +23,8 @@ const OTHER_ROOM = 'r_zzzzz99999';
 const emptyStorage: RoomStorage = {
   get: async () => undefined,
   put: async () => {},
+  setAlarm: async () => {},
+  deleteAlarm: async () => {},
 };
 
 const FAKE_ROOM = {
@@ -293,6 +295,8 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     'read.matches',
     'read.match',
     'admin.banName',
+    // T11: real handler; room/situations.test.ts covers it.
+    'admin.abortRoom',
   ]);
 
   it.each(ENDPOINTS.filter(e => !IMPLEMENTED.has(e.name)))(
@@ -509,14 +513,19 @@ describe('AdminAuth answers 401 invalid_token', () => {
     expect(body.retryable).toBe(false);
   });
 
+  // Past auth, the fake env has no room: abort answers room_not_found (T11);
+  // ban is still the stub.
   it.each(ADMIN_ENDPOINTS)(
     '$method $path with the right key reaches the handler',
     async endpoint => {
       const response = await call({ ...endpoint, authorization: admin() });
-      // Ban is real since T07 (503 unavailable with DB: {}); abort is a stub.
+      // Ban is real since T07 (503 unavailable with DB: {}); abort since
+      // T11 (404 room_not_found: the fake namespace has no room).
       if (endpoint.path.endsWith('/ban')) {
         expect(response.status).not.toBe(401);
         expect((await readError(response)).code).not.toBe('invalid_token');
+      } else if (endpoint.path.endsWith('/abort')) {
+        await expectError(response, 'room_not_found');
       } else {
         await expectStub(response);
       }
@@ -560,15 +569,18 @@ describe('secrets come only from env', () => {
   it('two envs with different ADMIN_KEYs work independently', async () => {
     const envA = makeEnv({ ADMIN_KEY: 'key-a' });
     const envB = makeEnv({ ADMIN_KEY: 'key-b' });
-    await expectStub(
+    // Past auth, the fake env has no room: abort answers room_not_found.
+    await expectError(
       await call({ ...ABORT, authorization: admin('key-a') }, envA),
+      'room_not_found',
     );
     await expectError(
       await call({ ...ABORT, authorization: admin('key-a') }, envB),
       'invalid_token',
     );
-    await expectStub(
+    await expectError(
       await call({ ...ABORT, authorization: admin('key-b') }, envB),
+      'room_not_found',
     );
     await expectError(
       await call({ ...ABORT, authorization: admin('key-b') }, envA),

@@ -57,6 +57,10 @@ class MemoryStorage implements RoomStorage {
     this.puts.push({ key, bytes });
     this.#data.set(key, structuredClone(value));
   }
+
+  async setAlarm(_scheduledTime: number): Promise<void> {}
+
+  async deleteAlarm(): Promise<void> {}
 }
 
 interface Clock {
@@ -1881,32 +1885,69 @@ describe('a room that ended over an hour ago answers invalid_token (A8)', () => 
     expect(again).toEqual({ ...accepted, duplicate: true });
   });
 
+  // Waits `stepMs` (under turn_seconds 300), then the seat to act checks, or
+  // calls when it cannot check. Answers the status after the action.
+  const actAfter = async (
+    t: TestEnv,
+    roomId: string,
+    tokens: readonly [string, string],
+    stepMs: number,
+  ): Promise<Status> => {
+    t.clock.ms += stepMs;
+    const first = (await state(t.env, roomId, tokens[0])).status;
+    const seat: Seat = first.status === 'your_turn' ? 0 : 1;
+    const turn = await yourTurn(t.env, roomId, tokens[seat]);
+    const check = turn.legal_actions.some(a => a.type === 'check');
+    await act(t.env, roomId, tokens[seat], {
+      turn_id: turn.turn_id,
+      type: check ? 'check' : 'call',
+    });
+    return (await state(t.env, roomId, tokens[0])).status;
+  };
+
   it('the hour counts from the end, not from the start of the room', async () => {
     const t = makeEnv({ allowTestRooms: true });
-    const { roomId, tokens } = await seededRoom(t, { hands: 1 });
-    // Playing for 50 minutes before the match ends.
-    t.clock.ms += 50 * 60 * 1000;
-    const turn = await yourTurn(t.env, roomId, tokens[0]);
-    await act(t.env, roomId, tokens[0], {
-      turn_id: turn.turn_id,
-      type: 'fold',
+    // spec requires timeouts: a room left idle for 50 minutes would be played
+    // out, so the players act every 200 s (under turn_seconds 300) until the
+    // 2-hand match ends normally, at least 50 minutes after it started.
+    const { roomId, tokens } = await seededRoom(t, {
+      hands: 2,
+      turn_seconds: 300,
     });
+    const startedAt = t.clock.ms;
+    let status = (await state(t.env, roomId, tokens[0])).status;
+    for (let i = 0; status.status !== 'match_over'; i++) {
+      if (i > 100) throw new Error('the match did not end');
+      status = await actAfter(t, roomId, tokens, 200_000);
+    }
+    expect(t.clock.ms - startedAt).toBeGreaterThanOrEqual(50 * 60 * 1000);
     t.clock.ms += 30 * 60 * 1000;
-    const { status } = await state(t.env, roomId, tokens[1]);
-    expect(status.status).toBe('match_over');
+    for (const token of tokens) {
+      const { status } = await state(t.env, roomId, token);
+      expect(status.status).toBe('match_over');
+    }
   });
 
   it('a room still playing never expires by this rule (2 hours later state and actions still work)', async () => {
     const t = makeEnv({ allowTestRooms: true });
-    const { roomId, tokens } = await seededRoom(t);
-    t.clock.ms += 2 * HOUR_MS;
-    const turn = await yourTurn(t.env, roomId, tokens[0]);
-    await act(t.env, roomId, tokens[0], {
-      turn_id: turn.turn_id,
-      type: 'call',
+    // spec requires timeouts: a room left idle for 2 hours would be played
+    // out, so the players act every 240 s (under turn_seconds 300) for 2 hours.
+    const { roomId, tokens } = await seededRoom(t, {
+      hands: 200,
+      turn_seconds: 300,
     });
-    const bob = await yourTurn(t.env, roomId, tokens[1]);
-    expect(bob.to_act_seat).toBe(1);
+    const startedAt = t.clock.ms;
+    while (t.clock.ms - startedAt < 2 * HOUR_MS) {
+      const status = await actAfter(t, roomId, tokens, 240_000);
+      expect(status.room_status).toBe('playing');
+    }
+    const status = await actAfter(t, roomId, tokens, 240_000);
+    expect(status.room_status).toBe('playing');
+    // No step of the 2 hours was played by the server.
+    for (const token of tokens) {
+      const { status } = await state(t.env, roomId, token);
+      expect(status.view?.history.some(event => event.timeout)).toBe(false);
+    }
   });
 });
 

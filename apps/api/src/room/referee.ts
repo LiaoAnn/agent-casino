@@ -24,6 +24,9 @@ import { viewFor } from '../holdem/view';
 export interface RoomStorage {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
+  // The DO's one alarm, which calls RoomReferee.alarm().
+  setAlarm(scheduledTime: number): Promise<void>;
+  deleteAlarm(): Promise<void>;
 }
 
 export interface RefereeOptions {
@@ -78,12 +81,31 @@ interface RoomData {
   // server acted for them.
   used_turns: Record<string, { seat: Seat; timeout?: true }>;
   ended: Ended | null;
+  // Epoch ms.
+  created_at: number;
+  // Timeouts in a row per seat; a seat's own action resets its count.
+  timeouts: [number, number];
+  // A9: three timeouts in a row; the server plays every later turn of the
+  // seat at once, for the rest of the match.
+  absent: [boolean, boolean];
+  // What test.chaos (A11) has done so far.
+  chaos_done: ChaosDone;
+}
+
+interface ChaosDone {
+  // reject_first_action: the seats whose first action was refused.
+  rejected: [boolean, boolean];
+  // extra_waiting: `waiting` answered instead of the turn `turn_id`.
+  fake_waits: { turn_id: string; count: number } | null;
+  // fail_request_every: each seat's requests to the room so far.
+  requests: [number, number];
 }
 
 // `complete`: all hands played or someone ran out of chips. `left`: `loser`
-// left while playing. `cancelled`: seat 0 left before anyone joined.
+// left while playing. `cancelled`: seat 0 left, or nobody joined in time.
+// `void`: aborted by an admin, or the platform failed; never rated.
 type Ended = (
-  | { reason: 'complete' | 'cancelled' }
+  | { reason: 'complete' | 'cancelled' | 'void' }
   | { reason: 'left'; loser: Seat }
 ) & {
   final_stacks: [number, number];
@@ -104,11 +126,15 @@ type MatchOverBody = typeof MatchOver.Type;
 // call to its referee).
 export type RoomApi = Pick<
   RoomReferee,
-  'create' | 'join' | 'status' | 'act' | 'leave'
+  'create' | 'join' | 'status' | 'act' | 'leave' | 'abort'
 >;
 
 const KEY = 'room';
 const WAIT_MS = 30_000;
+// 狀況處理: three timeouts in a row and the seat is absent.
+const ABSENT_AFTER_TIMEOUTS = 3;
+// 狀況處理: a room nobody joins in 5 minutes is dissolved.
+const DISSOLVE_AFTER_MS = 5 * 60 * 1000;
 // A8: an hour after the room ended, its tokens stop working.
 const EXPIRES_AFTER_END_MS = 60 * 60 * 1000;
 const PLAY_AGAIN =
@@ -121,8 +147,6 @@ const fail = <C extends ApiError['code']>(error: ApiError<C>) => ({
 });
 
 const waitPath = (data: RoomData) => `GET /v1/rooms/${data.room_id}/wait`;
-const actionsPath = (data: RoomData) =>
-  `POST /v1/rooms/${data.room_id}/actions`;
 
 const accepted = (data: RoomData): ActionAcceptedBody => ({
   status: 'accepted',
@@ -162,6 +186,14 @@ export class RoomReferee {
       turn_count: 0,
       used_turns: {},
       ended: null,
+      created_at: this.#now(),
+      timeouts: [0, 0],
+      absent: [false, false],
+      chaos_done: {
+        rejected: [false, false],
+        fake_waits: null,
+        requests: [0, 0],
+      },
     });
     return ok(null);
   }
@@ -179,17 +211,18 @@ export class RoomReferee {
       | 'name_invalid'
     >
   > {
-    const data = await this.#load();
-    if (!data) return fail(roomNotFound());
-    if (input.invite_code.toUpperCase() !== data.invite_code) {
+    const loaded = await this.#load();
+    if (!loaded) return fail(roomNotFound());
+    if (input.invite_code.toUpperCase() !== loaded.invite_code) {
       return fail(
         apiError(
           'wrong_invite_code',
-          `That invite code is not the code of room ${data.room_id}`,
+          `That invite code is not the code of room ${loaded.room_id}`,
           'Ask your opponent for the invite_code of this room and resend the join with it',
         ),
       );
     }
+    const data = await this.#settle(loaded);
     if (data.ended) return fail(matchOverError());
     if (data.names[1] !== null) {
       return fail(
@@ -215,7 +248,10 @@ export class RoomReferee {
       startingStack: data.settings.starting_stack,
     });
     await this.#save(
-      this.#nextTurn({ ...data, names: [data.names[0], input.name], match }),
+      this.#nextTurn(
+        { ...data, names: [data.names[0], input.name], match },
+        this.#now(),
+      ),
     );
     return ok({ seat: 1 });
   }
@@ -225,7 +261,11 @@ export class RoomReferee {
   async status(
     seat: Seat,
     options: { wait: boolean },
-  ): Promise<Result<RoomStatus, 'room_not_found' | 'invalid_token'>> {
+  ): Promise<
+    Result<RoomStatus, 'room_not_found' | 'invalid_token' | 'unavailable'>
+  > {
+    const dropped = await this.#dropRequest(seat);
+    if (dropped) return fail(dropped);
     let timedOut = !options.wait;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const windowEnd = new Promise<void>(resolve => {
@@ -240,6 +280,10 @@ export class RoomReferee {
         const opened = await this.#open();
         if (!opened.ok) return opened;
         const status = statusFor(opened.value, seat);
+        if (options.wait && status.status === 'your_turn') {
+          const fake = await this.#fakeWaiting(opened.value, status);
+          if (fake) return ok(fake);
+        }
         if (status.status !== 'waiting' || timedOut) return ok(status);
         const change = this.#nextChange();
         await Promise.race([change.promise, windowEnd]);
@@ -264,8 +308,11 @@ export class RoomReferee {
       | 'invalid_action'
       | 'match_over'
       | 'invalid_token'
+      | 'unavailable'
     >
   > {
+    const dropped = await this.#dropRequest(seat);
+    if (dropped) return fail(dropped);
     const opened = await this.#open();
     if (!opened.ok) return opened;
     const data = opened.value;
@@ -276,22 +323,49 @@ export class RoomReferee {
     const state = statusFor(data, seat);
     if (data.ended) return fail(matchOverError(state));
     const { match, turn } = data;
-    if (!match || turn?.seat !== seat) {
+    // A3: the server already played this turn when it timed out.
+    if (used?.seat === seat) {
       return fail(
         apiError(
-          'not_your_turn',
-          'It is not your turn',
-          `Do not resend. Call ${waitPath(data)} and act when it answers your_turn`,
+          'stale_turn',
+          `Turn ${input.turn_id} timed out, so the server checked or folded for you`,
+          doNotResend(data),
           { state },
         ),
+      );
+    }
+    if (!match || turn?.seat !== seat) {
+      return fail(
+        apiError('not_your_turn', 'It is not your turn', doNotResend(data), {
+          state,
+        }),
       );
     }
     if (input.turn_id !== turn.id) {
       return fail(
         apiError(
           'stale_turn',
-          `That turn_id is not your current turn; the current turn_id is ${turn.id}`,
-          `Pick an action from legal_actions in state and send it with turn_id ${turn.id} to ${actionsPath(data)}`,
+          `That turn_id is not your current turn`,
+          doNotResend(data),
+          { state },
+        ),
+      );
+    }
+    if (
+      data.test?.chaos?.reject_first_action &&
+      !data.chaos_done.rejected[seat]
+    ) {
+      const rejected: [boolean, boolean] = [...data.chaos_done.rejected];
+      rejected[seat] = true;
+      await this.#save({
+        ...data,
+        chaos_done: { ...data.chaos_done, rejected },
+      });
+      return fail(
+        apiError(
+          'invalid_action',
+          'This test room refuses the first action of each player on purpose (chaos reject_first_action)',
+          `Pick a legal action from legal_actions and resubmit it with the same turn_id before the deadline`,
           { state },
         ),
       );
@@ -302,7 +376,7 @@ export class RoomReferee {
         ? { type: 'raise', amount: input.amount }
         : { type: input.type }
     ) as Action;
-    const done = this.#perform(data, match, turn, action);
+    const done = this.#perform(data, match, turn, action, this.#now());
     if (!done.ok) {
       return fail(
         apiError(
@@ -322,37 +396,105 @@ export class RoomReferee {
   async leave(
     seat: Seat,
   ): Promise<
-    Result<MatchOverBody, 'room_not_found' | 'match_over' | 'invalid_token'>
+    Result<
+      MatchOverBody,
+      'room_not_found' | 'match_over' | 'invalid_token' | 'unavailable'
+    >
   > {
+    const dropped = await this.#dropRequest(seat);
+    if (dropped) return fail(dropped);
     const opened = await this.#open();
     if (!opened.ok) return opened;
     const data = opened.value;
     if (data.ended) return fail(matchOverError(statusFor(data, seat)));
-    const { match } = data;
-    const start = data.settings.starting_stack;
-    // The unfinished hand is called off: chips in its pot go back.
     const next = this.#finish(
       data,
-      match
-        ? {
-            reason: 'left',
-            loser: seat,
-            final_stacks: [
-              match.stacks[0] + match.contributed[0],
-              match.stacks[1] + match.contributed[1],
-            ],
-          }
-        : { reason: 'cancelled', final_stacks: [start, start] },
+      this.#now(),
+      data.match
+        ? { reason: 'left', loser: seat, final_stacks: calledOff(data) }
+        : { reason: 'cancelled', final_stacks: calledOff(data) },
     );
     await this.#save(next);
     return ok(matchOver(next, next.ended, seat));
   }
 
+  // A9: an admin calls the match off; it is void and never rated. Unlike the
+  // seats' requests, a room that ended over an hour ago still answers
+  // match_over here.
+  async abort(): Promise<Result<null, 'room_not_found' | 'match_over'>> {
+    const loaded = await this.#load();
+    if (!loaded) return fail(roomNotFound());
+    const data = await this.#settle(loaded);
+    // No seat, so no state to show (A4 attaches it on room endpoints).
+    if (data.ended) {
+      return fail(
+        apiError(
+          'match_over',
+          `The match in room ${data.room_id} already ended, so there is nothing to abort`,
+          'Nothing to do: the room already ended and keeps its result',
+        ),
+      );
+    }
+    await this.#save(
+      this.#finish(data, this.#now(), {
+        reason: 'void',
+        final_stacks: calledOff(data),
+      }),
+    );
+    return ok(null);
+  }
+
+  // A11 fail_request_every: counts the seat's requests and refuses every
+  // Nth one before anything else. This 503 is made on purpose, unlike the one
+  // client.ts answers when the DO can't be reached.
+  async #dropRequest(seat: Seat): Promise<ApiError<'unavailable'> | undefined> {
+    const data = await this.#load();
+    const every = data?.test?.chaos?.fail_request_every;
+    if (!data || every === undefined) return undefined;
+    const requests: [number, number] = [...data.chaos_done.requests];
+    requests[seat] += 1;
+    await this.#save({ ...data, chaos_done: { ...data.chaos_done, requests } });
+    if (requests[seat] % every !== 0) return undefined;
+    return apiError(
+      'unavailable',
+      'This test room dropped the request on purpose (chaos fail_request_every)',
+      'Resend the same request',
+    );
+  }
+
+  // A11 extra_waiting: the first N waits of each turn answer `waiting` at
+  // once instead of `your_turn`; the deadline does not move.
+  async #fakeWaiting(
+    data: RoomData,
+    turn: RoomStatus & { status: 'your_turn' },
+  ): Promise<RoomStatus | undefined> {
+    const extra = data.test?.chaos?.extra_waiting ?? 0;
+    const done = data.chaos_done.fake_waits;
+    const count = done?.turn_id === turn.turn_id ? done.count : 0;
+    if (count >= extra) return undefined;
+    await this.#save({
+      ...data,
+      chaos_done: {
+        ...data.chaos_done,
+        fake_waits: { turn_id: turn.turn_id, count: count + 1 },
+      },
+    });
+    return {
+      status: 'waiting',
+      room_status: turn.room_status,
+      to_act_seat: turn.to_act_seat,
+      hand_number: turn.hand_number,
+      view: turn.view,
+      hint: `Not your turn yet. Call ${waitPath(data)} again`,
+    };
+  }
+
   // Loads the room, refusing a missing one or one that ended over an hour
   // ago (A8).
   async #open(): Promise<Result<RoomData, 'room_not_found' | 'invalid_token'>> {
-    const data = await this.#load();
-    if (!data) return fail(roomNotFound());
+    const loaded = await this.#load();
+    if (!loaded) return fail(roomNotFound());
+    const data = await this.#settle(loaded);
     if (data.ended && this.#now() - data.ended.at > EXPIRES_AFTER_END_MS) {
       return fail(
         apiError(
@@ -366,12 +508,13 @@ export class RoomReferee {
   }
 
   // The one way an action is applied: by a player now, by the server on a
-  // timeout later (T11).
+  // timeout. `at` (epoch ms) is when it happened, which starts the next turn.
   #perform(
     data: RoomData,
     match: MatchState,
     turn: Turn,
     action: Action,
+    at: number,
     options: { timeout?: true } = {},
   ):
     | { ok: true; data: RoomData; finishedHands: HandRecord[] }
@@ -379,6 +522,10 @@ export class RoomReferee {
     const result = applyAction(match, turn.seat, action, options);
     if (!result.ok) return result;
     const { finishedHands } = result;
+    const timeouts: [number, number] = [...data.timeouts];
+    timeouts[turn.seat] = options.timeout ? timeouts[turn.seat] + 1 : 0;
+    const absent: [boolean, boolean] = [...data.absent];
+    absent[turn.seat] ||= timeouts[turn.seat] >= ABSENT_AFTER_TIMEOUTS;
     const next: RoomData = {
       ...data,
       match: result.state,
@@ -386,26 +533,91 @@ export class RoomReferee {
         ...data.used_turns,
         [turn.id]: { seat: turn.seat, ...options },
       },
+      timeouts,
+      absent,
     };
     if (result.state.over) {
       return {
         ok: true,
-        data: this.#finish(next, {
+        data: this.#finish(next, at, {
           reason: 'complete',
           final_stacks: result.state.stacks,
         }),
         finishedHands,
       };
     }
-    return { ok: true, data: this.#nextTurn(next), finishedHands };
+    return { ok: true, data: this.#nextTurn(next, at), finishedHands };
   }
 
-  // Where every match ends.
+  // Plays everything due by now, each at the time it fell due, so a late
+  // alarm or a request ends up where an alarm on time would have: a turn past
+  // its deadline, and an absent seat's turn the moment it starts, get the
+  // timeout action (holdem-rules 超時動作: check if it can, else fold).
+  #due(data: RoomData) {
+    let next = data;
+    const finishedHands: HandRecord[] = [];
+    for (;;) {
+      const { match, turn } = next;
+      if (next.ended) break;
+      if (!match) {
+        const at = next.created_at + DISSOLVE_AFTER_MS;
+        if (this.#now() < at) break;
+        next = this.#finish(next, at, {
+          reason: 'cancelled',
+          final_stacks: calledOff(next),
+        });
+        break;
+      }
+      if (!turn) break;
+      const at = next.absent[turn.seat]
+        ? turn.deadline - next.settings.turn_seconds * 1000
+        : turn.deadline;
+      if (!next.absent[turn.seat] && this.#now() < turn.deadline) break;
+      const canCheck = legalActions(match).some(a => a.type === 'check');
+      const done = this.#perform(
+        next,
+        match,
+        turn,
+        { type: canCheck ? 'check' : 'fold' },
+        at,
+        { timeout: true },
+      );
+      if (!done.ok) {
+        // A timeout action the engine refuses is a bug of ours: the match is
+        // void (狀況處理: 平台出錯) rather than stuck.
+        console.error(`Room ${next.room_id}: timeout refused: ${done.message}`);
+        next = this.#finish(next, at, {
+          reason: 'void',
+          final_stacks: calledOff(next),
+        });
+        break;
+      }
+      next = done.data;
+      finishedHands.push(...done.finishedHands);
+    }
+    return { data: next, finishedHands };
+  }
+
+  // Saves whatever fell due before the caller looks at the room.
+  async #settle(data: RoomData): Promise<RoomData> {
+    const due = this.#due(data);
+    if (due.data !== data) await this.#save(due.data, due.finishedHands);
+    return due.data;
+  }
+
+  // The Room DO's alarm: play what is due and set the next alarm.
+  async alarm(): Promise<void> {
+    const data = await this.#load();
+    if (data) await this.#settle(data);
+  }
+
+  // Where every match ends; `at` is when (epoch ms).
   #finish(
     data: RoomData,
+    at: number,
     ended: DistributiveOmit<Ended, 'at'>,
   ): RoomData & { ended: Ended } {
-    return { ...data, turn: null, ended: { ...ended, at: this.#now() } };
+    return { ...data, turn: null, ended: { ...ended, at } };
   }
 
   #load(): Promise<RoomData | undefined> {
@@ -415,17 +627,28 @@ export class RoomReferee {
 
   // Every change goes through here, so this is where recording a match that
   // just ended (T13: replay, D1) belongs, before the caller answers.
-  async #save(data: RoomData, finishedHands: HandRecord[] = []): Promise<void> {
+  async #save(
+    unsettled: RoomData,
+    unsettledHands: HandRecord[] = [],
+  ): Promise<void> {
+    // An absent seat may be next to act: it is played before anyone looks.
+    const due = this.#due(unsettled);
+    const data = due.data;
+    const finishedHands = [...unsettledHands, ...due.finishedHands];
     this.#data = Promise.resolve(data);
     const listeners = [...this.#listeners];
     this.#listeners.clear();
     for (const listener of listeners) listener();
     // Started together, the DO commits these writes as one.
+    const alarm = alarmAt(data);
     const writes = [
       ...finishedHands.map(hand =>
         this.#storage.put(`hand:${hand.hand_number}`, hand),
       ),
       this.#storage.put(KEY, data),
+      alarm === null
+        ? this.#storage.deleteAlarm()
+        : this.#storage.setAlarm(alarm),
     ];
     try {
       await Promise.all(writes);
@@ -445,8 +668,9 @@ export class RoomReferee {
     return { promise, cancel: () => this.#listeners.delete(listener) };
   }
 
-  // Hands the next turn to whoever is to act, with a fresh turn_id.
-  #nextTurn(data: RoomData): RoomData {
+  // Hands the next turn to whoever is to act, with a fresh turn_id; `at`
+  // (epoch ms) is when the turn starts.
+  #nextTurn(data: RoomData, at: number): RoomData {
     const seat = data.match?.toAct ?? null;
     if (seat === null) return { ...data, turn: null };
     const count = data.turn_count + 1;
@@ -456,11 +680,32 @@ export class RoomReferee {
       turn: {
         id: `t_${count}`,
         seat,
-        deadline: this.#now() + data.settings.turn_seconds * 1000,
+        deadline: at + data.settings.turn_seconds * 1000,
       },
     };
   }
 }
+
+// When the room next has something due (epoch ms), or null for nothing.
+const alarmAt = (data: RoomData): number | null =>
+  data.ended
+    ? null
+    : data.match
+      ? (data.turn?.deadline ?? null)
+      : data.created_at + DISSOLVE_AFTER_MS;
+
+// The stacks with the unfinished hand called off: chips in its pot go back.
+const calledOff = ({ match, settings }: RoomData): [number, number] =>
+  match
+    ? [
+        match.stacks[0] + match.contributed[0],
+        match.stacks[1] + match.contributed[1],
+      ]
+    : [settings.starting_stack, settings.starting_stack];
+
+// 收到什麼就做什麼: too late or not your turn → do not resend, wait.
+const doNotResend = (data: RoomData) =>
+  `Do not resend. Call ${waitPath(data)} and act when it answers your_turn`;
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
   ? Omit<T, K>
@@ -528,9 +773,9 @@ function matchOver(data: RoomData, ended: Ended, seat: Seat): MatchOverBody {
     ended.final_stacks[seat],
     ended.final_stacks[otherSeat(seat)],
   ];
-  const result: 'win' | 'loss' | 'draw' | 'cancelled' =
-    ended.reason === 'cancelled'
-      ? 'cancelled'
+  const result: MatchOverBody['result'] =
+    ended.reason === 'cancelled' || ended.reason === 'void'
+      ? ended.reason
       : ended.reason === 'left'
         ? ended.loser === seat
           ? 'loss'
@@ -542,7 +787,7 @@ function matchOver(data: RoomData, ended: Ended, seat: Seat): MatchOverBody {
             : 'draw';
   return {
     status: 'match_over',
-    room_status: 'finished',
+    room_status: ended.reason === 'void' ? 'void' : 'finished',
     to_act_seat: null,
     hand_number: seen?.hand_number ?? null,
     view: seen?.view ?? null,
@@ -555,12 +800,12 @@ function matchOver(data: RoomData, ended: Ended, seat: Seat): MatchOverBody {
   };
 }
 
-function matchOverHint(
-  ended: Ended,
-  result: 'win' | 'loss' | 'draw' | 'cancelled',
-) {
+function matchOverHint(ended: Ended, result: MatchOverBody['result']) {
   if (result === 'cancelled') {
     return `The room closed before the match started. ${PLAY_AGAIN}`;
+  }
+  if (result === 'void') {
+    return `The match was called off by the platform and does not count. ${PLAY_AGAIN}`;
   }
   const how =
     ended.reason !== 'left'
