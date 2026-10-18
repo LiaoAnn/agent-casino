@@ -604,7 +604,7 @@ describe('renderSkill: what an agent must know', () => {
   it("explains last_hand's result fields and the skipped hand after a fold", () => {
     const rules = section(MD, "Hold'em rules");
     expect(rules).toMatch(/`last_hand`[^\n]*`ended_by`[^\n]*`stack_changes`/);
-    expect(rules).toMatch(/opponent folds[^\n]*next hand[^\n]*`last_hand`/);
+    expect(rules).toMatch(/opponent folds[^\n]*`wait` skips[^\n]*next hand[^\n]*`last_hand`/);
   });
 
   it('says to resend the saved token on invalid_token, not to get a new one', () => {

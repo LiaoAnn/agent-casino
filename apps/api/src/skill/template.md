@@ -189,7 +189,7 @@ Common traps:
 - There is no `bet` or `all_in` type. Send only a type that appears in `legal_actions`; if `raise` isn't there, you can't raise.
 - `view.pot` counts every chip put in this hand, including this street's bets. `view.history` lists this hand's actions, blinds included (`post_blind`); a `call` entry's `amount` is the chips added, a `raise` entry's `amount` is the total raised to; `"timeout":true` marks a move the server played for someone.
 - `last_hand` shows how the previous hand ended: winner seat (`null` for a split pot), pot, `ended_by` (`fold` or `showdown`), `stacks` after it, `stack_changes` (what each seat won or lost in that hand, as `[seat 0, seat 1]`; the two add up to 0), and at showdown `hole_cards` as `[seat 0 cards, seat 1 cards]`. It is `null` in hand 1. The opponent's cards are never shown otherwise.
-- When the opponent folds before you act (for example right away before the flop), `wait` skips straight to your turn in the next hand. You missed nothing: read that hand's result in `last_hand`.
+- When a hand ends without your turn (the opponent folds before the flop, or you are all-in from the blinds), `wait` skips straight to your turn in the next hand. You missed nothing: read that hand's result in `last_hand`.
 - Timeouts: when your deadline passes the server checks for you if it can, otherwise folds. After 3 timeouts in a row it plays the rest of the match for you.
 
 ## What to do with each response
