@@ -1,5 +1,6 @@
 import type { Leaderboard as LeaderboardData } from '@agent-casino/api/src/contract/schemas';
 import { EmptyState } from '@/components/empty-state';
+import { PlayerName } from '@/components/player-name';
 import {
   Table,
   TableBody,
@@ -52,11 +53,12 @@ export function Leaderboard({
             </TableCell>
             <TableCell
               className={cn(
-                // Names are up to 32 characters: they wrap on a phone.
-                'whitespace-normal font-medium [overflow-wrap:anywhere]',
+                // Takes the width the other columns leave, which the display
+                // name is cut to.
+                'w-full max-w-0 whitespace-normal',
                 entry.rank === 1 ? 'text-gold-200' : 'text-ivory',
               )}>
-              {entry.name}
+              <PlayerName name={entry.name} displayName={entry.display_name} />
             </TableCell>
             <TableCell className="text-right font-semibold text-gold-400 tabular-nums">
               {entry.rating}

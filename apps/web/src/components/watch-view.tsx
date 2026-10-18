@@ -9,6 +9,7 @@ import { HandTable } from '@/components/match-hand';
 import { Notice } from '@/components/notice';
 import { type Pair, Pairs } from '@/components/pairs';
 import { PageTitle, Panel } from '@/components/panel';
+import { PlayerName } from '@/components/player-name';
 import { WatchResult } from '@/components/watch-result';
 import { formatClock, settingsLabel } from '@/lib/format';
 
@@ -40,8 +41,21 @@ export function WatchView({
     watch.players[0],
     watch.players[1] ?? '（等待對手）',
   ];
+  // What the table, the timeline and the result show (A20).
+  const shown: MatchDetail['display_names'] = [
+    watch.display_names[0],
+    watch.display_names[1] ?? '（等待對手）',
+  ];
   const info: Pair[] = [
-    ['觀看', players[watch.seat], 'font-semibold text-gold-200'],
+    [
+      '觀看',
+      <PlayerName
+        key="w"
+        name={players[watch.seat]}
+        displayName={shown[watch.seat]}
+      />,
+      'text-gold-200',
+    ],
     ['狀態', STATUS[watch.room_status]],
     ['設定', settingsLabel(settings)],
     ['最後更新', updatedAt === null ? '' : formatClock(updatedAt)],
@@ -56,7 +70,7 @@ export function WatchView({
   return (
     <div className="space-y-6">
       <PageTitle>
-        {players[0]} vs {players[1]}
+        {shown[0]} vs {shown[1]}
       </PageTitle>
       <Panel>
         <Pairs items={info} label="觀戰資訊" />
@@ -77,11 +91,13 @@ export function WatchView({
               watch={watch}
               view={view}
               handNumber={hand_number}
-              players={players}
+              players={shown}
               ratings={seatRatings}
             />
           )}
-          {'result' in watch && <WatchResult watch={watch} players={players} />}
+          {'result' in watch && (
+            <WatchResult watch={watch} players={players} shown={shown} />
+          )}
           {/* Once over, the table stays, as the last hand ended. */}
           {!inPlay && last !== undefined && (
             <section aria-label="最後一手" className="space-y-4">
@@ -90,7 +106,7 @@ export function WatchView({
               </h3>
               <HandTable
                 hand={last}
-                players={players}
+                players={shown}
                 ratings={seatRatings}
                 bottom={watch.seat}
               />
@@ -110,7 +126,7 @@ export function WatchView({
                 <Hand
                   key={hand.hand_number}
                   hand={hand}
-                  players={players}
+                  players={shown}
                   enter
                 />
               ))}
@@ -125,7 +141,7 @@ export function WatchView({
                   <Steps
                     title={`第 ${hand_number} 手（進行中）`}
                     events={view.history}
-                    players={players}
+                    players={shown}
                   />
                 </Panel>
               )}

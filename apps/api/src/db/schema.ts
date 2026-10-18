@@ -50,6 +50,10 @@ export const matches = sqliteTable(
     // Spelled as the players typed them in this room.
     player0: text('player0').notNull(),
     player1: text('player1').notNull(),
+    // What each seat was shown as (A20); null in rows from before T35, which
+    // show the name instead.
+    display0: text('display0'),
+    display1: text('display1'),
     settings: text('settings', { mode: 'json' })
       .$type<RoomSettings | LegacySettings>()
       .notNull(),
@@ -126,6 +130,9 @@ export const ratings = sqliteTable(
   {
     nameKey: text('name_key').primaryKey(),
     name: text('name').notNull(),
+    // The display name of the name's latest match (A20); null until a match
+    // after T35, which shows the name instead.
+    displayName: text('display_name'),
     // Unrounded; responses round it (A15).
     rating: real('rating').notNull(),
     games: integer('games').notNull(),

@@ -11,9 +11,9 @@ type Match = (typeof matches)[number];
 const resultText = (m: Match): string => {
   switch (m.result) {
     case 'seat0_win':
-      return `${m.players[0]} 勝`;
+      return `${m.display_names[0]} 勝`;
     case 'seat1_win':
-      return `${m.players[1]} 勝`;
+      return `${m.display_names[1]} 勝`;
     case 'draw':
       return '平手';
     case 'void':
@@ -69,9 +69,15 @@ test('shows every leaderboard entry in rank order', async ({ page }) => {
   await expect(board).toContainText('alice');
   for (const [i, e] of entries.entries()) {
     await expect(cells(rows.nth(i))).toHaveText(
-      [e.rank, e.name, e.rating, e.games, e.wins, e.losses, e.draws].map(
-        String,
-      ),
+      [
+        e.rank,
+        `${e.display_name}@${e.name}`,
+        e.rating,
+        e.games,
+        e.wins,
+        e.losses,
+        e.draws,
+      ].map(String),
     );
   }
 });
@@ -91,7 +97,14 @@ test('shows the 20 newest matches, newest first', async ({ page }) => {
   for (const [i, m] of matches.entries()) {
     const [game, result, ended] = [0, 1, 2].map(n => cells(rows.nth(i)).nth(n));
     const link = game.getByRole('link');
-    await expect(link).toHaveText(`${m.players[0]} vs ${m.players[1]}`);
+    await expect(link).toHaveAccessibleName(
+      `${m.display_names[0]} @${m.players[0]} vs ${m.display_names[1]} @${m.players[1]}`,
+    );
+    for (const seat of [0, 1] as const) {
+      await expect(link).toContainText(
+        `${m.display_names[seat]}@${m.players[seat]}`,
+      );
+    }
     await expect(link).toHaveAttribute('href', `/matches/${m.match_id}`);
     await expect(result).toHaveText(resultText(m));
     await expect(ended).toHaveText(endedText(m.ended_at));
@@ -119,4 +132,20 @@ test('has no forms or interactive controls', async ({ page }) => {
   ).toHaveCount(0);
   await expect(page.getByRole('button')).toHaveCount(0);
   await expect(page.getByRole('textbox')).toHaveCount(0);
+});
+
+// A20: the display name, cut with an ellipsis when long (whole in `title`),
+// over a grey `@name` that is always there.
+test('shows display names over @name on the leaderboard', async ({ page }) => {
+  const board = table(page, '排行榜');
+  const shown = entries.find(e => e.display_name !== e.name);
+  expect(shown).toBeDefined();
+  if (!shown) return;
+  const row = bodyRows(board).nth(shown.rank - 1);
+  const name = row.getByTitle(shown.display_name, { exact: true });
+  await expect(name).toHaveText(shown.display_name);
+  await expect(name).toHaveCSS('text-overflow', 'ellipsis');
+  const handle = row.getByText(`@${shown.name}`, { exact: true });
+  await expect(handle).toBeVisible();
+  await expect(handle).toHaveClass(/text-mist/);
 });

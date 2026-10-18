@@ -76,6 +76,8 @@ describe('apiError', () => {
       status: 'waiting',
       room_status: 'waiting',
       opponent_name: null,
+      display_name: 'alice',
+      opponent_display_name: null,
       settings: {
         max_hands: 10,
         turn_seconds: 60,
@@ -140,6 +142,8 @@ describe('apiErrors', () => {
         status: 'match_over',
         room_status: 'finished',
         opponent_name: 'bob',
+        display_name: 'alice',
+        opponent_display_name: 'bob',
         settings: {
           max_hands: 10,
           turn_seconds: 60,

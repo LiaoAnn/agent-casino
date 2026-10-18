@@ -2819,3 +2819,112 @@ describe('freezeout settings requests', () => {
     },
   );
 });
+
+describe('T35 display names over room HTTP', () => {
+  it.each([
+    ['  小愛   🃏 ', '  小包   🎲 ', '小愛 🃏', '小包 🎲'],
+    ['  Cafe\u0301  ', '🃏'.repeat(24), 'Café', '🃏'.repeat(24)],
+  ])(
+    'normalizes create/join and both seats in wait/state: %s',
+    async (first, second, a, b) => {
+      const { env } = makeEnv({ waitMs: 1 });
+      const room = await createRoom(env, {
+        name: 'AlIce',
+        display_name: first,
+      });
+      expect(room).toMatchObject({
+        display_name: a,
+        opponent_display_name: null,
+      });
+      for (const read of [state, wait]) {
+        expect(
+          (await read(env, room.room_id, room.token)).status,
+        ).toMatchObject({
+          display_name: a,
+          opponent_display_name: null,
+        });
+      }
+      const joined = await joinRoom(env, room, {
+        name: 'bOB',
+        display_name: second,
+      });
+      expect(joined).toMatchObject({
+        display_name: b,
+        opponent_display_name: a,
+      });
+      for (const read of [state, wait]) {
+        for (const [token, own, opponent] of [
+          [room.token, a, b],
+          [joined.token, b, a],
+        ]) {
+          expect((await read(env, room.room_id, token)).status).toMatchObject({
+            display_name: own,
+            opponent_display_name: opponent,
+          });
+        }
+      }
+    },
+  );
+
+  it('defaults to the request spelling and gives the bot its human name', async () => {
+    const { env } = makeEnv({ waitMs: 1 });
+    const room = await createRoom(env, { name: 'AlIce' });
+    expect(room).toMatchObject({
+      display_name: 'AlIce',
+      opponent_display_name: null,
+    });
+    const joined = await joinRoom(env, room, { name: 'bOB' });
+    expect(joined).toMatchObject({
+      display_name: 'bOB',
+      opponent_display_name: 'AlIce',
+    });
+    const botRoom = await createRoom(env, { name: 'CARol', opponent: 'bot' });
+    expect(botRoom).toMatchObject({
+      display_name: 'CARol',
+      opponent_display_name: 'House Bot',
+    });
+    for (const read of [state, wait]) {
+      expect(
+        (await read(env, botRoom.room_id, botRoom.token)).status,
+      ).toMatchObject({
+        display_name: 'CARol',
+        opponent_display_name: 'House Bot',
+      });
+    }
+  });
+
+  it.each([
+    'bad\u0000name',
+    'bad\tname',
+    'bad\nname',
+    'bad\rname',
+    'bad\u2028name',
+    'bad\u2029name',
+    '中'.repeat(25),
+    '🃏'.repeat(25),
+    '',
+    '   ',
+  ])(
+    'rejects invalid display_name %j in create and join',
+    async display_name => {
+      const { env } = makeEnv();
+      await expectError(
+        await post(env, '/v1/rooms', {
+          game: 'holdem',
+          name: 'alice',
+          display_name,
+        }),
+        'invalid_request',
+      );
+      const room = await createRoom(env);
+      await expectError(
+        await post(env, `/v1/rooms/${room.room_id}/join`, {
+          name: 'bob',
+          invite_code: room.invite_code,
+          display_name,
+        }),
+        'invalid_request',
+      );
+    },
+  );
+});

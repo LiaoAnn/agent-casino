@@ -140,6 +140,7 @@ async function expectRecord(
   expect(t.spy.mock.calls[0][0]).toEqual({
     match_id: ROOM_ID,
     players: PLAYERS,
+    display_names: PLAYERS,
     settings,
     seed: SEED,
     result,

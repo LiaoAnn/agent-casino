@@ -118,6 +118,7 @@ function expectedEntries(rows: RatingFixture[], banned = new Set<string>()) {
     .map(({ nameKey: _nameKey, ...row }, index) => ({
       rank: index + 1,
       ...row,
+      display_name: row.name,
     }));
 }
 

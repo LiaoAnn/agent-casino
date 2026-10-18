@@ -8,6 +8,7 @@
 import { Effect } from 'effect';
 import { type ApiError, apiError } from '../contract/errors';
 import {
+  defaultDisplayName,
   type QueueResponse,
   SETTINGS_DEFAULTS,
   type Settings,
@@ -24,6 +25,8 @@ type Matched = Extract<Answer, { status: 'matched' }>;
 export interface QueueInput {
   // Checked (name rules, house-bot, bans) by the handler.
   name: string;
+  // Normalized by the handler (A20); `name` when left out.
+  display_name?: string;
   settings?: typeof Settings.Type;
   // Only where ALLOW_TEST_ROOMS=true; the handler drops it otherwise.
   test?: typeof TestSettings.Type;
@@ -160,6 +163,19 @@ interface Saved {
 
 const STORAGE_KEY = 'queue';
 
+// Answers saved before display names (T35) lack them: each seat shows its
+// name, which the other seat's answer holds as opponent_name (A20).
+const withDisplayNames = (matched: [Matched, Matched]): [Matched, Matched] => {
+  const [a, b] = matched;
+  const fill = (seat: Matched, other: Matched): Matched => ({
+    ...seat,
+    display_name: seat.display_name ?? defaultDisplayName(other.opponent_name),
+    opponent_display_name:
+      seat.opponent_display_name ?? defaultDisplayName(seat.opponent_name),
+  });
+  return [fill(a, b), fill(b, a)];
+};
+
 // Whether this seat of the pairing was queued with this queue_key (A17).
 const ownedBy = (pairing: Pairing, key: string, queueKey: string) =>
   pairing.queueKeys[pairing.keys.indexOf(key)] === queueKey;
@@ -221,8 +237,9 @@ export class MatchQueue {
       return { ok: false, error: NAME_IN_USE(input.name) };
     }
     if (entry) {
-      // The same person waiting on: their latest settings count.
-      entry.input = input;
+      // The same person waiting on: their latest settings count, but the
+      // display name they first queued with stays (A20).
+      entry.input = { ...input, display_name: entry.input.display_name };
       entry.pairingKey = pairingKey(input);
     } else {
       entry = {
@@ -303,8 +320,8 @@ export class MatchQueue {
           keys,
           queueKeys,
           at,
-          answers: Promise.resolve(matched),
-          matched,
+          answers: Promise.resolve(withDisplayNames(matched)),
+          matched: withDisplayNames(matched),
         };
         for (const key of keys) this.#pairings.set(key, pairing);
       }
@@ -455,6 +472,7 @@ const openMatchIn =
         const room = yield* Rooms.openRoom(env, first);
         const joined = yield* Rooms.joinRoom(env, room.room_id, {
           name: second.name,
+          display_name: second.display_name,
           invite_code: room.invite_code,
         });
         const seats: [Seated, Seated] = [
@@ -463,6 +481,8 @@ const openMatchIn =
             seat: room.seat,
             token: room.token,
             opponent_name: second.name,
+            display_name: room.display_name,
+            opponent_display_name: joined.display_name,
             settings: room.settings,
             watch_url: room.watch_url,
           },

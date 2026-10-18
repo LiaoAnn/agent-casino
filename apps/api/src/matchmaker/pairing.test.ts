@@ -19,6 +19,8 @@ const seats: [Seated, Seated] = [
     seat: 0,
     token: 'alice-token',
     opponent_name: 'bob',
+    display_name: 'alice',
+    opponent_display_name: 'bob',
     settings: SETTINGS_DEFAULTS,
     watch_url: `https://web.test/watch/${ROOM}?token=alice-watch`,
   },
@@ -27,6 +29,8 @@ const seats: [Seated, Seated] = [
     seat: 1,
     token: 'bob-token',
     opponent_name: 'alice',
+    display_name: 'bob',
+    opponent_display_name: 'alice',
     settings: SETTINGS_DEFAULTS,
     watch_url: `https://web.test/watch/${ROOM}?token=bob-watch`,
   },
@@ -89,7 +93,13 @@ const persistentFixture = () => {
     now: () => clock.ms,
   };
   const recreate = () => new MatchQueue(openMatch, options);
-  return { clock, openMatch, queue: recreate(), recreate };
+  return {
+    clock,
+    openMatch,
+    storage: options.storage,
+    queue: recreate(),
+    recreate,
+  };
 };
 
 const withKey = (
@@ -166,6 +176,8 @@ describe('MatchQueue (A2)', () => {
               seat: 0,
               token: `${first.name}-token`,
               opponent_name: second.name,
+              display_name: first.name,
+              opponent_display_name: second.name,
               settings: SETTINGS_DEFAULTS,
               watch_url: `https://web.test/watch/${ROOM}?token=${first.name}-watch`,
             },
@@ -174,6 +186,8 @@ describe('MatchQueue (A2)', () => {
               seat: 1,
               token: `${second.name}-token`,
               opponent_name: first.name,
+              display_name: second.name,
+              opponent_display_name: first.name,
               settings: SETTINGS_DEFAULTS,
               watch_url: `https://web.test/watch/${ROOM}?token=${second.name}-watch`,
             },
@@ -1061,4 +1075,100 @@ describe('MatchQueue queue_key ownership (A17)', () => {
       expect(openMatch).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe('T35 persisted queue display names', () => {
+  it.each([0, 1] as const)(
+    'restores a pre-T35 matched answer for seat %s with default display names',
+    async seat => {
+      const { queue, storage, recreate, clock, openMatch } =
+        persistentFixture();
+      const players: [QueueInput, QueueInput] = [
+        withKey({ name: 'alice' }),
+        withKey({ name: 'bob' }),
+      ];
+      await queue.queue(players[0]);
+      await queue.queue(players[1]);
+      const saved = await storage.get<{
+        pairings: { matched: Seated[] }[];
+      }>('queue');
+      expect(saved?.pairings).toHaveLength(1);
+      await storage.put('queue', {
+        ...saved,
+        pairings: saved?.pairings.map(pairing => ({
+          ...pairing,
+          matched: pairing.matched.map(
+            ({
+              display_name: _displayName,
+              opponent_display_name: _opponentDisplayName,
+              ...legacy
+            }) => legacy,
+          ),
+        })),
+      });
+      clock.ms = HOLD_MS - 1;
+
+      expect(await recreate().queue(players[seat])).toEqual(matched(seat));
+      expect(openMatch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('keeps the first display name through waiting retries and queue recreation, then returns the same matched answer', async () => {
+    const { queue, openMatch, recreate } = persistentFixture();
+    openMatch.mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          ...seats[0],
+          display_name: '小愛 🃏',
+          opponent_display_name: '小包 🎲',
+        },
+        {
+          ...seats[1],
+          display_name: '小包 🎲',
+          opponent_display_name: '小愛 🃏',
+        },
+      ],
+    });
+    const alice = withKey({
+      name: 'alice',
+      display_name: '小愛 🃏',
+      settings: SETTINGS_DEFAULTS,
+    });
+    expect(await queue.queue(alice)).toMatchObject({
+      ok: true,
+      value: { status: 'waiting' },
+    });
+    const restored = recreate();
+    expect(
+      await restored.queue({ ...alice, display_name: '改名' }),
+    ).toMatchObject({ ok: true, value: { status: 'waiting' } });
+    const bob = await restored.queue(
+      withKey({
+        name: 'bob',
+        display_name: '小包 🎲',
+        settings: SETTINGS_DEFAULTS,
+      }),
+    );
+    expect(openMatch).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'alice', display_name: '小愛 🃏' }),
+      expect.objectContaining({ name: 'bob', display_name: '小包 🎲' }),
+    );
+    expect(bob).toMatchObject({
+      ok: true,
+      value: { display_name: '小包 🎲', opponent_display_name: '小愛 🃏' },
+    });
+    const matched = await restored.queue({
+      ...alice,
+      display_name: '第三個名字',
+    });
+    expect(matched).toMatchObject({
+      ok: true,
+      value: { display_name: '小愛 🃏', opponent_display_name: '小包 🎲' },
+    });
+    expect(
+      await recreate().queue({ ...alice, display_name: '第四個名字' }),
+    ).toEqual(matched);
+    expect(openMatch).toHaveBeenCalledTimes(1);
+  });
 });

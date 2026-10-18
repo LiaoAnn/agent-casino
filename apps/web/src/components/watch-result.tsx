@@ -5,22 +5,34 @@ import type {
 import { Link } from '@tanstack/react-router';
 import { BySeat, type Pair, Pairs } from '@/components/pairs';
 import { Panel } from '@/components/panel';
+import { PlayerName } from '@/components/player-name';
 import { Badge } from '@/components/ui/badge';
 import { formatSigned, resultLabel } from '@/lib/format';
 
 // How a watched match ended, with a link to its public record. A win or a
-// loss of the watched seat is marked ▲ or ▼ beside the words.
+// loss of the watched seat is marked ▲ or ▼ beside the words. `shown` is
+// the players' display names.
 export function WatchResult({
   watch,
   players,
+  shown,
 }: {
   watch: Extract<WatchResponse, { result: unknown }>;
   players: MatchDetail['players'];
+  shown: MatchDetail['display_names'];
 }) {
-  const label = resultLabel({ players, result: watch.result });
+  const label = resultLabel({ players: shown, result: watch.result });
   const winner =
     watch.result === 'seat0_win' ? 0 : watch.result === 'seat1_win' ? 1 : null;
   const items: Pair[] = [
+    [
+      '玩家',
+      <span key="p" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <PlayerName name={players[0]} displayName={shown[0]} />
+        <span className="text-mist">vs</span>
+        <PlayerName name={players[1]} displayName={shown[1]} />
+      </span>,
+    ],
     [
       '結果',
       winner === null ? (
@@ -36,14 +48,16 @@ export function WatchResult({
     ],
     [
       '最終籌碼',
-      <BySeat key="f" players={players} values={watch.final_stacks} />,
+      <BySeat key="f" players={shown} values={watch.final_stacks} />,
     ],
   ];
   if (watch.ratings !== null) {
     items.push([
       'Elo',
       watch.ratings
-        .map(r => `${r.name} ${r.rating} (${formatSigned(r.change)})`)
+        .map(
+          (r, seat) => `${shown[seat]} ${r.rating} (${formatSigned(r.change)})`,
+        )
         .join(' · '),
     ]);
   }

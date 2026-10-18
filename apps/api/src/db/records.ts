@@ -1,5 +1,6 @@
 // Writing a finished match (casino-api skill: 資料與積分, A10).
 import { eq, getTableColumns, inArray } from 'drizzle-orm';
+import { defaultDisplayName } from '../contract/schemas';
 import type { HandRecord } from '../holdem/match';
 import type { Db } from './client';
 import { eloUpdate, INITIAL_RATING } from './elo';
@@ -18,6 +19,8 @@ export interface MatchRecordInput {
   match_id: string;
   /** Seat 0, seat 1, spelled as typed in this room. */
   players: [string, string];
+  /** What people saw of seat 0 and seat 1 (A20); the names when left out. */
+  display_names?: [string, string];
   settings: RoomSettings;
   /** Stored as is. */
   seed: string;
@@ -74,6 +77,9 @@ const toMatchRatings = (changes: RatingChanges | null): MatchRatings =>
         },
       ];
 
+const renameRated = (db: Db, key: string, displayName: string) =>
+  db.update(ratings).set({ displayName }).where(eq(ratings.nameKey, key));
+
 const upsertRating = (db: Db, row: typeof ratings.$inferInsert) => {
   const { nameKey: _key, name: _name, ...counts } = row;
   return db
@@ -92,6 +98,10 @@ export async function recordMatch(
   db: Db,
   input: MatchRecordInput,
 ): Promise<RecordedMatch> {
+  const shown = input.display_names ?? [
+    defaultDisplayName(input.players[0]),
+    defaultDisplayName(input.players[1]),
+  ];
   const keys = [nameKey(input.players[0]), nameKey(input.players[1])] as const;
   if (keys[0] === keys[1]) {
     throw new RangeError(`Both seats are ${input.players[0]}`);
@@ -128,7 +138,11 @@ export async function recordMatch(
   }
 
   let ratingChanges: RatingChanges | null = null;
-  let ratingWrites: ReturnType<typeof upsertRating>[] = [];
+  // An unrated match still renames whoever is on the leaderboard (A20).
+  let ratingWrites: (
+    | ReturnType<typeof upsertRating>
+    | ReturnType<typeof renameRated>
+  )[] = keys.map((key, n) => renameRated(db, key, shown[n as 0 | 1]));
   if (rated) {
     const seat = (n: 0 | 1) => {
       const row = rows.find(r => r.nameKey === keys[n]);
@@ -136,6 +150,7 @@ export async function recordMatch(
         nameKey: keys[n],
         // The first spelling seen stays (A14).
         name: row?.name ?? input.players[n],
+        displayName: shown[n],
         rating: row?.rating ?? INITIAL_RATING,
         games: (row?.games ?? 0) + 1,
         wins: row?.wins ?? 0,
@@ -196,6 +211,8 @@ export async function recordMatch(
       matchId: input.match_id,
       player0: input.players[0],
       player1: input.players[1],
+      display0: shown[0],
+      display1: shown[1],
       settings: input.settings,
       seed: input.seed,
       result: input.result,

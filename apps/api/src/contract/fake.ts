@@ -28,6 +28,17 @@ import { SETTINGS_DEFAULTS } from './schemas';
 const PAGE_SIZE = 20;
 const PLAYERS = ['alice', 'Bob', 'carol', 'dave-7', 'eve_x', 'Frank', 'grace'];
 const BOT = 'house-bot';
+// What people see of them (A20); the others show their name.
+const DISPLAY_NAMES: Record<string, string> = {
+  alice: '愛麗絲 Alice',
+  Bob: 'Bob 🃏',
+  carol: '卡蘿的撲克機器人',
+  'dave-7': 'Dave',
+  // As long as a display name gets: lists cut it with an ellipsis.
+  grace: '葛瑞絲的德州撲克機器人二號專打錦標賽那一隻🃏',
+  [BOT]: 'House Bot',
+};
+const displayName = (name: string) => DISPLAY_NAMES[name] ?? name;
 const START_TIME = Date.parse('2026-10-01T00:00:00Z');
 
 function makeRandom(seed: number) {
@@ -242,6 +253,7 @@ function fakeWatch(seed: number): {
       room_id,
       seat: 0,
       names,
+      display_names: [displayName(names[0]), displayName(names[1])],
       settings,
       seed: played.config.seed,
       match: played.state,
@@ -270,6 +282,7 @@ function fakeWatch(seed: number): {
     record: {
       match_id: over.room_id,
       players: names,
+      display_names: [displayName(names[0]), displayName(names[1])],
       settings,
       seed: finished.config.seed,
       result,
@@ -391,6 +404,10 @@ export function makeFakeData(
     details.push({
       match_id: roomId(random),
       players: [first, second],
+      // A record from before T35 has none: the names stand in.
+      display_names: legacy
+        ? [first, second]
+        : [displayName(first), displayName(second)],
       settings,
       seed,
       result,
@@ -404,9 +421,10 @@ export function makeFakeData(
 
   const watch = fakeWatch(seed);
   const newestFirst: MatchSummary[] = details
-    .map(({ match_id, players, result, ended_at, rated }) => ({
+    .map(({ match_id, players, display_names, result, ended_at, rated }) => ({
       match_id,
       players,
+      display_names,
       result,
       ended_at,
       rated,
@@ -419,6 +437,7 @@ export function makeFakeData(
       .map((r, i) => ({
         rank: i + 1,
         name: r.name,
+        display_name: displayName(r.name),
         rating: r.rating,
         games: r.wins + r.losses + r.draws,
         wins: r.wins,

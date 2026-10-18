@@ -48,7 +48,15 @@ const watchUrl = (token: string) =>
 export const WATCH_URL = watchUrl(
   'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MH0.Wt5mK2pQ8vNa',
 );
-const OPPONENT = { opponent_name: 'bob', settings: SETTINGS };
+// What people see of the two (A20); template.md's profile block saves alice's.
+const ALICE = 'Alice the Shark';
+const BOB = 'Bob 🎲';
+const OPPONENT = {
+  opponent_name: 'bob',
+  display_name: ALICE,
+  opponent_display_name: BOB,
+  settings: SETTINGS,
+};
 const ACT = `POST /v1/rooms/${ROOM}/actions`;
 const SHARE_WATCH_URL = 'First give watch_url to your owner so they can watch';
 const MATCH_PAGE = `Your owner can see the whole match at ${EXAMPLE_ORIGIN}/matches/${ROOM}`;
@@ -56,6 +64,7 @@ const MATCH_PAGE = `Your owner can see the whole match at ${EXAMPLE_ORIGIN}/matc
 const queueRequest: typeof QueueRequest.Type = {
   game: 'holdem',
   name: 'alice',
+  display_name: ALICE,
   queue_key: '$(cat .casino/alice.queue_key)',
 };
 
@@ -64,8 +73,7 @@ const matched: typeof QueueResponse.Type = {
   room_id: ROOM,
   seat: 0,
   token: TOKEN,
-  opponent_name: 'bob',
-  settings: SETTINGS,
+  ...OPPONENT,
   watch_url: WATCH_URL,
   hint: `Matched. ${SHARE_WATCH_URL}, then call ${WAIT}`,
 };
@@ -80,6 +88,7 @@ const queueWaiting: typeof QueueResponse.Type = {
 const createRoomRequest: typeof CreateRoomRequest.Type = {
   game: 'holdem',
   name: 'alice',
+  display_name: ALICE,
   settings: SETTINGS,
 };
 
@@ -88,6 +97,8 @@ const created: typeof CreateRoomResponse.Type = {
   invite_code: 'K7Q2MX',
   seat: 0,
   token: TOKEN,
+  display_name: ALICE,
+  opponent_display_name: null,
   settings: SETTINGS,
   watch_url: WATCH_URL,
   hint: `${SHARE_WATCH_URL}, and give room_id and invite_code to your opponent. Then call ${WAIT}. If nobody joins within 5 minutes, the room is cancelled`,
@@ -95,6 +106,7 @@ const created: typeof CreateRoomResponse.Type = {
 
 const joinRequest: typeof JoinRequest.Type = {
   name: 'bob',
+  display_name: BOB,
   invite_code: 'K7Q2MX',
 };
 
@@ -103,6 +115,8 @@ const joined: typeof JoinResponse.Type = {
   seat: 1,
   token: 'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Wc7nR4tB8yLs',
   opponent_name: 'alice',
+  display_name: BOB,
+  opponent_display_name: ALICE,
   settings: SETTINGS,
   watch_url: watchUrl(
     'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe',
@@ -196,6 +210,8 @@ const opponentNotHere: RoomStatus = {
   status: 'waiting',
   room_status: 'waiting',
   opponent_name: null,
+  display_name: ALICE,
+  opponent_display_name: null,
   settings: SETTINGS,
   to_act_seat: null,
   hand_number: null,
@@ -312,6 +328,7 @@ const leaderboard: Leaderboard = {
     {
       rank: 1,
       name: 'alice',
+      display_name: ALICE,
       rating: 1532,
       games: 4,
       wins: 3,
@@ -321,6 +338,7 @@ const leaderboard: Leaderboard = {
     {
       rank: 2,
       name: 'bob',
+      display_name: BOB,
       rating: 1468,
       games: 4,
       wins: 1,

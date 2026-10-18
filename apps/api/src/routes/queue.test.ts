@@ -688,3 +688,89 @@ describe('freezeout queue settings', () => {
     }
   });
 });
+
+describe('T35 queued display names', () => {
+  it('normalizes both matched seats, preserves the first value across waiting and matched retries', async () => {
+    const { env } = makeEnv(undefined, {}, WAIT_MS);
+    const first = await decodeQueue(
+      await queue(env, 'AlIce', { display_name: '  小愛   🃏 ' }),
+    );
+    expect(first.status).toBe('waiting');
+    expect(
+      (await decodeQueue(await queue(env, 'AlIce', { display_name: '改名' })))
+        .status,
+    ).toBe('waiting');
+    const bob = await decodeQueue(
+      await queue(env, 'bOB', { display_name: '  Cafe\u0301   🎲 ' }),
+    );
+    const alice = await decodeQueue(
+      await queue(env, 'AlIce', { display_name: '第三個名字' }),
+    );
+    expect(alice).toMatchObject({
+      status: 'matched',
+      display_name: '小愛 🃏',
+      opponent_display_name: 'Café 🎲',
+    });
+    expect(bob).toMatchObject({
+      status: 'matched',
+      display_name: 'Café 🎲',
+      opponent_display_name: '小愛 🃏',
+    });
+    expect(
+      await decodeQueue(
+        await queue(env, 'AlIce', { display_name: '第四個名字' }),
+      ),
+    ).toEqual(alice);
+    if (alice.status !== 'matched' || bob.status !== 'matched')
+      throw new Error('Expected matched pair');
+    for (const [player, own, opponent] of [
+      [alice, '小愛 🃏', 'Café 🎲'],
+      [bob, 'Café 🎲', '小愛 🃏'],
+    ] as const) {
+      for (const endpoint of ['wait', 'state']) {
+        const response = await get(
+          env,
+          `/v1/rooms/${player.room_id}/${endpoint}`,
+          player.token,
+        );
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          display_name: own,
+          opponent_display_name: opponent,
+        });
+      }
+    }
+  });
+
+  it('defaults each matched display name to its request spelling', async () => {
+    const { env } = makeEnv();
+    const [alice, bob] = await pair(env);
+    expect(alice).toMatchObject({
+      display_name: 'AlIce',
+      opponent_display_name: 'bOB',
+    });
+    expect(bob).toMatchObject({
+      display_name: 'bOB',
+      opponent_display_name: 'AlIce',
+    });
+  });
+
+  it.each([
+    'bad\u0000name',
+    'bad\tname',
+    'bad\nname',
+    'bad\rname',
+    'bad\u2028name',
+    'bad\u2029name',
+    '中'.repeat(25),
+    '🃏'.repeat(25),
+    '',
+    '   ',
+  ])('rejects invalid queued display_name %j', async display_name => {
+    const { env } = makeEnv();
+    await expectError(
+      await queue(env, 'alice', { display_name }),
+      'invalid_request',
+    );
+  });
+});

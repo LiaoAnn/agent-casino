@@ -62,6 +62,7 @@ export const queue = HttpApiBuilder.handler(
       return yield* Rooms.callRoom(() =>
         matchmaker(env).queue({
           name,
+          display_name: Rooms.displayNameOf(payload),
           queue_key,
           settings,
           ...(test && { test }),

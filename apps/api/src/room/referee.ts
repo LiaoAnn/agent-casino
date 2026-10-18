@@ -10,7 +10,11 @@ import type {
   TestSettings,
   WatchResponse,
 } from '../contract/schemas';
-import { RESERVED_NAMES } from '../contract/schemas';
+import {
+  defaultDisplayName,
+  HOUSE_BOT_DISPLAY_NAME,
+  RESERVED_NAMES,
+} from '../contract/schemas';
 import type { MatchRecordInput, RecordedMatch } from '../db/records';
 import { randomAction } from '../holdem/bot';
 import {
@@ -62,6 +66,8 @@ export interface CreateInput {
   room_id: string;
   invite_code: string;
   name: string;
+  // Normalized (A20); `name` when left out.
+  display_name?: string;
   settings: RoomSettings;
   seed: string;
   // Only where ALLOW_TEST_ROOMS=true; `chaos` is for T11.
@@ -92,6 +98,9 @@ interface RoomData {
   seed: string;
   test: typeof TestSettings.Type | null;
   names: [string, string | null];
+  // What people see of each seat (A20). Missing in rooms saved before T35:
+  // read it with displayNames().
+  display_names?: [string, string | null];
   // `null` until the second player joins.
   match: MatchState | null;
   turn: Turn | null;
@@ -222,10 +231,11 @@ export class RoomReferee {
         ),
       );
     }
-    const { opponent, ...room } = input;
+    const { opponent, display_name, ...room } = input;
     const data: RoomData = {
       ...room,
       names: [input.name, null],
+      display_names: [display_name ?? input.name, null],
       match: null,
       turn: null,
       turn_count: 0,
@@ -242,17 +252,31 @@ export class RoomReferee {
       recorded: null,
     };
     await this.#save(
-      opponent === 'bot' ? this.#start(data, HOUSE_BOT, this.#now()) : data,
+      opponent === 'bot'
+        ? this.#start(
+            data,
+            { name: HOUSE_BOT, display_name: HOUSE_BOT_DISPLAY_NAME },
+            this.#now(),
+          )
+        : data,
     );
     return ok(null);
   }
 
   async join(input: {
     name: string;
+    // Normalized (A20); `name` when left out.
+    display_name?: string;
     invite_code: string;
   }): Promise<
     Result<
-      { seat: 1; opponent_name: string; settings: RoomSettings },
+      {
+        seat: 1;
+        opponent_name: string;
+        display_name: string;
+        opponent_display_name: string;
+        settings: RoomSettings;
+      },
       | 'room_not_found'
       | 'wrong_invite_code'
       | 'room_full'
@@ -291,23 +315,41 @@ export class RoomReferee {
         ),
       );
     }
-    await this.#save(this.#start(data, input.name, this.#now()));
+    const player = {
+      name: input.name,
+      display_name: input.display_name ?? input.name,
+    };
+    await this.#save(this.#start(data, player, this.#now()));
     return ok({
       seat: 1,
       opponent_name: data.names[0],
+      display_name: player.display_name,
+      opponent_display_name: displayNames(data)[0],
       settings: data.settings,
     });
   }
 
-  // Seats `name` in seat 1 and deals hand 1; `at` (epoch ms) is when.
-  #start(data: RoomData, name: string, at: number): RoomData {
+  // Seats the player in seat 1 and deals hand 1; `at` (epoch ms) is when.
+  #start(
+    data: RoomData,
+    player: { name: string; display_name: string },
+    at: number,
+  ): RoomData {
     const match = startMatch({
       seed: data.seed,
       startingStack: data.settings.starting_stack,
       blindEvery: data.settings.blind_every,
       maxHands: data.settings.max_hands,
     });
-    return this.#nextTurn({ ...data, names: [data.names[0], name], match }, at);
+    return this.#nextTurn(
+      {
+        ...data,
+        names: [data.names[0], player.name],
+        display_names: [displayNames(data)[0], player.display_name],
+        match,
+      },
+      at,
+    );
   }
 
   // `wait: true` holds the request until it is the seat's turn, the match is
@@ -545,6 +587,7 @@ export class RoomReferee {
         room_id: data.room_id,
         seat,
         names: data.names,
+        display_names: displayNames(data),
         settings: data.settings,
         seed: data.seed,
         match,
@@ -625,6 +668,8 @@ export class RoomReferee {
       status: 'waiting',
       room_status: turn.room_status,
       opponent_name: turn.opponent_name,
+      display_name: turn.display_name,
+      opponent_display_name: turn.opponent_display_name,
       settings: turn.settings,
       to_act_seat: turn.to_act_seat,
       hand_number: turn.hand_number,
@@ -819,11 +864,13 @@ export class RoomReferee {
         `Room ${loaded.room_id}: replay differs; the match is void`,
       );
     }
+    const shown = displayNames(loaded);
     let recorded: RecordedMatch;
     try {
       recorded = await this.#recordMatch({
         match_id: loaded.room_id,
         players: [loaded.names[0], loaded.names[1] ?? ''],
+        display_names: [shown[0], shown[1] ?? ''],
         settings: loaded.settings,
         seed: loaded.seed,
         result: seatResult(final),
@@ -1037,11 +1084,24 @@ const roomNotFound = () =>
     'Check the room_id, or open a room with POST /v1/rooms',
   );
 
+// A20: what people see of each seat. A room saved before T35 has none.
+const displayNames = (data: RoomData): [string, string | null] =>
+  data.display_names ?? [
+    defaultDisplayName(data.names[0]),
+    data.names[1] === null ? null : defaultDisplayName(data.names[1]),
+  ];
+
 // A16: who the seat plays, and with what settings.
-const seatFields = (data: RoomData, seat: Seat) => ({
-  opponent_name: data.names[otherSeat(seat)] ?? null,
-  settings: data.settings,
-});
+const seatFields = (data: RoomData, seat: Seat) => {
+  const shown = displayNames(data);
+  return {
+    opponent_name: data.names[otherSeat(seat)] ?? null,
+    // Seat 1 asks only once it has joined.
+    display_name: shown[seat] ?? '',
+    opponent_display_name: shown[otherSeat(seat)] ?? null,
+    settings: data.settings,
+  };
+};
 
 // `now`: when the answer is made (epoch ms). `stacksBefore`: the stacks the
 // last finished hand started from.
