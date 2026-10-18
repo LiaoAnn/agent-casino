@@ -55,3 +55,24 @@ for (const path of [
     expect([...origins]).toEqual([new URL(page.url()).origin]);
   });
 }
+
+// A phone (390px) never scrolls sideways: long values such as the seed wrap.
+test.describe('on a 390px phone', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  for (const path of [
+    '/',
+    `/matches/${match.match_id}`,
+    `/watch/${data.watch.playing.room_id}?token=fake-watch-token`,
+    `/watch/${data.watch.finished.room_id}?token=fake-watch-token`,
+  ]) {
+    test(`${path} is no wider than the screen`, async ({ page }) => {
+      await page.goto(path);
+      await expect(
+        page.getByRole('heading', { level: 2 }).first(),
+      ).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(390);
+    });
+  }
+});

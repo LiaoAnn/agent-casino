@@ -61,13 +61,17 @@ export function Pairs({
     <dl
       aria-label={label}
       className={cn(
-        'grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-2 text-ivory text-sm',
+        'grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 text-ivory text-sm sm:gap-x-6',
         className,
       )}>
       {items.map(([term, value, itemClass]) => (
         <div key={term} className="contents">
-          <dt className="text-mist">{term}</dt>
-          <dd className={cn('tabular-nums', itemClass)}>{value}</dd>
+          <dt className="whitespace-nowrap text-mist">{term}</dt>
+          {/* Long values such as the 64-hex seed wrap instead of widening the page. */}
+          <dd
+            className={cn('tabular-nums [overflow-wrap:anywhere]', itemClass)}>
+            {value}
+          </dd>
         </div>
       ))}
     </dl>

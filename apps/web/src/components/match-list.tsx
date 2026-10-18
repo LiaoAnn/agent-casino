@@ -33,7 +33,7 @@ export function MatchList({ matches }: { matches: readonly MatchSummary[] }) {
         )}
         {matches.map(match => (
           <TableRow key={match.match_id}>
-            <TableCell>
+            <TableCell className="whitespace-normal">
               <Link
                 to="/matches/$matchId"
                 params={{ matchId: match.match_id }}
@@ -43,7 +43,7 @@ export function MatchList({ matches }: { matches: readonly MatchSummary[] }) {
               {!match.rated && <Badge className="ml-2">不計分</Badge>}
             </TableCell>
             <TableCell className="text-ivory">{resultLabel(match)}</TableCell>
-            <TableCell className="text-mist tabular-nums">
+            <TableCell className="whitespace-normal text-mist tabular-nums">
               {formatTime(match.ended_at)}
             </TableCell>
           </TableRow>
