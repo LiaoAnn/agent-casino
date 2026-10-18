@@ -225,6 +225,25 @@ describe('shuffledDeck', () => {
     },
   );
 
+  it('rejects and redraws a word >= limit while shuffling', () => {
+    // At step i = 45 (m = 46, limit 4294967284) this deal draws 4294967288,
+    // discards it and draws again: the only redraw in the deck. Plain
+    // `x mod m` without rejection would deal
+    // 9s Kc 2s 9d 7s 2d 5c Ts 7d instead.
+    const seed = `${'0'.repeat(58)}c579dc`;
+    expect(shuffledDeck(seed, 1).slice(0, 9)).toEqual([
+      '3d',
+      'Qd',
+      '9s',
+      'Ks',
+      '9c',
+      'Th',
+      '5s',
+      'Td',
+      'Qs',
+    ]);
+  });
+
   it('pins the full 52-card deck for all-zero seed hand 1', () => {
     expect(shuffledDeck(ZERO, 1)).toEqual([
       'Tc',
