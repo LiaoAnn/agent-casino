@@ -151,8 +151,13 @@ const WAIT_MS = 30_000;
 const ABSENT_AFTER_TIMEOUTS = 3;
 // 狀況處理: a room nobody joins in 5 minutes is dissolved.
 const DISSOLVE_AFTER_MS = 5 * 60 * 1000;
-// How soon a failed write of a finished match is tried again.
-const RECORD_RETRY_MS = 10_000;
+// A failed write of a finished match is tried again after as long as the
+// match has been over, so about twice as long each time: at least 10 seconds,
+// at most an hour, and no more alarms once it ended 24 hours ago (T22: a write
+// that always fails would otherwise wake the room forever).
+const RECORD_RETRY_MIN_MS = 10_000;
+const RECORD_RETRY_MAX_MS = 60 * 60 * 1000;
+const RECORD_GIVE_UP_AFTER_MS = 24 * 60 * 60 * 1000;
 // A8: an hour after the room ended, its tokens stop working.
 const EXPIRES_AFTER_END_MS = 60 * 60 * 1000;
 const PLAY_AGAIN =
@@ -718,7 +723,15 @@ export class RoomReferee {
       });
     } catch (error) {
       console.error(`Room ${loaded.room_id}: storing the match failed`, error);
-      await this.#storage.setAlarm(this.#now() + RECORD_RETRY_MS);
+      const retry = recordRetryAt(ended, this.#now());
+      if (retry === null) {
+        console.error(
+          `Room ${loaded.room_id}: gave up storing the match a day after it ended`,
+        );
+        await this.#storage.deleteAlarm();
+      } else {
+        await this.#storage.setAlarm(retry);
+      }
       return false;
     }
     // Reloaded: other requests may have saved while D1 was busy.
@@ -819,11 +832,21 @@ const unrecorded = (
 const alarmAt = (data: RoomData, now: number): number | null =>
   data.ended
     ? unrecorded(data)
-      ? now + RECORD_RETRY_MS
+      ? recordRetryAt(data.ended, now)
       : null
     : data.match
       ? (data.turn?.deadline ?? null)
       : data.created_at + DISSOLVE_AFTER_MS;
+
+// When to try again to store a match that ended at `ended.at` (epoch ms), or
+// null once it is too late.
+const recordRetryAt = (ended: Ended, now: number): number | null => {
+  const age = now - ended.at;
+  if (age >= RECORD_GIVE_UP_AFTER_MS) return null;
+  return (
+    now + Math.min(RECORD_RETRY_MAX_MS, Math.max(RECORD_RETRY_MIN_MS, age))
+  );
+};
 
 // The stacks with the unfinished hand called off: chips in its pot go back.
 const calledOff = ({ match, settings }: RoomData): [number, number] =>
