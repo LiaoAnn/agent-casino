@@ -204,6 +204,7 @@
   - `__root.tsx` 放共用的外框：深色底、站名（Cinzel）、連到排行榜的連結。
   - 頁面只負責組合元件，`Hand`、座位、牌、標籤這些都抽到 `components/`，`/matches` 和 `/watch` 共用同一套。
   - 加一個測試擋住寫死的顏色：`routes/` 和 `components/` 裡不能出現 hex 色碼或 Tailwind 內建色票（例如 `bg-red-500`、`text-zinc-400`），顏色只能用 design token。
+- 順手處理 T24 發現的事：`watch_url` 的 token 在網址的 query string 裡，web Worker 開了 observability，第一次打開觀戰頁時 token 會被記進 Cloudflare 的請求 log。在 `apps/web/wrangler.jsonc` 加 `observability.redact_query_string: true`（所有環境）。
 - 只改：`apps/web/`。
 - 驗證：`pnpm test:web`（既有的 e2e 照樣全過）。另外檢查一遍 web-design skill 的對比表：沒有用到禁止的配對。
 - 功能驗證：在 worktree 網址跟 house-bot 打一場。排行榜、對局紀錄、觀戰頁（進行中和結束後）各截一張桌機和手機（390px）的圖貼在 PR；再開「減少動態效果」截一張觀戰頁。截圖照 web-design skill 自我檢查後就可以合併，不用等 Ann。
