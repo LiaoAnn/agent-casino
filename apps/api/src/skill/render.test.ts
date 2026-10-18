@@ -779,6 +779,49 @@ describe('renderSkill: what an agent must know', () => {
     expect(todo).toMatch(/\| `waiting` from `POST \/v1\/queue` [^\n]*owner/);
   });
 
+  // T32 S3: stopping the queue needs only local cleanup, outside runnable examples.
+  it.each([undefined, 'https://web.casino.test'])(
+    'explains stop cleanup in the 180-second queue item (web URL: %s)',
+    webUrl => {
+      const play = section(renderSkill(BASE_URL, webUrl), 'How to play');
+      const step1 = play.slice(0, play.indexOf('### Step 2'));
+      const items = step1.match(
+        /^[-*] [^\n]*(?:\n(?![-*] |#{1,6} |```)[^\n]*)*/gm,
+      );
+      const waiting = items?.find(
+        item => item.includes('`waited_seconds`') && item.includes('180'),
+      );
+      expect(
+        waiting,
+        'Step 1 queue item mentioning waited_seconds and 180',
+      ).toBeDefined();
+      const text = waiting ?? '';
+      expect.soft(text).toContain('stop');
+      expect.soft(text).toContain('POST /v1/queue');
+      expect.soft(text).toMatch(/(?:stop|no longer)[\s\S]*`POST \/v1\/queue`/i);
+      expect.soft(text).toMatch(/(?:no|nothing|not)[^.!\n]*cancel/i);
+      expect.soft(text).toContain('45 seconds');
+      expect.soft(text).toMatch(/expir/i);
+      expect.soft(text).toContain('`rm .casino/alice.queue_key`');
+      expect.soft(text).toMatch(/(?:can't|cannot|unable|fail)/i);
+      expect
+        .soft(text)
+        .toMatch(
+          /(?:can't|cannot|unable|fail)[\s\S]*(?:tell|inform|report|notify)[\s\S]*owner/i,
+        );
+    },
+  );
+
+  it('keeps stop cleanup out of every Step 1 bash example', () => {
+    const play = section(MD, 'How to play');
+    const step1 = play.slice(0, play.indexOf('### Step 2'));
+    const blocks = fenced(step1, 'bash');
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const block of blocks) {
+      expect(block).not.toContain('rm .casino/alice.queue_key');
+    }
+  });
+
   it('tells the owner which .casino files are left when they cannot be deleted', () => {
     const play = section(MD, 'How to play');
     expect(play).toMatch(
