@@ -1,0 +1,237 @@
+import { describe, expect, it, vi } from 'vitest';
+import { apiError } from '../contract/errors';
+import { SETTINGS_DEFAULTS } from '../contract/schemas';
+import {
+  MatchQueue,
+  type OpenMatch,
+  type QueueInput,
+  type Seated,
+} from './pairing';
+
+const WAIT_MS = 60;
+const HOLD_MS = 45_000;
+const ROOM = 'r_0123456789';
+const seats: [Seated, Seated] = [
+  { room_id: ROOM, seat: 0, token: 'alice-token' },
+  { room_id: ROOM, seat: 1, token: 'bob-token' },
+];
+const opened = { ok: true as const, value: seats };
+const waiting = {
+  ok: true,
+  value: {
+    status: 'waiting',
+    hint: 'No opponent yet. Call POST /v1/queue again',
+  },
+};
+const matched = (seat: 0 | 1) => ({
+  ok: true,
+  value: {
+    status: 'matched',
+    ...seats[seat],
+    hint: `Matched. Next, call GET /v1/rooms/${ROOM}/wait`,
+  },
+});
+
+const fixture = () => {
+  const clock = { ms: 0 };
+  const openMatch = vi.fn<OpenMatch>().mockResolvedValue(opened);
+  const queue = new MatchQueue(openMatch, {
+    waitMs: WAIT_MS,
+    now: () => clock.ms,
+  });
+  return { clock, openMatch, queue };
+};
+
+// Attach a rejection handler while another request is being arranged. The
+// original promise still rejects when awaited, including against the RED stub.
+const start = (queue: MatchQueue, input: QueueInput) => {
+  const pending = queue.queue(input);
+  void pending.catch(() => {});
+  return pending;
+};
+
+describe('MatchQueue (A2)', () => {
+  it('holds a lone request until waitMs, then returns the exact waiting hint', async () => {
+    const { queue, openMatch } = fixture();
+    const started = performance.now();
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(WAIT_MS - 5);
+    expect(openMatch).not.toHaveBeenCalled();
+  });
+
+  it('pairs concurrent requests once, preserving order and name spelling', async () => {
+    const { queue, openMatch } = fixture();
+    const first = { name: 'AlIce' };
+    const second = { name: 'bOB' };
+    expect(
+      await Promise.all([queue.queue(first), queue.queue(second)]),
+    ).toEqual([matched(0), matched(1)]);
+    expect(openMatch).toHaveBeenCalledExactlyOnceWith(first, second);
+  });
+
+  it('matches a retained waiter and returns its result on the next call', async () => {
+    const { queue, clock } = fixture();
+    const alice = start(queue, { name: 'Alice' });
+    clock.ms += 1_000;
+    expect(await alice).toEqual(waiting);
+    clock.ms += HOLD_MS - 1;
+    expect(await queue.queue({ name: 'Bob' })).toEqual(matched(1));
+    expect(await queue.queue({ name: 'Alice' })).toEqual(matched(0));
+  });
+
+  it('wakes an outstanding long poll as soon as an opponent arrives', async () => {
+    const { queue } = fixture();
+    const alice = start(queue, { name: 'Alice' });
+    const started = performance.now();
+    expect(await queue.queue({ name: 'Bob' })).toEqual(matched(1));
+    expect(await alice).toEqual(matched(0));
+    expect(performance.now() - started).toBeLessThan(WAIT_MS);
+  });
+
+  it('expires queue eligibility 45 seconds after waiting is returned', async () => {
+    const { queue, clock, openMatch } = fixture();
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    clock.ms += HOLD_MS + 1;
+    expect(await queue.queue({ name: 'Bob' })).toEqual(waiting);
+    expect(openMatch).not.toHaveBeenCalled();
+  });
+
+  it('replays matched results for 45 seconds from pairing, then queues anew', async () => {
+    const { queue, clock, openMatch } = fixture();
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    clock.ms = HOLD_MS - 1;
+    const [alice, bob] = await Promise.all([
+      queue.queue({ name: 'Alice' }),
+      queue.queue({ name: 'Bob' }),
+    ]);
+    expect([alice, bob]).toEqual([matched(0), matched(1)]);
+    clock.ms += HOLD_MS - 1;
+    expect(await queue.queue({ name: 'ALICE' })).toEqual(alice);
+    expect(await queue.queue({ name: 'BOB' })).toEqual(bob);
+    expect(openMatch).toHaveBeenCalledTimes(1);
+    clock.ms += 2;
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(openMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats case variants as one person renewing their wait', async () => {
+    const { queue, openMatch } = fixture();
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue({ name: 'ALICE' })).toEqual(waiting);
+    expect(openMatch).not.toHaveBeenCalled();
+    expect(await queue.queue({ name: 'Bob' })).toEqual(matched(1));
+    expect(await queue.queue({ name: 'alice' })).toEqual(matched(0));
+    expect(openMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('wakes both simultaneous calls for the same name with the same match', async () => {
+    const { queue, openMatch } = fixture();
+    const a = start(queue, { name: 'Alice' });
+    const duplicate = start(queue, { name: 'ALICE' });
+    expect(await queue.queue({ name: 'Bob' })).toEqual(matched(1));
+    expect(await Promise.all([a, duplicate])).toEqual([matched(0), matched(0)]);
+    expect(openMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      { settings: { ...SETTINGS_DEFAULTS, hands: 2 } },
+      { settings: { ...SETTINGS_DEFAULTS, hands: 3 } },
+    ],
+    [
+      { settings: { ...SETTINGS_DEFAULTS, turn_seconds: 5 } },
+      { settings: { ...SETTINGS_DEFAULTS, turn_seconds: 10 } },
+    ],
+    [
+      { settings: { ...SETTINGS_DEFAULTS, starting_stack: 50 } },
+      { settings: { ...SETTINGS_DEFAULTS, starting_stack: 60 } },
+    ],
+    [{ test: { seed: '00'.repeat(32) } }, { test: { seed: '01'.repeat(32) } }],
+    [
+      { test: { chaos: { extra_waiting: 1 } } },
+      { test: { chaos: { extra_waiting: 2 } } },
+    ],
+  ])(
+    'does not pair incompatible settings or test options: %j / %j',
+    async (a, b) => {
+      const { queue, openMatch } = fixture();
+      expect(
+        await Promise.all([
+          queue.queue({ name: 'Alice', ...a }),
+          queue.queue({ name: 'Bob', ...b }),
+        ]),
+      ).toEqual([waiting, waiting]);
+      expect(openMatch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('pairs omitted settings with explicit defaults', async () => {
+    const { queue } = fixture();
+    expect(
+      await Promise.all([
+        queue.queue({ name: 'Alice' }),
+        queue.queue({ name: 'Bob', settings: SETTINGS_DEFAULTS }),
+      ]),
+    ).toEqual([matched(0), matched(1)]);
+  });
+
+  it('pairs identical settings and test options and passes them to openMatch', async () => {
+    const { queue, openMatch } = fixture();
+    const options = {
+      settings: { hands: 2, turn_seconds: 5, starting_stack: 100 },
+      test: { seed: '00'.repeat(32), chaos: { extra_waiting: 2 } },
+    };
+    const a = { name: 'Alice', ...options };
+    const b = { name: 'Bob', ...structuredClone(options) };
+    expect(await Promise.all([queue.queue(a), queue.queue(b)])).toEqual([
+      matched(0),
+      matched(1),
+    ]);
+    expect(openMatch).toHaveBeenCalledExactlyOnceWith(a, b);
+  });
+
+  it('returns an opening failure to the newcomer and retains the first waiter', async () => {
+    const { queue, openMatch } = fixture();
+    const failed = {
+      ok: false as const,
+      error: apiError('unavailable', 'Try again', 'Call POST /v1/queue again'),
+    };
+    openMatch.mockResolvedValueOnce(failed);
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    expect(await queue.queue({ name: 'Bob' })).toEqual(failed);
+    expect(await queue.queue({ name: 'Carol' })).toEqual(matched(1));
+    expect(await queue.queue({ name: 'Alice' })).toEqual(matched(0));
+    expect(openMatch.mock.calls).toEqual([
+      [{ name: 'Alice' }, { name: 'Bob' }],
+      [{ name: 'Alice' }, { name: 'Carol' }],
+    ]);
+  });
+
+  it('reserves both people while opening and deduplicates the first person', async () => {
+    const { queue, openMatch } = fixture();
+    let release!: (value: Awaited<ReturnType<OpenMatch>>) => void;
+    openMatch.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          release = resolve;
+        }),
+    );
+    expect(await queue.queue({ name: 'Alice' })).toEqual(waiting);
+    const bob = start(queue, { name: 'Bob' });
+    await vi.waitFor(() => expect(openMatch).toHaveBeenCalledTimes(1), {
+      timeout: 300,
+      interval: 5,
+    });
+    const carol = start(queue, { name: 'Carol' });
+    // Let Carol finish a complete long poll while the opening is still pending.
+    expect(await carol).toEqual(waiting);
+    expect(openMatch).toHaveBeenCalledTimes(1);
+    const duplicate = start(queue, { name: 'ALICE' });
+    release(opened);
+    expect(await Promise.all([bob, duplicate])).toEqual([
+      matched(1),
+      matched(0),
+    ]);
+    expect(await queue.queue({ name: 'Alice' })).toEqual(matched(0));
+  });
+});
