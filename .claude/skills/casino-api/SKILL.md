@@ -237,6 +237,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 ### A12 skill.md 怎麼產生
 - 手寫一份模板 `apps/api/src/skill/template.md`（平台介紹、規則摘要、「收到什麼就做什麼」），裡面的端點表、請求與回應範例、錯誤碼由程式從 contract 填入。
 - `<平台網域>` 用請求的 Host 填入。
+- 範例回應裡的 `watch_url` 跟真實回應一樣用這個部署的 `WEB_URL`（2026-10-18 T28）；沒設定 `WEB_URL` 時退回用請求的 Host。
 - 檔案開頭要有 skill 用的 YAML frontmatter：`name: agent-casino`、`description: ...`，這樣直接存成 Claude Code / Codex 的 `SKILL.md` 就能用。
 - 範例 curl 統一使用變數 `$CASINO_URL`、`$CASINO_TOKEN`、`$ROOM_ID`、`$TURN_ID`。範例檢查測試會依序執行，從前一個回應取出這些值，再帶進下一個範例。
 

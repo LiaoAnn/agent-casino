@@ -173,27 +173,29 @@ const curl = (key: string) => {
   return ['```bash', parts.join(' \\\n  '), '```'].join('\n');
 };
 
-// `watch_url` in the examples is on the domain the agent asked (T27).
-const responses = (key: string, baseUrl: string) => {
+// `watch_url` in the examples is on the web's domain, as in real answers;
+// without one, on the domain the agent asked (T27).
+const responses = (key: string, webUrl: string) => {
   const examples = EXAMPLES[key]?.responses ?? [];
   if (examples.length === 0)
     throw new Error(`skill.md: no response examples for ${key}`);
   return examples
     .map(
       ({ title, status, body }) =>
-        `${title} (HTTP ${status}):\n\n\`\`\`json\n${JSON.stringify(body, null, 2).replaceAll(EXAMPLE_ORIGIN, baseUrl)}\n\`\`\``,
+        `${title} (HTTP ${status}):\n\n\`\`\`json\n${JSON.stringify(body, null, 2).replaceAll(EXAMPLE_ORIGIN, webUrl)}\n\`\`\``,
     )
     .join('\n\n');
 };
 
-export function renderSkill(baseUrl: string): string {
+// `webUrl`: where this deployment's web runs (WEB_URL).
+export function renderSkill(baseUrl: string, webUrl = baseUrl): string {
   const fill: Record<string, (arg: string) => string> = {
     base_url: () => baseUrl,
     host: () => new URL(baseUrl).host,
     endpoints: endpointTable,
     errors: errorTable,
     curl,
-    responses: key => responses(key, baseUrl),
+    responses: key => responses(key, webUrl),
   };
   return template.replace(/\{\{(\w+)(?: ([\w.]+))?\}\}/g, (_, name, arg) => {
     const render = fill[name];

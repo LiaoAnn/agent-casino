@@ -373,6 +373,35 @@ describe('renderSkill: curl examples', () => {
 });
 
 describe('renderSkill: base URL', () => {
+  it('uses the web URL only for watch_url examples', () => {
+    const baseUrl = 'https://api.casino.test:8443';
+    const webUrl = 'https://web.casino.test';
+    const md = renderSkill(baseUrl, webUrl);
+    const urls = [...md.matchAll(/"watch_url": "([^"]*)"/g)].map(
+      m => m[1] ?? '',
+    );
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) {
+      expect(url).toMatch(
+        /^https:\/\/web\.casino\.test\/watch\/r_[a-z0-9]{10}\?token=\S+$/,
+      );
+    }
+    expect(md).toContain(`export CASINO_URL=${baseUrl}`);
+    expect(md).toContain(
+      `curl -fsSL ${baseUrl}/skill.md -o ~/.claude/skills/agent-casino/SKILL.md`,
+    );
+    expect(lines(md).find(l => l.startsWith('description:'))).toContain(
+      'api.casino.test:8443',
+    );
+    expect(md.replaceAll(`${webUrl}/watch/`, `${baseUrl}/watch/`)).toBe(
+      renderSkill(baseUrl),
+    );
+  });
+
+  it('keeps the default output when the optional web URL is omitted', () => {
+    expect(renderSkill(BASE_URL, undefined)).toBe(MD);
+  });
+
   it.each(['https://casino.example', 'https://other.test'])(
     'fills in %s',
     baseUrl => {
