@@ -130,8 +130,9 @@
 
 ### T12 配對排隊（約 600 行）· Blocked by：T07、T09
 - Matchmaker DO、`POST /v1/queue`（casino-api skill A2）、由 Matchmaker 依序寫入 Elo（casino-api skill A10）。
-- 只改：`apps/api/src/matchmaker/`、`apps/api/src/routes/queue.ts`。
-- 驗證：`pnpm test:api`。同時排 2 人進同一房；只有 1 人時 30 秒回 `waiting`；同時結束兩場，Elo 不會互相覆蓋。
+- 停權檢查（A9：停權的名字不能排隊、開房、進房，回 `name_banned`）：T09 的開房、進房還沒查，一起補上（T07 留下 `isBanned`）。
+- 只改：`apps/api/src/matchmaker/`、`apps/api/src/routes/queue.ts`，以及 `apps/api/src/routes/room.ts` 的 `createRoom`、`joinRoom` 加停權檢查（只加這個）。
+- 驗證：`pnpm test:api`。同時排 2 人進同一房；只有 1 人時 30 秒回 `waiting`；同時結束兩場，Elo 不會互相覆蓋；停權的名字排隊、開房、進房都回 `name_banned`。
 
 ### T13 串起來與測試環境（約 800 行）· Blocked by：T05、T08、T10、T11、T12
 - 房間結束 → 重播比對 → `recordMatch()`；內建機器人 `house-bot` 進房（casino-api skill A1）；網頁改接真 API；`scripts/e2e.sh`；skill.md 範例實打檢查；部署到 Cloudflare 測試環境。
