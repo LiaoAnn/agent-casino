@@ -53,7 +53,8 @@ function pickConfig(random: () => number, matchIndex: number): MatchConfig {
               .toString(16)
               .padStart(8, '0'),
           ).join('');
-  const hands = randomInt(random, 1, 200);
+  const maxHands = randomInt(random, 1, 200);
+  const blindEvery = randomInt(random, 1, 50);
   const roll = random();
   const startingStack =
     roll < 0.4
@@ -63,7 +64,7 @@ function pickConfig(random: () => number, matchIndex: number): MatchConfig {
         : roll < 0.9
           ? randomInt(random, 10, 200)
           : randomInt(random, 10, 2000);
-  return { seed, hands, startingStack };
+  return { seed, maxHands, blindEvery, startingStack };
 }
 
 /** Plain JSON with sorted keys, for cheap deep comparison. */
@@ -229,10 +230,10 @@ describe('fuzz: random legal play', () => {
             expectedHand = hand.hand_number + 1;
             const payout = payoutProblem(handStart, hand);
             if (payout) report(state, `hand ${hand.hand_number}: ${payout}`);
-            handStart = [hand.stacks[0], hand.stacks[1]];
-            for (const message of checkHand(hand, config)) {
+            for (const message of checkHand(hand, config, handStart)) {
               report(state, `hand ${hand.hand_number}: ${message}`);
             }
+            handStart = [hand.stacks[0], hand.stacks[1]];
             events.push(...hand.events);
             allHands.push(canonical(hand));
             handsPlayed++;

@@ -1,7 +1,8 @@
 /// <reference types="node" />
 /**
  * Play heads-up against the random bot in the terminal, no server needed:
- *   pnpm holdem:play [--seed HEX64] [--hands N] [--stack N] [--bot-seed N]
+ *   pnpm holdem:play [--seed HEX64] [--max-hands N] [--blind-every N] [--stack N]
+ *     [--bot-seed N]
  * You are seat 0. Type `fold`, `check`, `call` or `raise <total>` (or
  * `f`, `k`, `c`, `r <total>`). Input can be piped in, one action per line.
  */
@@ -27,7 +28,7 @@ registerHooks({
     return nextResolve(specifier, context);
   },
 });
-const { applyAction, legalActions, startMatch } = await import(
+const { applyAction, blindsAt, legalActions, startMatch } = await import(
   '../src/holdem/match'
 );
 const { randomAction } = await import('../src/holdem/bot');
@@ -39,15 +40,17 @@ const randomSeed = () => Math.floor(Math.random() * 2 ** 32);
 const { values } = parseArgs({
   options: {
     seed: { type: 'string' },
-    hands: { type: 'string', default: '10' },
+    'max-hands': { type: 'string', default: '50' },
+    'blind-every': { type: 'string', default: '5' },
     stack: { type: 'string', default: '40' },
     'bot-seed': { type: 'string' },
   },
 });
 const config = {
   seed: values.seed ?? randomBytes(32).toString('hex'),
-  hands: Number(values.hands),
   startingStack: Number(values.stack),
+  blindEvery: Number(values['blind-every']),
+  maxHands: Number(values['max-hands']),
 };
 const botSeed =
   values['bot-seed'] === undefined ? randomSeed() : Number(values['bot-seed']);
@@ -64,8 +67,8 @@ const events: HistoryEvent[] = [];
 const hands: HandRecord[] = [];
 
 console.log(
-  `Seed ${config.seed}, bot seed ${botSeed}, ${config.hands} hands, ` +
-    `${config.startingStack} chips each. You are seat 0.`,
+  `Seed ${config.seed}, bot seed ${botSeed}, ${config.startingStack} chips each, ` +
+    `blinds double every ${config.blindEvery} hands, at most ${config.maxHands} hands. You are seat 0.`,
 );
 announceHand();
 
@@ -154,7 +157,7 @@ function describe(action: Action, legal: LegalAction[]): string {
 function announceHand(): void {
   const dealer = state.button === YOU ? 'you are' : 'bot is';
   console.log(
-    `\n=== Hand ${state.handNumber}/${config.hands} (${dealer} the button) ===`,
+    `\n=== Hand ${state.handNumber}, blinds ${blindsAt(state.handNumber, config.blindEvery).join('/')} (${dealer} the button) ===`,
   );
 }
 
