@@ -424,10 +424,13 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
       turn_seconds: 10,
     });
     const before = await yourTurn(t, roomId, tokens[0]);
+    expect(before.seconds_remaining).toBe(10);
     t.clock.ms = joinedAt + 10_000 - 1;
     await t.referee(roomId).alarm();
     const after = await yourTurn(t, roomId, tokens[0]);
-    expect(after).toEqual(before);
+    // The remaining 1 ms rounds down to zero; every other field stays equal.
+    expect(after.seconds_remaining).toBe(0);
+    expect(after).toEqual({ ...before, seconds_remaining: 0 });
     expect(t.storage(roomId).alarm).toBe(joinedAt + 10_000);
   });
 

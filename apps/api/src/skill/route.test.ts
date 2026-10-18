@@ -17,6 +17,30 @@ const getSkill = (url: string, headers: Record<string, string> = {}) =>
   handle(new Request(url, { method: 'GET', headers }), ENV);
 
 describe('GET /skill.md', () => {
+  it('uses WEB_URL for every watch_url while keeping the request host for the API', async () => {
+    const response = await handle(
+      new Request('http://casino.example/skill.md', {
+        headers: { host: 'play.casino.test' },
+      }),
+      { ...ENV, WEB_URL: 'https://web.casino.test' } as Bindings,
+    );
+    expect(response.status).toBe(200);
+    const md = await response.text();
+    const urls = [...md.matchAll(/"watch_url": "([^"]*)"/g)].map(
+      m => m[1] ?? '',
+    );
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) {
+      expect(url).toMatch(
+        /^https:\/\/web\.casino\.test\/watch\/r_[a-z0-9]{10}\?token=\S+$/,
+      );
+    }
+    expect(md).toBe(
+      renderSkill('https://play.casino.test', 'https://web.casino.test'),
+    );
+    expect(md).toContain('export CASINO_URL=https://play.casino.test');
+  });
+
   it('serves the rendered skill as markdown, over https', async () => {
     const response = await getSkill('http://casino.example/skill.md');
     expect(response.status).toBe(200);

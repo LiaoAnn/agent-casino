@@ -25,6 +25,7 @@ import type { Bindings } from '../routes/env';
 import { renderSkill } from './render';
 
 const BASE = 'https://casino.example';
+const WEB_URL = 'https://web.test';
 // The values the examples show; the test sends the real ones, as an agent
 // copies them from the responses.
 const EXAMPLE_INVITE = 'K7Q2MX';
@@ -63,7 +64,7 @@ const makeEnv = (): Bindings => {
   const referees = new Map<string, RoomReferee>();
   const env = {
     TOKEN_SECRET: 'skill-run-token-secret',
-    WEB_URL: 'https://web.test',
+    WEB_URL,
     ADMIN_KEY: 'skill-run-admin-key',
     DB: testD1.d1,
     ROOM: {
@@ -182,7 +183,7 @@ interface Ran {
 describe('skill.md examples, run against the API', () => {
   it('every curl runs as written and answers what the contract says', async () => {
     const env = makeEnv();
-    const md = renderSkill(BASE);
+    const md = renderSkill(BASE, WEB_URL);
     const vars: Record<string, string> = { CASINO_URL: BASE };
     const ran: Ran[] = [];
     const tokens: string[] = [];

@@ -176,14 +176,18 @@ export function verifyWatchToken(
 const JOIN_AGAIN =
   'Get a fresh token from POST /v1/queue, POST /v1/rooms or POST /v1/rooms/{room_id}/join';
 
+// A token the agent mistyped: its seat is still there under the saved one.
+const USE_SAVED =
+  'Resend with the token you saved when you got your seat (skill.md keeps it in .casino/$ROOM_ID.token), copied exactly. Do not queue or join again for another one: your seat stays with the token you have';
+
 const REJECTIONS: Record<TokenRejection, [message: string, hint: string]> = {
   malformed: [
-    'Missing or malformed token. Send the header "Authorization: Bearer <token>" with the token you got when you entered this room',
-    JOIN_AGAIN,
+    'No token in the right form. Send the header exactly as "Authorization: Bearer <token>": the word Bearer, one space, then the token with no quotes, spaces or line breaks around or inside it',
+    USE_SAVED,
   ],
   bad_signature: [
-    'Token signature is invalid. Send the token exactly as the server gave it to you, without changes',
-    JOIN_AGAIN,
+    'This token is not the one the server gave you: its signature does not match, so some characters were changed, added or left out',
+    USE_SAVED,
   ],
   expired: [
     `Token expired. Tokens last ${TOKEN_TTL_SECONDS / 3600} hours after they are issued`,

@@ -94,7 +94,7 @@ const ADVICE: Record<ErrorCode, string> = {
   invalid_request:
     'Your JSON body, path or query is malformed. Fix it as `message` says and resend.',
   invalid_token:
-    'The room token is missing, wrong, or for another room. Send `Authorization: Bearer $(cat .casino/$ROOM_ID.token)`, with the token you saved for this room. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
+    'The room token is missing, mistyped, or for another room. `message` says which: the header is not exactly `Authorization: Bearer <token>`, or the token differs from the one you got. Send `Authorization: Bearer $(cat .casino/$ROOM_ID.token)` with the token you saved for this room, exactly as saved; do not queue or join again for another one, your seat stays with that token. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
   room_not_found: 'No such room. Check `$ROOM_ID`.',
   room_full: 'Both seats are taken. Queue or open your own room instead.',
   wrong_invite_code: 'Ask your opponent for the right invite code.',
@@ -173,27 +173,29 @@ const curl = (key: string) => {
   return ['```bash', parts.join(' \\\n  '), '```'].join('\n');
 };
 
-// `watch_url` in the examples is on the domain the agent asked (T27).
-const responses = (key: string, baseUrl: string) => {
+// `watch_url` in the examples is on the web's domain, as in real answers;
+// without one, on the domain the agent asked (T27).
+const responses = (key: string, webUrl: string) => {
   const examples = EXAMPLES[key]?.responses ?? [];
   if (examples.length === 0)
     throw new Error(`skill.md: no response examples for ${key}`);
   return examples
     .map(
       ({ title, status, body }) =>
-        `${title} (HTTP ${status}):\n\n\`\`\`json\n${JSON.stringify(body, null, 2).replaceAll(EXAMPLE_ORIGIN, baseUrl)}\n\`\`\``,
+        `${title} (HTTP ${status}):\n\n\`\`\`json\n${JSON.stringify(body, null, 2).replaceAll(EXAMPLE_ORIGIN, webUrl)}\n\`\`\``,
     )
     .join('\n\n');
 };
 
-export function renderSkill(baseUrl: string): string {
+// `webUrl`: where this deployment's web runs (WEB_URL).
+export function renderSkill(baseUrl: string, webUrl = baseUrl): string {
   const fill: Record<string, (arg: string) => string> = {
     base_url: () => baseUrl,
     host: () => new URL(baseUrl).host,
     endpoints: endpointTable,
     errors: errorTable,
     curl,
-    responses: key => responses(key, baseUrl),
+    responses: key => responses(key, webUrl),
   };
   return template.replace(/\{\{(\w+)(?: ([\w.]+))?\}\}/g, (_, name, arg) => {
     const render = fill[name];

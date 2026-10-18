@@ -26,6 +26,10 @@ const errorResponse = (error: ApiError) =>
 
 const READ_THE_SKILL = 'Read GET /skill.md for the endpoints and examples';
 
+// A17: a queue_key that is missing or not a string.
+const QUEUE_KEY_HINT =
+  'Make one queue_key once with `openssl rand -hex 16`, save it, and send the same one on every POST /v1/queue';
+
 const formatIssue = SchemaIssue.makeFormatterStandardSchemaV1();
 
 const INPUT_KINDS: Record<string, string> = {
@@ -58,15 +62,17 @@ const contractError = (cause: Cause.Cause<unknown>, route: string) => {
     ? INPUT_KINDS[defect.kind]
     : undefined;
   if (HttpApiError.HttpApiSchemaError.is(defect) && kind) {
-    const issues = formatIssue(defect.cause.issue).issues.map(
-      ({ path, message }) =>
-        path?.length ? `${path.join('.')}: ${message}` : message,
+    const { issues } = formatIssue(defect.cause.issue);
+    const lines = issues.map(({ path, message }) =>
+      path?.length ? `${path.join('.')}: ${message}` : message,
     );
     return errorResponse(
       apiError(
         'invalid_request',
-        `Invalid ${kind} for ${route}: ${issues.join('; ')}`,
-        `Fix the ${kind} and resend. ${READ_THE_SKILL}`,
+        `Invalid ${kind} for ${route}: ${lines.join('; ')}`,
+        issues.some(({ path }) => path?.[0] === 'queue_key')
+          ? QUEUE_KEY_HINT
+          : `Fix the ${kind} and resend. ${READ_THE_SKILL}`,
       ),
     );
   }

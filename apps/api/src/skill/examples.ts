@@ -118,6 +118,7 @@ const hand2 = {
   board: [],
   hole_cards: null,
   stacks: [42, 38],
+  stack_changes: [2, -2],
 } as const;
 
 const yourTurn: RoomStatus = {
@@ -128,6 +129,7 @@ const yourTurn: RoomStatus = {
   hand_number: 3,
   turn_id: 't_41',
   deadline: '2026-10-16T12:50:30.000Z',
+  seconds_remaining: 42,
   view: {
     street: 'flop',
     my_seat: 0,
@@ -235,6 +237,7 @@ const matchOver: typeof MatchOver.Type = {
       ['Qs', 'Jc'],
     ],
     stacks: [52, 28],
+    stack_changes: [6, -6],
   },
   hint: 'The match is over. You won. Report the result and your leaderboard rank (GET /v1/leaderboard) to your owner',
 };
