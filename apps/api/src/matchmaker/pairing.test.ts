@@ -649,6 +649,49 @@ describe('MatchQueue waiting information (A18)', () => {
     expect(await pending).toEqual(waitingFor(30));
   });
 
+  it('preserves continuous waiting after a failed room opening returns the waiter to the queue', async () => {
+    const { queue, clock, openMatch } = fixture();
+    const failed = {
+      ok: false as const,
+      error: apiError('unavailable', 'Try again', 'Call POST /v1/queue again'),
+    };
+    await poll(queue, { name: 'Alice' });
+    clock.ms = 30_000;
+    expect(await poll(queue, { name: 'Alice' })).toEqual(waitingFor(30));
+
+    clock.ms = 40_000;
+    openMatch.mockResolvedValueOnce(failed);
+    expect(await queue.queue(withKey({ name: 'Bob' }))).toEqual(failed);
+    expect(openMatch).toHaveBeenCalledExactlyOnceWith(
+      { name: 'Alice' },
+      { name: 'Bob' },
+    );
+
+    clock.ms = 60_999;
+    expect(await poll(queue, { name: 'Alice' })).toEqual(waitingFor(60));
+    expect(openMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('excludes a different-settings waiter that expires during the current long poll', async () => {
+    const { queue, clock, openMatch } = fixture();
+    await poll(queue, {
+      name: 'Bob',
+      settings: { ...SETTINGS_DEFAULTS, hands: 3 },
+    });
+
+    clock.ms = 30_000;
+    const pending = start(queue, {
+      name: 'Alice',
+      settings: { ...SETTINGS_DEFAULTS, hands: 2 },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    clock.ms = HOLD_MS + 1;
+    await vi.advanceTimersByTimeAsync(WAIT_MS);
+
+    expect(await pending).toEqual(waitingFor(15, 1));
+    expect(openMatch).not.toHaveBeenCalled();
+  });
+
   it.each(['same-key', 'new-key'] as const)(
     'starts waiting from zero after eligibility expires with %s',
     async key => {
