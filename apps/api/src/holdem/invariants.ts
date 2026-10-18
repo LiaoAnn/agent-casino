@@ -1,6 +1,7 @@
 import type { Card } from './cards';
 import { compareHands, evaluateHand } from './hand';
 import {
+  blindsAt,
   type HandRecord,
   type HistoryEvent,
   legalActions,
@@ -54,15 +55,26 @@ export function checkState(state: MatchState): string[] {
       errors.push('A finished match must keep its last hand');
     }
     const busted = state.stacks[0] === 0 || state.stacks[1] === 0;
-    if (!busted && state.handNumber !== config.hands) {
+    if (!busted && state.handNumber !== config.maxHands) {
       errors.push(
-        `Match ended after hand ${state.handNumber} of ${config.hands} with both players still holding chips`,
+        `Match ended after hand ${state.handNumber} of ${config.maxHands} with both players still holding chips`,
       );
     }
     return errors;
   }
   if (state.toAct === null) return errors;
 
+  errors.push(
+    ...checkBlinds(
+      state.history,
+      state.button,
+      blindsAt(state.handNumber, config.blindEvery),
+      [
+        state.stacks[0] + state.contributed[0],
+        state.stacks[1] + state.contributed[1],
+      ],
+    ),
+  );
   errors.push(...checkLegal(state, state.toAct));
   const expected = nextToAct(state.history, state.button, state.street);
   if (expected !== state.toAct) {
@@ -86,7 +98,11 @@ export function checkState(state: MatchState): string[] {
 }
 
 /** Rule violations in one finished hand record of a match with `config`. */
-export function checkHand(hand: HandRecord, config: MatchConfig): string[] {
+export function checkHand(
+  hand: HandRecord,
+  config: MatchConfig,
+  before?: [number, number],
+): string[] {
   const errors: string[] = [];
   if (
     sum(hand.stacks) !== 2 * config.startingStack ||
@@ -96,6 +112,17 @@ export function checkHand(hand: HandRecord, config: MatchConfig): string[] {
       `Stacks ${hand.stacks.join(', ')} don't add up to ${2 * config.startingStack}`,
     );
   }
+  const scheduled = blindsAt(hand.hand_number, config.blindEvery);
+  if (JSON.stringify(hand.blinds) !== JSON.stringify(scheduled)) {
+    errors.push('Recorded blinds do not match the scheduled blinds');
+  }
+  // Heads-up pots contain equal matched contributions; undo the payout.
+  const start: [number, number] = before ?? [...hand.stacks];
+  if (!before && hand.winner_seat !== null) {
+    start[hand.winner_seat] -= hand.pot / 2;
+    start[otherSeat(hand.winner_seat)] += hand.pot / 2;
+  }
+  errors.push(...checkBlinds(hand.events, hand.button_seat, scheduled, start));
   const expectedPot = potOf(hand.events);
   if (hand.pot !== expectedPot || hand.pot <= 0) {
     errors.push(`Pot is ${hand.pot}, but the events put in ${expectedPot}`);
@@ -220,9 +247,9 @@ function checkHandNumber(
   if (
     !Number.isInteger(handNumber) ||
     handNumber < 1 ||
-    handNumber > config.hands
+    handNumber > config.maxHands
   ) {
-    errors.push(`Hand ${handNumber} is outside 1 to ${config.hands}`);
+    errors.push(`Hand ${handNumber} is outside 1 to ${config.maxHands}`);
   }
   if (button !== (handNumber % 2 === 1 ? 0 : 1)) {
     errors.push(`Seat ${button} has the button in hand ${handNumber}`);
@@ -296,3 +323,20 @@ const sameCards = (a: Card[] | Card[][], b: Card[] | Card[][]) =>
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
 
 const isChipCount = (value: number) => Number.isInteger(value) && value >= 0;
+
+/** Scheduled blinds are capped by each seat's stack before posting. */
+function checkBlinds(
+  events: HistoryEvent[],
+  button: Seat,
+  scheduled: [number, number],
+  before: [number, number],
+): string[] {
+  const errors: string[] = [];
+  for (const [index, seat] of [button, otherSeat(button)].entries()) {
+    const expected = Math.min(scheduled[index], before[seat]);
+    if (events[index]?.amount !== expected) {
+      errors.push(`Seat ${seat} blind must be ${expected}`);
+    }
+  }
+  return errors;
+}

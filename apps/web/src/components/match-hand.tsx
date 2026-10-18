@@ -3,6 +3,7 @@ import { Felt, TableCenter } from '@/components/felt';
 import { type HandRecord, Steps } from '@/components/hand';
 import { Panel } from '@/components/panel';
 import { SeatPanel } from '@/components/seat-panel';
+import { blindsLabel } from '@/lib/format';
 
 type Ratings = readonly [number | undefined, number | undefined];
 
@@ -44,6 +45,7 @@ export function HandTable({
         pot={hand.pot}
         details={[
           ['莊家', players[hand.button_seat]],
+          ['盲注', blindsLabel(hand.blinds)],
           ['結果', result, 'basis-full justify-center text-gold-200'],
         ]}
       />

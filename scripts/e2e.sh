@@ -36,7 +36,7 @@ trap 'rm -rf "$TMP"; kill $(jobs -p) 2>/dev/null || true' EXIT
 RUN=$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 8 || true)
 # Settings nobody else is likely to queue with, so the two players here meet
 # each other (A2).
-SETTINGS='{"hands":7,"turn_seconds":30,"starting_stack":40}'
+SETTINGS='{"starting_stack":40,"blind_every":3,"max_hands":40,"turn_seconds":30}'
 
 ok() { echo "ok - $*"; }
 fail() { echo "not ok - $*" >&2; exit 1; }
@@ -114,18 +114,35 @@ skill=$(get /skill.md)
 
 # --- a match against house-bot -------------------------------------------
 human="e2e-h-$RUN"
+r=$(post /v1/rooms \
+  "{\"game\":\"holdem\",\"name\":\"$human\",\"opponent\":\"bot\",\"settings\":{\"hands\":10}}" \
+  -w '\n%{http_code}')
+check "POST /v1/rooms with the old settings.hands: 400 pointing to max_hands" \
+  '.[0].code == "invalid_request" and .[1] == 400
+   and (.[0].hint | contains("max_hands"))' "$(jq -s . <<<"$r")"
 room=$(post /v1/rooms \
-  "{\"game\":\"holdem\",\"name\":\"$human\",\"opponent\":\"bot\",\"settings\":{\"hands\":10,\"turn_seconds\":30,\"starting_stack\":40}}")
-check "POST /v1/rooms with house-bot" '.seat == 0 and (.token | length > 0)' "$room"
+  "{\"game\":\"holdem\",\"name\":\"$human\",\"opponent\":\"bot\"}")
+# No settings: the defaults (holdem-rules 設定表).
+check "POST /v1/rooms with house-bot and the default settings" \
+  '.seat == 0 and (.token | length > 0)
+   and .settings == {starting_stack: 40, blind_every: 5, max_hands: 50, turn_seconds: 30}' "$room"
 bot_room=$(jq -r .room_id <<<"$room")
 play "$bot_room" "$(jq -r .token <<<"$room")" "$TMP/bot" ||
   fail "play house-bot to match_over"
 check "house-bot match: over, not rated" \
   '.status == "match_over" and (.result | IN("win", "loss", "draw"))
-   and .ratings == null and (.final_stacks | add) == 80' "$(cat "$TMP/bot")"
+   and .ratings == null and (.final_stacks | add) == 80
+   and .view.next_blinds_at_hand == null
+   and .view.blinds == .last_hand.blinds' "$(cat "$TMP/bot")"
+# A freezeout (A19): it ends on a bust or after max_hands, and the blinds
+# double every blind_every hands.
 check "GET /v1/matches/{id} of the house-bot match" \
   ".players == [\"$human\", \"house-bot\"] and .rated == false
-   and (.hands | length) >= 1 and (.hands | length) <= 10
+   and .settings == {starting_stack: 40, blind_every: 5, max_hands: 50, turn_seconds: 30}
+   and (.hands | length) >= 1 and (.hands | length) <= 50
+   and ((.final_stacks | index(0)) != null or (.hands | length) == 50)
+   and all(.hands[]; .blinds == [pow(2; (.hand_number - 1) / 5 | floor),
+                                 2 * pow(2; (.hand_number - 1) / 5 | floor)])
    and (.seed | test(\"^[0-9a-f]{64}$\"))" "$(get "/v1/matches/$bot_room")"
 
 # --- two players queue and play each other --------------------------------

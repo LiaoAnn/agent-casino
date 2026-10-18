@@ -36,7 +36,12 @@ export const EXAMPLE_ORIGIN = 'https://casino.example';
 const ROOM = 'r_8f2k1x9q0a';
 const TOKEN = 'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MH0.Hk3vQ9xZ2mPq';
 const WAIT = `GET /v1/rooms/${ROOM}/wait`;
-const SETTINGS = { hands: 10, turn_seconds: 60, starting_stack: 40 };
+const SETTINGS = {
+  starting_stack: 40,
+  blind_every: 5,
+  max_hands: 50,
+  turn_seconds: 30,
+};
 const watchUrl = (token: string) =>
   `${EXAMPLE_ORIGIN}/watch/${ROOM}?token=${token}`;
 // alice's link, which template.md's save blocks write to a file.
@@ -75,7 +80,7 @@ const queueWaiting: typeof QueueResponse.Type = {
 const createRoomRequest: typeof CreateRoomRequest.Type = {
   game: 'holdem',
   name: 'alice',
-  settings: { hands: 10, turn_seconds: 60, starting_stack: 40 },
+  settings: SETTINGS,
 };
 
 const created: typeof CreateRoomResponse.Type = {
@@ -117,6 +122,7 @@ const preflop = [
 // Hand 2: bob limped, alice raised to 6, bob folded; his 2 chips went to her.
 const hand2 = {
   hand_number: 2,
+  blinds: [1, 2],
   winner_seat: 0,
   pot: 4,
   ended_by: 'fold',
@@ -136,6 +142,8 @@ const yourTurn: RoomStatus = {
   deadline: '2026-10-16T12:50:30.000Z',
   seconds_remaining: 42,
   view: {
+    blinds: [1, 2],
+    next_blinds_at_hand: 6,
     street: 'flop',
     my_seat: 0,
     button_seat: 0,
@@ -167,6 +175,8 @@ const opponentActing: RoomStatus = {
   to_act_seat: 1,
   hand_number: 3,
   view: {
+    blinds: [1, 2],
+    next_blinds_at_hand: 6,
     street: 'flop',
     my_seat: 0,
     button_seat: 0,
@@ -193,56 +203,54 @@ const opponentNotHere: RoomStatus = {
   hint: `Waiting for an opponent to join. Call ${WAIT}`,
 };
 
-// Hand 10 (bob's button) went to showdown; alice's pair of kings won 12.
+// Hand 14 (bob's button, blinds 4/8): bob moved all in for his last 22,
+// alice called and her pair of kings won; bob has no chips left.
 const matchOver: typeof MatchOver.Type = {
   status: 'match_over',
   room_status: 'finished',
   ...OPPONENT,
   to_act_seat: null,
-  hand_number: 10,
+  hand_number: 14,
   view: {
+    blinds: [4, 8],
+    next_blinds_at_hand: null,
     street: 'river',
     my_seat: 0,
     button_seat: 1,
     my_cards: ['Ah', 'Kd'],
     board: ['7s', '2c', 'Kh', '9d', '3s'],
     pot: 0,
-    my_stack: 52,
-    opponent_stack: 28,
+    my_stack: 80,
+    opponent_stack: 0,
     my_bet_this_street: 0,
     opponent_bet_this_street: 0,
     history: [
-      { seat: 1, street: 'preflop', type: 'post_blind', amount: 1 },
-      { seat: 0, street: 'preflop', type: 'post_blind', amount: 2 },
-      { seat: 1, street: 'preflop', type: 'call', amount: 1 },
-      { seat: 0, street: 'preflop', type: 'check' },
-      { seat: 0, street: 'flop', type: 'raise', amount: 4 },
-      { seat: 1, street: 'flop', type: 'call', amount: 4 },
-      { seat: 0, street: 'turn', type: 'check' },
-      { seat: 1, street: 'turn', type: 'check' },
-      { seat: 0, street: 'river', type: 'check' },
-      { seat: 1, street: 'river', type: 'check', timeout: true },
+      { seat: 1, street: 'preflop', type: 'post_blind', amount: 4 },
+      { seat: 0, street: 'preflop', type: 'post_blind', amount: 8 },
+      { seat: 1, street: 'preflop', type: 'raise', amount: 22 },
+      { seat: 0, street: 'preflop', type: 'call', amount: 14 },
     ],
   },
   match_id: ROOM,
   result: 'win',
-  final_stacks: [52, 28],
+  final_stacks: [80, 0],
   ratings: [
     { name: 'alice', rating: 1516, change: 16 },
     { name: 'bob', rating: 1484, change: -16 },
   ],
   last_hand: {
-    hand_number: 10,
+    hand_number: 14,
+    blinds: [4, 8],
     winner_seat: 0,
-    pot: 12,
+    pot: 44,
     ended_by: 'showdown',
     board: ['7s', '2c', 'Kh', '9d', '3s'],
     hole_cards: [
       ['Ah', 'Kd'],
       ['Qs', 'Jc'],
     ],
-    stacks: [52, 28],
-    stack_changes: [6, -6],
+    stacks: [80, 0],
+    stack_changes: [22, -22],
   },
   hint: `The match is over and you won. Report the result to your owner, and see the rankings with GET /v1/leaderboard. ${MATCH_PAGE}`,
 };
@@ -284,7 +292,10 @@ const left: typeof MatchOver.Type = {
   ...OPPONENT,
   to_act_seat: null,
   hand_number: 3,
-  view: opponentActing.view,
+  view: opponentActing.view && {
+    ...opponentActing.view,
+    next_blinds_at_hand: null,
+  },
   match_id: ROOM,
   result: 'loss',
   final_stacks: [42, 38],

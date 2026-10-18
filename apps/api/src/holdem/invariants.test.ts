@@ -28,7 +28,8 @@ const raise = (amount: number): Action => ({ type: 'raise', amount });
 
 const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
   seed: '0000000000000000000000000000000000000000000000000000000000000005',
-  hands: 10,
+  maxHands: 10,
+  blindEvery: 50,
   startingStack: 40,
   ...overrides,
 });
@@ -109,7 +110,7 @@ const SCENARIOS: [string, Partial<MatchConfig>, Step[]][] = [
     'split pot on the last hand (seed ...0016, hands 1)',
     {
       seed: '0000000000000000000000000000000000000000000000000000000000000016',
-      hands: 1,
+      maxHands: 1,
     },
     [[0, raise(6)], [1, CALL], ...checkPostflop(1)],
   ],
@@ -152,7 +153,7 @@ const SCENARIOS: [string, Partial<MatchConfig>, Step[]][] = [
   ],
   [
     'match ends after the configured hands',
-    { hands: 2 },
+    { maxHands: 2 },
     [
       [0, FOLD],
       [1, FOLD],
@@ -204,12 +205,12 @@ function randomMatch(overrides: Partial<MatchConfig>, botSeed: number) {
 }
 
 const RANDOM_MATCHES: [Partial<MatchConfig>, number][] = [
-  [{ seed: '0'.repeat(64), hands: 30, startingStack: 10 }, 1],
-  [{ seed: 'f'.repeat(64), hands: 30, startingStack: 10 }, 2],
+  [{ seed: '0'.repeat(64), maxHands: 30, startingStack: 10 }, 1],
+  [{ seed: 'f'.repeat(64), maxHands: 30, startingStack: 10 }, 2],
   [
     {
       seed: '000000000000000000000000000000000000000000000000000000000000000b',
-      hands: 40,
+      maxHands: 40,
       startingStack: 40,
     },
     3,
@@ -217,7 +218,7 @@ const RANDOM_MATCHES: [Partial<MatchConfig>, number][] = [
   [
     {
       seed: '000000000000000000000000000000000000000000000000000000000000000c',
-      hands: 20,
+      maxHands: 20,
       startingStack: 2000,
     },
     4,
@@ -225,7 +226,7 @@ const RANDOM_MATCHES: [Partial<MatchConfig>, number][] = [
   [
     {
       seed: '000000000000000000000000000000000000000000000000000000000000000d',
-      hands: 200,
+      maxHands: 100,
       startingStack: 15,
     },
     5,
@@ -261,8 +262,8 @@ describe('checkState on legal play', () => {
   it('the start of a match has no violations', () => {
     for (const overrides of [
       {},
-      { seed: '0'.repeat(64), hands: 1, startingStack: 10 },
-      { seed: 'f'.repeat(64), hands: 200, startingStack: 2000 },
+      { seed: '0'.repeat(64), maxHands: 1, startingStack: 10 },
+      { seed: 'f'.repeat(64), maxHands: 100, startingStack: 2000 },
     ]) {
       expect(checkState(startMatch(config(overrides)))).toEqual([]);
     }
@@ -281,7 +282,8 @@ describe('checkState on legal play', () => {
     expect(states.some(s => s.over && s.stacks.includes(0))).toBe(true);
     expect(
       states.some(
-        s => s.over && s.handNumber === s.config.hands && !s.stacks.includes(0),
+        s =>
+          s.over && s.handNumber === s.config.maxHands && !s.stacks.includes(0),
       ),
     ).toBe(true);
     expect(states.some(s => !s.over && s.stacks.includes(0))).toBe(true);
@@ -345,7 +347,7 @@ describe('checkState reports broken states', () => {
   const hand2 = () => stateAfter({}, [[0, FOLD]]);
   // Over after 2 of 2 hands, stacks [40, 40].
   const overByHands = () =>
-    stateAfter({ hands: 2 }, [
+    stateAfter({ maxHands: 2 }, [
       [0, FOLD],
       [1, FOLD],
     ]);
@@ -588,10 +590,10 @@ describe('checkState reports broken states', () => {
       },
     ],
     [
-      'hand number above config.hands',
+      'hand number above config.maxHands',
       hand2,
       s => {
-        s.config.hands = 1;
+        s.config.maxHands = 1;
       },
     ],
     // 7. history order and who acts next
@@ -689,7 +691,7 @@ describe('checkState reports broken states', () => {
       'over early: both have chips and hands remain',
       overByHands,
       s => {
-        s.config.hands = 3;
+        s.config.maxHands = 3;
       },
     ],
   ];
@@ -771,13 +773,13 @@ describe('checkHand reports broken records', () => {
     ) as HandRecord;
   // Hand 2 of 2 (seat 1 button): seat 1 folds its small blind.
   const hand2Fold = () =>
-    trace({ hands: 2 }, [
+    trace({ maxHands: 2 }, [
       [0, FOLD],
       [1, FOLD],
     ]).hands[1];
 
   const tenChips = config({ startingStack: 10 });
-  const twoHands = config({ hands: 2 });
+  const twoHands = config({ maxHands: 2 });
 
   it('the base records themselves are fine', () => {
     expect(checkHand(showdown(), config())).toEqual([]);
@@ -862,9 +864,9 @@ describe('checkHand reports broken records', () => {
       },
     ],
     [
-      'hand number above config.hands',
+      'hand number above config.maxHands',
       hand2Fold,
-      config({ hands: 1 }),
+      config({ maxHands: 1 }),
       () => {},
     ],
     // 3. event order
@@ -1273,7 +1275,7 @@ describe('bad numbers are reported, not thrown', () => {
       },
     ],
     [
-      'handNumber above config.hands',
+      'handNumber above config.maxHands',
       s => {
         s.handNumber = 11;
       },
@@ -1340,7 +1342,7 @@ describe('bad numbers are reported, not thrown', () => {
       config(),
     ],
     [
-      'hand_number above config.hands',
+      'hand_number above config.maxHands',
       h => {
         h.hand_number = 11;
       },
@@ -1366,5 +1368,75 @@ describe('bad numbers are reported, not thrown', () => {
       found = checkHand(hand, matchConfig);
     }).not.toThrow();
     expectViolations(found);
+  });
+});
+
+describe('blind invariants', () => {
+  it('accepts upgraded blinds and checks each posted amount against pre-hand stacks', () => {
+    const matchConfig = config({
+      blindEvery: 1,
+      maxHands: 20,
+      startingStack: 10,
+    });
+    const { states, hands } = trace(matchConfig, [
+      [0, FOLD],
+      [1, FOLD],
+      [0, FOLD],
+    ]);
+    for (const state of states) expect(checkState(state)).toEqual([]);
+    let before: [number, number] = [10, 10];
+    expect(hands).toHaveLength(4);
+    for (const hand of hands) {
+      const original = structuredClone(before);
+      expect(checkHand(hand, matchConfig, before)).toEqual([]);
+      expect(before).toEqual(original);
+      before = [...hand.stacks];
+    }
+    expect(hands[3].blinds).toEqual([8, 16]);
+    expect(hands[3].events.slice(0, 2).map(event => event.amount)).toEqual([
+      8, 7,
+    ]);
+  });
+
+  it('reports a record with the wrong scheduled level even when postings are unchanged', () => {
+    const hand = structuredClone(trace({}, CHECK_DOWN_HAND_1).hands[0]);
+    hand.blinds = [2, 4];
+    expect(checkHand(hand, config())).toContain(
+      'Recorded blinds do not match the scheduled blinds',
+    );
+  });
+
+  it.each([0, 1])('reports a wrong posted amount for blind index %i', index => {
+    const hand = structuredClone(trace({}, CHECK_DOWN_HAND_1).hands[0]);
+    hand.events[index].amount = (hand.events[index].amount ?? 0) + 1;
+    const expected = index === 0 ? 1 : 2;
+    expect(checkHand(hand, config(), [40, 40])).toContain(
+      `Seat ${index} blind must be ${expected}`,
+    );
+    const state = structuredClone(startMatch(config()));
+    state.history[index].amount = expected + 1;
+    expect(checkState(state)).toContain(
+      `Seat ${index} blind must be ${expected}`,
+    );
+  });
+
+  it('checks capped small and big blinds in the existing short-stack fixtures', () => {
+    const matchConfig = config({ startingStack: 10 });
+    const { hands } = trace(matchConfig, BLIND_ALL_IN_SCRIPT);
+    for (const handNumber of [3, 4]) {
+      const index = hands.findIndex(hand => hand.hand_number === handNumber);
+      expect(index).toBeGreaterThan(0);
+      const hand = structuredClone(hands[index]);
+      const before = hands[index - 1].stacks;
+      expect(checkHand(hand, matchConfig, before)).toEqual([]);
+      const blindIndex = handNumber === 3 ? 0 : 1;
+      hand.events[blindIndex].amount =
+        (hand.events[blindIndex].amount ?? 0) + 1;
+      expect(
+        checkHand(hand, matchConfig, before).some(message =>
+          message.includes('blind must be'),
+        ),
+      ).toBe(true);
+    }
   });
 });

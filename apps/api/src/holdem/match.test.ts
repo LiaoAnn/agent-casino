@@ -34,7 +34,8 @@ const raise = (amount: number): Action => ({ type: 'raise', amount });
 
 const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
   seed: '0000000000000000000000000000000000000000000000000000000000000005',
-  hands: 10,
+  maxHands: 10,
+  blindEvery: 50,
   startingStack: 40,
   ...overrides,
 });
@@ -147,9 +148,12 @@ describe('startMatch', () => {
     ['non-hex seed', { seed: 'g'.repeat(64) }],
     ['empty seed', { seed: '' }],
     ['65-character seed', { seed: '0'.repeat(65) }],
-    ['hands 0', { hands: 0 }],
-    ['hands 201', { hands: 201 }],
-    ['hands 2.5', { hands: 2.5 }],
+    ['maxHands 0', { maxHands: 0 }],
+    ['maxHands 101', { maxHands: 101 }],
+    ['maxHands 2.5', { maxHands: 2.5 }],
+    ['blindEvery 0', { blindEvery: 0 }],
+    ['blindEvery 51', { blindEvery: 51 }],
+    ['blindEvery 2.5', { blindEvery: 2.5 }],
     ['startingStack 9', { startingStack: 9 }],
     ['startingStack 2001', { startingStack: 2001 }],
     ['startingStack 40.5', { startingStack: 40.5 }],
@@ -159,8 +163,8 @@ describe('startMatch', () => {
 
   it('accepts the boundary values', () => {
     for (const overrides of [
-      { seed: '0'.repeat(64), hands: 1, startingStack: 10 },
-      { seed: 'f'.repeat(64), hands: 200, startingStack: 2000 },
+      { seed: '0'.repeat(64), maxHands: 1, blindEvery: 1, startingStack: 10 },
+      { seed: 'f'.repeat(64), maxHands: 100, startingStack: 2000 },
     ]) {
       expect(startMatch(config(overrides)).handNumber).toBe(1);
     }
@@ -347,6 +351,7 @@ describe('hand endings', () => {
     const { state, finished } = playFrom({}, [[0, FOLD]]);
     expect(finished).toEqual([
       {
+        blinds: [1, 2],
         hand_number: 1,
         button_seat: 0,
         winner_seat: 1,
@@ -439,6 +444,7 @@ describe('hand endings', () => {
     ];
     expect(finished).toEqual([
       {
+        blinds: [1, 2],
         hand_number: 1,
         button_seat: 0,
         winner_seat: 1,
@@ -459,7 +465,11 @@ describe('hand endings', () => {
       },
     ]);
     expect(state.handNumber).toBe(2);
-    expect(state.lastHand).toMatchObject({ hand_number: 1, winner_seat: 1 });
+    expect(state.lastHand).toMatchObject({
+      blinds: [1, 2],
+      hand_number: 1,
+      winner_seat: 1,
+    });
     expect(state.stacks).toEqual([36, 41]);
   });
 
@@ -544,6 +554,7 @@ describe('all-in', () => {
     expect(finished).toEqual([]);
     expect(result.finishedHands).toEqual([
       {
+        blinds: [1, 2],
         hand_number: 1,
         button_seat: 0,
         winner_seat: 1,
@@ -588,6 +599,7 @@ describe('all-in', () => {
       ],
     );
     expect(finished[0]).toMatchObject({
+      blinds: [1, 2],
       hand_number: 1,
       winner_seat: 0,
       pot: 80,
@@ -631,6 +643,7 @@ describe('all-in', () => {
     const { state, finished } = play(shoveHand2(), [[0, CALL]]);
     expect(finished).toEqual([
       {
+        blinds: [1, 2],
         hand_number: 2,
         button_seat: 1,
         winner_seat: 0,
@@ -681,6 +694,7 @@ describe('all-in', () => {
     expect(finished.map(hand => hand.hand_number)).toEqual([2]);
     expect(end.finished).toEqual([
       expect.objectContaining({
+        blinds: [1, 2],
         hand_number: 3,
         button_seat: 0,
         winner_seat: 0,
@@ -697,7 +711,11 @@ describe('all-in', () => {
       bets: [0, 0],
       contributed: [0, 0],
     });
-    expect(end.state.lastHand).toMatchObject({ hand_number: 3, pot: 8 });
+    expect(end.state.lastHand).toMatchObject({
+      blinds: [1, 2],
+      hand_number: 3,
+      pot: 8,
+    });
   });
 
   it('short all-in raise: min = max = all-in total, then the opponent may only call or fold', () => {
@@ -760,6 +778,7 @@ describe('blind all-ins (seed ...0005, 10 chips)', () => {
     const result = expectOk(applyAction(before.state, 0, FOLD));
     expect(result.finishedHands).toEqual([
       expect.objectContaining({
+        blinds: [1, 2],
         hand_number: 2,
         button_seat: 1,
         winner_seat: 1,
@@ -772,6 +791,7 @@ describe('blind all-ins (seed ...0005, 10 chips)', () => {
         stacks: [1, 19],
       }),
       {
+        blinds: [1, 2],
         hand_number: 3,
         button_seat: 0,
         winner_seat: 0,
@@ -790,6 +810,7 @@ describe('blind all-ins (seed ...0005, 10 chips)', () => {
       },
     ]);
     expect(result.state.lastHand).toMatchObject({
+      blinds: [1, 2],
       hand_number: 3,
       stacks: [2, 18],
     });
@@ -819,6 +840,7 @@ describe('blind all-ins (seed ...0005, 10 chips)', () => {
     const end = play(state, [[1, CALL]]);
     expect(end.finished).toEqual([
       expect.objectContaining({
+        blinds: [1, 2],
         hand_number: 4,
         winner_seat: 1,
         pot: 4,
@@ -853,6 +875,7 @@ describe('blind all-ins (seed ...0005, 10 chips)', () => {
     const result = expectOk(applyAction(before, 0, FOLD));
     expect(result.finishedHands).toEqual([
       expect.objectContaining({
+        blinds: [1, 2],
         hand_number: 1,
         button_seat: 0,
         winner_seat: 1,
@@ -861,6 +884,7 @@ describe('blind all-ins (seed ...0005, 10 chips)', () => {
         stacks: [1, 19],
       }),
       {
+        blinds: [1, 2],
         hand_number: 2,
         button_seat: 1,
         winner_seat: 0,
@@ -896,6 +920,7 @@ describe('blind all-ins (seed ...0005, 10 chips)', () => {
       history: [blind(0, 1), blind(1, 2)],
     });
     expect(result.state.lastHand).toMatchObject({
+      blinds: [1, 2],
       hand_number: 2,
       stacks: [2, 18],
     });
@@ -932,12 +957,12 @@ describe('match flow', () => {
     }
   });
 
-  it('ends after the configured number of hands (hands: 1)', () => {
+  it('ends after the configured number of hands (maxHands: 1)', () => {
     const deal = dealHand(
       '0000000000000000000000000000000000000000000000000000000000000005',
       1,
     );
-    const { state, finished } = playFrom({ hands: 1 }, CHECK_DOWN_HAND_1);
+    const { state, finished } = playFrom({ maxHands: 1 }, CHECK_DOWN_HAND_1);
     expect(finished).toHaveLength(1);
     expect(state).toMatchObject({
       handNumber: 1,
@@ -951,12 +976,16 @@ describe('match flow', () => {
       over: true,
     });
     expect(state.history).toEqual(finished[0].events);
-    expect(state.lastHand).toMatchObject({ hand_number: 1, stacks: [38, 42] });
+    expect(state.lastHand).toMatchObject({
+      blinds: [1, 2],
+      hand_number: 1,
+      stacks: [38, 42],
+    });
     expect(legalActions(state)).toEqual([]);
   });
 
   it('ends after 2 folded hands with stacks back to [40, 40]', () => {
-    const { state, finished } = playFrom({ hands: 2 }, [
+    const { state, finished } = playFrom({ maxHands: 2 }, [
       [0, FOLD],
       [1, FOLD],
     ]);
@@ -1046,6 +1075,7 @@ describe('match flow', () => {
     );
     expect(a.finished).toEqual([
       {
+        blinds: [1, 2],
         hand_number: 1,
         button_seat: 0,
         winner_seat: null,
@@ -1069,6 +1099,7 @@ describe('match flow', () => {
         ],
       },
       expect.objectContaining({
+        blinds: [1, 2],
         hand_number: 2,
         button_seat: 1,
         winner_seat: 0,
@@ -1114,7 +1145,7 @@ describe('errors', () => {
   });
 
   it('match_over takes precedence once the match has ended', () => {
-    const { state } = playFrom({ hands: 1 }, [[0, FOLD]]);
+    const { state } = playFrom({ maxHands: 1 }, [[0, FOLD]]);
     expect(state.over).toBe(true);
     for (const seat of [0, 1] as const) {
       for (const action of [FOLD, CHECK, CALL, raise(4)]) {

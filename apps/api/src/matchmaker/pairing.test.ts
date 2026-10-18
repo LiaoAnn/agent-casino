@@ -121,19 +121,19 @@ describe('MatchQueue (A2)', () => {
       const queue = new MatchQueue(openMatch, { waitMs: WAIT_MS, isBanned });
       const alice = start(queue, {
         name: 'Alice',
-        settings: { ...SETTINGS_DEFAULTS, hands: 3 },
+        settings: { ...SETTINGS_DEFAULTS, max_hands: 3 },
       });
       await vi.advanceTimersByTimeAsync(0);
       const bob = start(queue, {
         name: 'Bob',
-        settings: { ...SETTINGS_DEFAULTS, hands: 3 },
+        settings: { ...SETTINGS_DEFAULTS, max_hands: 3 },
       });
       await vi.advanceTimersByTimeAsync(0);
       expect(checks.map(check => check.name.toLowerCase())).toEqual(['alice']);
 
       const aliceRetry = start(queue, {
         name: 'Alice',
-        settings: { ...SETTINGS_DEFAULTS, hands: 10 },
+        settings: { ...SETTINGS_DEFAULTS, max_hands: 10 },
       });
       await vi.advanceTimersByTimeAsync(0);
       checks[0]?.resolve(false);
@@ -476,16 +476,24 @@ describe('MatchQueue (A2)', () => {
 
   it.each([
     [
-      { settings: { ...SETTINGS_DEFAULTS, hands: 2 } },
-      { settings: { ...SETTINGS_DEFAULTS, hands: 3 } },
+      { settings: { ...SETTINGS_DEFAULTS, blind_every: 1 } },
+      { settings: { ...SETTINGS_DEFAULTS, blind_every: 5 } },
+    ],
+    [
+      { settings: { ...SETTINGS_DEFAULTS, max_hands: 2 } },
+      { settings: { ...SETTINGS_DEFAULTS, max_hands: 3 } },
     ],
     [
       { settings: { ...SETTINGS_DEFAULTS, turn_seconds: 5 } },
       { settings: { ...SETTINGS_DEFAULTS, turn_seconds: 10 } },
     ],
     [
-      { settings: { ...SETTINGS_DEFAULTS, starting_stack: 50 } },
-      { settings: { ...SETTINGS_DEFAULTS, starting_stack: 60 } },
+      {
+        settings: { ...SETTINGS_DEFAULTS, blind_every: 50, starting_stack: 50 },
+      },
+      {
+        settings: { ...SETTINGS_DEFAULTS, blind_every: 50, starting_stack: 60 },
+      },
     ],
     [{ test: { seed: '00'.repeat(32) } }, { test: { seed: '01'.repeat(32) } }],
     [
@@ -511,7 +519,17 @@ describe('MatchQueue (A2)', () => {
     expect(
       await Promise.all([
         queue.queue(withKey({ name: 'Alice' })),
-        queue.queue(withKey({ name: 'Bob', settings: SETTINGS_DEFAULTS })),
+        queue.queue(
+          withKey({
+            name: 'Bob',
+            settings: {
+              starting_stack: 40,
+              blind_every: 5,
+              max_hands: 50,
+              turn_seconds: 30,
+            },
+          }),
+        ),
       ]),
     ).toEqual([matched(0), matched(1)]);
   });
@@ -519,7 +537,12 @@ describe('MatchQueue (A2)', () => {
   it('pairs identical settings and test options and passes them to openMatch', async () => {
     const { queue, openMatch } = fixture();
     const options = {
-      settings: { hands: 2, turn_seconds: 5, starting_stack: 100 },
+      settings: {
+        max_hands: 2,
+        turn_seconds: 5,
+        blind_every: 50,
+        starting_stack: 100,
+      },
       test: { seed: '00'.repeat(32), chaos: { extra_waiting: 2 } },
     };
     const a = { name: 'Alice', ...options };
@@ -678,13 +701,13 @@ describe('MatchQueue waiting information (A18)', () => {
     const { queue, clock, openMatch } = fixture();
     await poll(queue, {
       name: 'Bob',
-      settings: { ...SETTINGS_DEFAULTS, hands: 3 },
+      settings: { ...SETTINGS_DEFAULTS, max_hands: 3 },
     });
 
     clock.ms = 30_000;
     const pending = start(queue, {
       name: 'Alice',
-      settings: { ...SETTINGS_DEFAULTS, hands: 2 },
+      settings: { ...SETTINGS_DEFAULTS, max_hands: 2 },
     });
     await vi.advanceTimersByTimeAsync(0);
     clock.ms = HOLD_MS + 1;
@@ -727,12 +750,15 @@ describe('MatchQueue waiting information (A18)', () => {
     const { queue, clock, openMatch } = fixture();
     const alice = {
       name: 'Alice',
-      settings: { ...SETTINGS_DEFAULTS, hands: 2 },
+      settings: { ...SETTINGS_DEFAULTS, max_hands: 2 },
     };
-    const bob = { name: 'Bob', settings: { ...SETTINGS_DEFAULTS, hands: 3 } };
+    const bob = {
+      name: 'Bob',
+      settings: { ...SETTINGS_DEFAULTS, max_hands: 3 },
+    };
     const carol = {
       name: 'Carol',
-      settings: { ...SETTINGS_DEFAULTS, hands: 4 },
+      settings: { ...SETTINGS_DEFAULTS, max_hands: 4 },
     };
     expect.soft(await poll(queue, alice)).toEqual(waitingFor(0, 1));
     clock.ms = 30_000;
@@ -943,13 +969,13 @@ describe('MatchQueue queue_key ownership (A17)', () => {
   it('retains waiting settings and test options when another key tries to replace them', async () => {
     const { queue, openMatch } = fixture();
     const options = {
-      settings: { ...SETTINGS_DEFAULTS, hands: 3 },
+      settings: { ...SETTINGS_DEFAULTS, max_hands: 3 },
       test: { seed: '00'.repeat(32) },
     };
     expect(await queue.queue({ ...alice, ...options })).toEqual(waiting);
     const conflict = await queue.queue({
       ...impostor,
-      settings: { ...SETTINGS_DEFAULTS, hands: 10 },
+      settings: { ...SETTINGS_DEFAULTS, max_hands: 10 },
       test: { seed: '01'.repeat(32) },
     });
     const opponent = await queue.queue({ ...bob, ...options });

@@ -62,14 +62,17 @@ const eloText = (m: MatchDetail) =>
     )
     .join(' · ');
 
+// A19: `blind_every: null` is a match from before T34, fixed blinds 1/2.
+const settingsText = ({ settings: s }: MatchDetail) =>
+  s.blind_every === null
+    ? `起始籌碼 ${s.starting_stack} · 固定盲注 1/2 · ${s.max_hands} 手 · 每步 ${s.turn_seconds} 秒`
+    : `起始籌碼 ${s.starting_stack} · 盲注每 ${s.blind_every} 手翻倍 · 最多 ${s.max_hands} 手 · 每步 ${s.turn_seconds} 秒`;
+
 const infoPairs = (m: MatchDetail): [string, string][] => [
   ['結果', resultText(m)],
   ['結束時間', endedText(m.ended_at)],
   ['計分', m.rated ? '計分' : '不計分'],
-  [
-    '設定',
-    `${m.settings.hands} 手 · 每步 ${m.settings.turn_seconds} 秒 · 起始籌碼 ${m.settings.starting_stack}`,
-  ],
+  ['設定', settingsText(m)],
   ['種子', String(m.seed)],
   ['最終籌碼', pairText(m, m.final_stacks)],
   ...(m.rating_changes === null
@@ -88,6 +91,7 @@ const centerPairs = (m: MatchDetail, h: MatchHand): [string, string][] => [
   ['公共牌', h.board.length > 0 ? h.board.map(card).join(' ') : '沒有發公共牌'],
   ['底池', String(h.pot)],
   ['莊家', m.players[h.button_seat]],
+  ['盲注', `${h.blinds[0]}/${h.blinds[1]}`],
   ['結果', handResult(m, h)],
 ];
 
@@ -204,6 +208,10 @@ const split = findHand(h => h.winner_seat === null);
 const timedOut = findHand(h => h.events.some(e => e.timeout === true));
 const raised = findHand(h => h.events.some(e => e.type === 'raise'));
 const called = findHand(h => h.events.some(e => e.type === 'call'));
+const risen = findHand(h => h.blinds[0] > 1);
+const legacy = matches.find(
+  m => m.settings.blind_every === null && m.hands.length > 0,
+);
 const empty = matches.find(m => m.hands.length === 0);
 const rated = matches.find(m => m.rating_changes !== null);
 const unrated = matches.find(m => m.rating_changes === null);
@@ -222,6 +230,27 @@ test('the fake data covers the cases this page must show', () => {
   );
   expect(deltas.some(d => d > 0)).toBe(true);
   expect(deltas.some(d => d < 0)).toBe(true);
+});
+
+// T34: the blinds of each hand, and a match from before the freezeout.
+test("shows each hand's blinds, raised ones too", async ({ page }) => {
+  const { m, h } = risen;
+  await open(page, m);
+  await expectHand(page, m, h);
+  await expect(
+    handSection(page, h.hand_number).locator('dl[aria-label="牌桌"]'),
+  ).toContainText(`盲注${h.blinds[0]}/${h.blinds[1]}`);
+});
+
+test('shows a match from before T34 as fixed blinds', async ({ page }) => {
+  if (legacy === undefined) throw new Error('fake data lacks an old match');
+  await open(page, legacy);
+  await expectPairs(info(page), infoPairs(legacy));
+  await expect(info(page)).toContainText('固定盲注 1/2');
+  const first = legacy.hands[0];
+  await expect(
+    handSection(page, first.hand_number).locator('dl[aria-label="牌桌"]'),
+  ).toContainText('盲注1/2');
 });
 
 test('shows a showdown hand step by step', async ({ page }) => {

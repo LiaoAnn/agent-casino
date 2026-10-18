@@ -40,7 +40,12 @@ const { values } = parseArgs({
 });
 const [p0 = 'alice', p1 = 'bob'] = (values.players ?? '').split(',');
 const firstSeed = Number(values.seed);
-const settings = { hands: 10, turn_seconds: 60, starting_stack: 40 };
+const settings = {
+  starting_stack: 40,
+  blind_every: 5,
+  max_hands: 50,
+  turn_seconds: 30,
+};
 
 const random = mulberry32(firstSeed);
 const roomId = () =>
@@ -49,8 +54,9 @@ const roomId = () =>
 function play(seed: string) {
   let state: MatchState = startMatch({
     seed,
-    hands: settings.hands,
     startingStack: settings.starting_stack,
+    blindEvery: settings.blind_every,
+    maxHands: settings.max_hands,
   });
   const hands: HandRecord[] = [];
   while (!state.over) {

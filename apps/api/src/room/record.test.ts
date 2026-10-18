@@ -16,7 +16,12 @@ import { RoomReferee, type RoomStorage } from './referee';
 const ROOM_ID = 'r_record0001';
 const SEED = '0'.repeat(64);
 const PLAYERS: [string, string] = ['ALice', 'bOB'];
-const SETTINGS = { hands: 2, turn_seconds: 10, starting_stack: 40 };
+const SETTINGS = {
+  max_hands: 2,
+  turn_seconds: 10,
+  blind_every: 50,
+  starting_stack: 40,
+};
 const RECORDED: RecordedMatch = {
   rated: true,
   ratings: [
@@ -56,7 +61,8 @@ function fixture(record: Recorder = async () => RECORDED, settings = SETTINGS) {
   const referee = new RoomReferee(storage, options);
   let engine = startMatch({
     seed: SEED,
-    hands: settings.hands,
+    maxHands: settings.max_hands,
+    blindEvery: 50,
     startingStack: settings.starting_stack,
   });
   const hands: HandRecord[] = [];
@@ -148,13 +154,13 @@ async function expectRecord(
 
 describe('T13 S1: replay, record, then match_over', () => {
   it.each([
-    { hands: 1, result: 'seat1_win' as const, firstCall: false },
-    { hands: 1, result: 'seat0_win' as const, firstCall: true },
-    { hands: 2, result: 'draw' as const, firstCall: false },
+    { max_hands: 1, result: 'seat1_win' as const, firstCall: false },
+    { max_hands: 1, result: 'seat0_win' as const, firstCall: true },
+    { max_hands: 2, result: 'draw' as const, firstCall: false },
   ])(
-    'records $result after all $hands hands, preserving metadata and ordered engine hands',
+    'records $result after all $max_hands hands, preserving metadata and ordered engine hands',
     async scenario => {
-      const settings = { ...SETTINGS, hands: scenario.hands };
+      const settings = { ...SETTINGS, max_hands: scenario.max_hands };
       const t = fixture(undefined, settings);
       await t.open();
       if (scenario.firstCall) {
@@ -174,7 +180,12 @@ describe('T13 S1: replay, record, then match_over', () => {
   );
 
   it('records an early bust from all-in showdowns before the configured hand limit', async () => {
-    const settings = { ...SETTINGS, hands: 200, starting_stack: 10 };
+    const settings = {
+      ...SETTINGS,
+      max_hands: 100,
+      blind_every: 50,
+      starting_stack: 10,
+    };
     const t = fixture(undefined, settings);
     await t.open();
     const final = await t.finish(state => {
@@ -186,7 +197,7 @@ describe('T13 S1: replay, record, then match_over', () => {
         : { type: 'check' };
     });
     expect(final.stacks).toContain(0);
-    expect(t.hands.length).toBeLessThan(settings.hands);
+    expect(t.hands.length).toBeLessThan(settings.max_hands);
     await expectRecord(
       t,
       final.stacks[0] === 0 ? 'seat1_win' : 'seat0_win',
@@ -249,7 +260,7 @@ describe('T13 S1: replay, record, then match_over', () => {
           entered();
           return blocked;
         },
-        { ...SETTINGS, hands: 1 },
+        { ...SETTINGS, max_hands: 1 },
       );
       await t.open();
       const current = await t.turn();
@@ -322,7 +333,7 @@ describe('T13 S1: replay, record, then match_over', () => {
   it('replays timeout substitutions without voiding an otherwise valid match', async () => {
     const t = fixture();
     await t.open();
-    for (let n = 0; n < SETTINGS.hands; n++) {
+    for (let n = 0; n < SETTINGS.max_hands; n++) {
       const deadline = t.storage.alarm;
       if (deadline === null) throw new Error('Expected turn alarm');
       t.clock.ms = deadline;
@@ -370,7 +381,7 @@ describe('T13 S1: replay, record, then match_over', () => {
         if (failing) throw new Error('D1 temporarily unavailable');
         return RECORDED;
       },
-      { ...SETTINGS, hands: 1 },
+      { ...SETTINGS, max_hands: 1 },
     );
     await t.open();
     const current = await t.turn();
@@ -405,7 +416,7 @@ describe('T13 S1: replay, record, then match_over', () => {
         if (failing) throw new Error('D1 temporarily unavailable');
         return RECORDED;
       },
-      { ...SETTINGS, hands: 1 },
+      { ...SETTINGS, max_hands: 1 },
     );
     await t.open();
     expect(await t.step({ type: 'fold' })).toMatchObject({
@@ -445,7 +456,7 @@ describe('T13 S1: replay, record, then match_over', () => {
           if (failing) throw new Error('D1 temporarily unavailable');
           return RECORDED;
         },
-        { ...SETTINGS, hands: 1 },
+        { ...SETTINGS, max_hands: 1 },
       );
       await t.open();
       expect(await t.step({ type: 'fold' })).toMatchObject({
@@ -522,7 +533,7 @@ describe('T23: notes go to record (A16)', () => {
   };
 
   it('hands the notes of both seats over, by hand and position in the hand (blinds count)', async () => {
-    const t = fixture(undefined, { ...SETTINGS, hands: 2 });
+    const t = fixture(undefined, { ...SETTINGS, max_hands: 2 });
     await t.open();
     const expected = await playWithNotes(t);
     // preflop call + check, a flop fold, then hand 2's opening fold.
@@ -541,7 +552,7 @@ describe('T23: notes go to record (A16)', () => {
   });
 
   it('leaves out the note of a refused action and of a step sent without one', async () => {
-    const t = fixture(undefined, { ...SETTINGS, hands: 1 });
+    const t = fixture(undefined, { ...SETTINGS, max_hands: 1 });
     await t.open();
     const current = await t.turn();
     expect(
@@ -563,14 +574,14 @@ describe('T23: notes go to record (A16)', () => {
 // T28 A6/A15: results survive the immediate transition to the next hand.
 describe('T28 S2 last_hand.stack_changes', () => {
   it.each([
-    { ending: 'fold', hands: 1 },
-    { ending: 'fold', hands: 3 },
-    { ending: 'showdown', hands: 1 },
-    { ending: 'showdown', hands: 3 },
+    { ending: 'fold', max_hands: 1 },
+    { ending: 'fold', max_hands: 3 },
+    { ending: 'showdown', max_hands: 1 },
+    { ending: 'showdown', max_hands: 3 },
   ] as const)(
-    '$ending across $hands hands in wait and state',
-    async ({ ending, hands }) => {
-      const t = fixture(undefined, { ...SETTINGS, hands });
+    '$ending across $max_hands hands in wait and state',
+    async ({ ending, max_hands: hands }) => {
+      const t = fixture(undefined, { ...SETTINGS, max_hands: hands });
       await t.open();
       let before: readonly [number, number] = [40, 40];
       for (let handNumber = 1; handNumber <= hands; handNumber++) {

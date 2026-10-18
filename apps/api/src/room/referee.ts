@@ -52,9 +52,10 @@ export interface RefereeOptions {
 }
 
 interface RoomSettings {
-  hands: number;
-  turn_seconds: number;
   starting_stack: number;
+  blind_every: number;
+  max_hands: number;
+  turn_seconds: number;
 }
 
 export interface CreateInput {
@@ -122,7 +123,7 @@ interface ChaosDone {
   requests: [number, number];
 }
 
-// `complete`: all hands played or someone ran out of chips. `left`: `loser`
+// `complete`: someone ran out of chips or max_hands were played. `left`: `loser`
 // left while playing. `cancelled`: seat 0 left, or nobody joined in time.
 // `void`: aborted by an admin, or the platform failed; never rated.
 type Ended = (
@@ -302,8 +303,9 @@ export class RoomReferee {
   #start(data: RoomData, name: string, at: number): RoomData {
     const match = startMatch({
       seed: data.seed,
-      hands: data.settings.hands,
       startingStack: data.settings.starting_stack,
+      blindEvery: data.settings.blind_every,
+      maxHands: data.settings.max_hands,
     });
     return this.#nextTurn({ ...data, names: [data.names[0], name], match }, at);
   }
@@ -1142,7 +1144,8 @@ function matchOver(
     ...seatFields(data, seat),
     to_act_seat: null,
     hand_number: seen?.hand_number ?? null,
-    view: seen?.view ?? null,
+    // Also after a leave or an abort mid-match: the blinds never rise again.
+    view: seen && { ...seen.view, next_blinds_at_hand: null },
     match_id: data.room_id,
     result,
     final_stacks: ended.final_stacks,

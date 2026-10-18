@@ -203,7 +203,12 @@ const waitingStatus = (hint: string) =>
     status: 'waiting',
     room_status: 'playing',
     opponent_name: 'bob',
-    settings: { hands: 10, turn_seconds: 60, starting_stack: 40 },
+    settings: {
+      max_hands: 10,
+      turn_seconds: 60,
+      blind_every: 50,
+      starting_stack: 40,
+    },
     to_act_seat: 1,
     hand_number: 1,
     view: null,

@@ -257,7 +257,7 @@ const seededRoom = async (t: TestEnv, settings: Record<string, unknown>) => {
   const created = await post(t.env, '/v1/rooms', {
     game: 'holdem',
     name: 'alice',
-    settings,
+    settings: { blind_every: 50, ...settings },
     test: { seed: SEED },
   });
   expect(created.status).toBe(200);
@@ -278,7 +278,12 @@ const seededRoom = async (t: TestEnv, settings: Record<string, unknown>) => {
 // --- Engine oracle ----------------------------------------------------------
 
 const engineStart = (hands: number): MatchState =>
-  startMatch({ seed: SEED, hands, startingStack: STACK });
+  startMatch({
+    seed: SEED,
+    maxHands: hands,
+    blindEvery: 50,
+    startingStack: STACK,
+  });
 
 const applyOk = (
   match: MatchState,
@@ -311,7 +316,7 @@ const openRoom = async (
   const response = await post(t.env, '/v1/rooms', {
     game: 'holdem',
     name: 'alice',
-    settings,
+    settings: { blind_every: 50, ...settings },
     test: { seed: SEED },
   });
   expect(response.status).toBe(200);
@@ -365,7 +370,7 @@ describe('狀況處理 等人超過 5 分鐘: a room nobody joined is dissolved 
 
   it('alarm() at created_at + 5 min dissolves it: match_over cancelled, finished, final_stacks [start, start], ratings null; the alarm is deleted', async () => {
     const t = makeEnv();
-    const room = await openRoom(t, { starting_stack: 100 });
+    const room = await openRoom(t, { blind_every: 50, starting_stack: 100 });
     t.clock.ms = room.createdAt + WAIT_LIMIT_MS;
     await t.referee(room.room_id).alarm();
     expectCancelled(await state(t, room.room_id, room.token), 100);
@@ -490,8 +495,9 @@ describe('狀況處理 平台出錯', () => {
     async trigger => {
       const t = makeEnv();
       const { roomId, tokens } = await seededRoom(t, {
-        hands: 2,
+        max_hands: 2,
         turn_seconds: 10,
+        blind_every: 50,
         starting_stack: STACK,
       });
       const turn = await yourTurn(t, roomId, tokens[0]);
@@ -557,7 +563,7 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
   // Hand 1: seat 0 folds. Hand 2: seat 1 (button) raises to 6. Then abort.
   const midHand = async (t: TestEnv) => {
     const { roomId, tokens } = await seededRoom(t, {
-      hands: 3,
+      max_hands: 3,
       turn_seconds: 60,
     });
     let match = engineStart(3);
@@ -603,7 +609,7 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
   it("the opponent's pending wait answers match_over void at once when the room is aborted", async () => {
     const t = makeEnv({ waitMs: 3_000 });
     const { roomId, tokens } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 60,
     });
     const pending = wait(t, roomId, tokens[1]);
@@ -619,7 +625,7 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
 
   it('a waiting room (no opponent yet) is voided too: final_stacks [start, start], view null; joining afterwards answers 409 match_over', async () => {
     const t = makeEnv();
-    const room = await openRoom(t, { starting_stack: 100 });
+    const room = await openRoom(t, { blind_every: 50, starting_stack: 100 });
     await abort(t, room.room_id);
     const over = asMatchOver(await state(t, room.room_id, room.token));
     expect(over).toMatchObject({
@@ -637,7 +643,7 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
   it('after abort: actions answer 409 match_over with the void state, leave answers 409 match_over, the alarm is deleted and no timeout is ever played', async () => {
     const t = makeEnv();
     const { roomId, tokens } = await seededRoom(t, {
-      hands: 2,
+      max_hands: 2,
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
@@ -671,7 +677,7 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
     {
       case: 'a complete match',
       end: async (t: TestEnv) => {
-        const { roomId, tokens } = await seededRoom(t, { hands: 1 });
+        const { roomId, tokens } = await seededRoom(t, { max_hands: 1 });
         const alice = await yourTurn(t, roomId, tokens[0]);
         await act(t, roomId, tokens[0], {
           turn_id: alice.turn_id,
@@ -683,7 +689,7 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
     {
       case: 'a leave while playing',
       end: async (t: TestEnv) => {
-        const { roomId, tokens } = await seededRoom(t, { hands: 2 });
+        const { roomId, tokens } = await seededRoom(t, { max_hands: 2 });
         await readStatus(await leavePost(t, roomId, tokens[1]));
         return roomId;
       },
@@ -708,7 +714,7 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
     {
       case: 'an aborted room',
       end: async (t: TestEnv) => {
-        const { roomId } = await seededRoom(t, { hands: 2 });
+        const { roomId } = await seededRoom(t, { max_hands: 2 });
         await abort(t, roomId);
         return roomId;
       },
@@ -745,14 +751,14 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
 
   it('a wrong admin key answers 401 invalid_token and the room keeps playing', async () => {
     const t = makeEnv();
-    const { roomId, tokens } = await seededRoom(t, { hands: 2 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 2 });
     await expectError(await abortPost(t, roomId, 'wrong-key'), 'invalid_token');
     expect((await yourTurn(t, roomId, tokens[0])).room_status).toBe('playing');
   });
 
   it('A8: a room aborted over an hour ago answers abort with 409 match_over (not invalid_token), while its room endpoints answer 401 invalid_token', async () => {
     const t = makeEnv();
-    const { roomId, tokens } = await seededRoom(t, { hands: 2 });
+    const { roomId, tokens } = await seededRoom(t, { max_hands: 2 });
     await abort(t, roomId);
     t.clock.ms += HOUR_MS;
     expect(asMatchOver(await state(t, roomId, tokens[0])).result).toBe('void');

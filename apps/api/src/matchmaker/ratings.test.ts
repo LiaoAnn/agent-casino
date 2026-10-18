@@ -32,7 +32,12 @@ function input(
   return {
     match_id: `r_${String(id).padStart(10, '0')}`,
     players: ['alice', opponent],
-    settings: { hands: 1, turn_seconds: 30, starting_stack: 200 },
+    settings: {
+      max_hands: 1,
+      turn_seconds: 30,
+      blind_every: 50,
+      starting_stack: 200,
+    },
     seed: '2a'.repeat(32),
     result: score === 1 ? 'seat0_win' : score === 0 ? 'seat1_win' : 'draw',
     ended_at: '2026-10-18T10:00:00.000Z',
@@ -41,6 +46,7 @@ function input(
       {
         hand_number: 1,
         button_seat: 0,
+        blinds: [1, 2],
         winner_seat: score === 1 ? 0 : score === 0 ? 1 : null,
         pot: 200,
         ended_by: 'showdown',

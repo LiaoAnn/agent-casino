@@ -14,7 +14,12 @@ import {
 import { viewFor } from '../holdem/view';
 import { RoomReferee, type RoomStorage } from './referee';
 
-const SETTINGS = { hands: 4, turn_seconds: 5, starting_stack: 40 };
+const SETTINGS = {
+  max_hands: 4,
+  turn_seconds: 5,
+  blind_every: 50,
+  starting_stack: 40,
+};
 const INPUT = {
   room_id: 'r_bottest001',
   invite_code: 'ABC234',
@@ -171,7 +176,8 @@ describe('T13 S2: house-bot in RoomReferee', () => {
         const oracleRandom = sequence(values);
         let engine = startMatch({
           seed: INPUT.seed,
-          hands: SETTINGS.hands,
+          maxHands: SETTINGS.max_hands,
+          blindEvery: 50,
           startingStack: SETTINGS.starting_stack,
         });
         const hands: HandRecord[] = [];
@@ -236,7 +242,7 @@ describe('T13 S2: house-bot in RoomReferee', () => {
   );
 
   it('times out only the human, checks when possible, and finishes automatically after three consecutive timeouts', async () => {
-    const t = fixture([0.6], { ...SETTINGS, hands: 10 });
+    const t = fixture([0.6], { ...SETTINGS, max_hands: 10 });
     await t.create();
     let thirdDeadline = 0;
     for (let n = 0; n < 3; n++) {
@@ -284,5 +290,46 @@ describe('T13 S2: house-bot in RoomReferee', () => {
     });
     expect(t.random).not.toHaveBeenCalled();
     expect(t.record).not.toHaveBeenCalled();
+  });
+});
+
+describe('T34 freezeout against house-bot', () => {
+  it('ends on a bust before max_hands, with upgraded blinds in last_hand and the record', async () => {
+    const settings = {
+      starting_stack: 10,
+      blind_every: 1,
+      max_hands: 50,
+      turn_seconds: 5,
+    };
+    // The bot checks/calls. Folding every human turn eventually loses to the blinds.
+    const t = fixture([0.6], settings);
+    await t.create();
+    let over = await t.status();
+    for (let step = 0; step < 100 && over.status !== 'match_over'; step++) {
+      if (over.status !== 'your_turn') throw new Error('Expected human turn');
+      await t.act({ type: 'fold' });
+      over = await t.status();
+    }
+    expect(over.status).toBe('match_over');
+    if (over.status !== 'match_over') throw new Error('Expected a bust');
+    expect(over.final_stacks).toContain(0);
+    expect(over.final_stacks[0] + over.final_stacks[1]).toBe(20);
+    expect(over.hand_number).toBeLessThan(settings.max_hands);
+    expect(over.result).toBe(
+      over.final_stacks[0] > over.final_stacks[1] ? 'win' : 'loss',
+    );
+    expect(over.ratings).toBeNull();
+    const recorded = t.record.mock.calls[0]?.[0];
+    expect(recorded).toBeDefined();
+    const last = recorded?.hands.at(-1);
+    expect(last?.blinds[0]).toBeGreaterThan(1);
+    expect(over.last_hand).toMatchObject({
+      hand_number: last?.hand_number,
+      blinds: last?.blinds,
+    });
+    for (const hand of recorded?.hands ?? []) {
+      const small = 2 ** (hand.hand_number - 1);
+      expect(hand.blinds).toEqual([small, small * 2]);
+    }
   });
 });

@@ -23,7 +23,8 @@ const raise = (amount: number): Action => ({ type: 'raise', amount });
 
 const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
   seed: '0000000000000000000000000000000000000000000000000000000000000005',
-  hands: 10,
+  maxHands: 10,
+  blindEvery: 50,
   startingStack: 40,
   ...overrides,
 });
@@ -159,7 +160,7 @@ const SCRIPTS: [string, MatchConfig, Step[]][] = [
   ],
   [
     'big blind shorter than the blind (seed ...0005, 10 chips)',
-    config({ startingStack: 10, hands: 3 }),
+    config({ startingStack: 10, maxHands: 3 }),
     [
       [0, raise(9)],
       [1, raise(10)],
@@ -181,7 +182,7 @@ const SCRIPTS: [string, MatchConfig, Step[]][] = [
     'split pot on the last hand (seed ...0016, hands 1)',
     config({
       seed: '0000000000000000000000000000000000000000000000000000000000000016',
-      hands: 1,
+      maxHands: 1,
     }),
     [[0, raise(6)], [1, CALL], ...checkPostflop(1)],
   ],
@@ -189,7 +190,7 @@ const SCRIPTS: [string, MatchConfig, Step[]][] = [
     'raises on every street, split pot, then folds to the end (seed ...001a)',
     config({
       seed: '000000000000000000000000000000000000000000000000000000000000001a',
-      hands: 3,
+      maxHands: 3,
     }),
     [
       [0, raise(6)],
@@ -204,7 +205,7 @@ const SCRIPTS: [string, MatchConfig, Step[]][] = [
   ],
   [
     'timeouts (seed ...0005, hands 2)',
-    config({ hands: 2 }),
+    config({ maxHands: 2 }),
     [
       [0, CALL, { timeout: true }],
       [1, CHECK, { timeout: true }],
@@ -218,8 +219,8 @@ describe('replay', () => {
   it('no events, or only the first blinds, gives the start of the match', () => {
     for (const matchConfig of [
       config(),
-      config({ seed: '0'.repeat(64), hands: 1, startingStack: 10 }),
-      config({ seed: 'f'.repeat(64), hands: 200, startingStack: 2000 }),
+      config({ seed: '0'.repeat(64), maxHands: 1, startingStack: 10 }),
+      config({ seed: 'f'.repeat(64), maxHands: 100, startingStack: 2000 }),
     ]) {
       const start = startMatch(matchConfig);
       expectReplayed(replay(matchConfig, []), {
@@ -261,12 +262,12 @@ describe('replay', () => {
   );
 
   it.each<[MatchConfig, number]>([
-    [config({ seed: '0'.repeat(64), hands: 50, startingStack: 10 }), 1],
-    [config({ seed: 'f'.repeat(64), hands: 40, startingStack: 12 }), 2],
+    [config({ seed: '0'.repeat(64), maxHands: 50, startingStack: 10 }), 1],
+    [config({ seed: 'f'.repeat(64), maxHands: 40, startingStack: 12 }), 2],
     [
       config({
         seed: '0000000000000000000000000000000000000000000000000000000000000309',
-        hands: 30,
+        maxHands: 30,
         startingStack: 40,
       }),
       3,
@@ -274,7 +275,7 @@ describe('replay', () => {
     [
       config({
         seed: '0000000000000000000000000000000000000000000000000000000000007a69',
-        hands: 20,
+        maxHands: 20,
         startingStack: 2000,
       }),
       4,
@@ -290,7 +291,7 @@ describe('replay', () => {
   );
 
   it('keeps timeout flags in the replayed records', () => {
-    const matchConfig = config({ hands: 2 });
+    const matchConfig = config({ maxHands: 2 });
     const end = trace(matchConfig, SCRIPTS[6][2]).at(-1) as Snapshot;
     const result = replay(matchConfig, end.events);
     if (!result.ok) throw new Error(result.message);
@@ -365,7 +366,7 @@ describe('replay rejects', () => {
   const blinds = startMatch(config()).history;
 
   it('an event after the match is over: match_over at its index', () => {
-    const matchConfig = config({ hands: 1 });
+    const matchConfig = config({ maxHands: 1 });
     const end = trace(matchConfig, [[0, FOLD]]).at(-1) as Snapshot;
     const events: HistoryEvent[] = [
       ...end.events,
@@ -445,8 +446,8 @@ describe('replay rejects', () => {
   });
 
   it.each([
-    ['hands 0', { hands: 0 }],
-    ['hands 201', { hands: 201 }],
+    ['maxHands 0', { maxHands: 0 }],
+    ['maxHands 101', { maxHands: 101 }],
     ['startingStack 5', { startingStack: 5 }],
     ['startingStack 2001', { startingStack: 2001 }],
     ['uppercase seed', { seed: 'A'.repeat(64) }],

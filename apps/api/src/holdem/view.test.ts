@@ -26,7 +26,8 @@ const raise = (amount: number): Action => ({ type: 'raise', amount });
 
 const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
   seed: '0000000000000000000000000000000000000000000000000000000000000005',
-  hands: 10,
+  maxHands: 10,
+  blindEvery: 50,
   startingStack: 40,
   ...overrides,
 });
@@ -87,6 +88,7 @@ const HAND_1_CHECK_DOWN_HISTORY: HistoryEvent[] = [
 ];
 
 const HAND_1_SHOWDOWN: LastHand = {
+  blinds: [1, 2],
   hand_number: 1,
   winner_seat: 1,
   pot: 4,
@@ -100,6 +102,7 @@ const HAND_1_SHOWDOWN: LastHand = {
 };
 
 const VIEW_KEYS = [
+  'blinds',
   'board',
   'button_seat',
   'history',
@@ -107,6 +110,7 @@ const VIEW_KEYS = [
   'my_cards',
   'my_seat',
   'my_stack',
+  'next_blinds_at_hand',
   'opponent_bet_this_street',
   'opponent_stack',
   'pot',
@@ -114,6 +118,7 @@ const VIEW_KEYS = [
 ];
 const SEAT_VIEW_KEYS = ['hand_number', 'last_hand', 'to_act_seat', 'view'];
 const LAST_HAND_KEYS = [
+  'blinds',
   'board',
   'ended_by',
   'hand_number',
@@ -176,6 +181,8 @@ describe('viewFor', () => {
       hand_number: 1,
       to_act_seat: 0,
       view: {
+        blinds: [1, 2],
+        next_blinds_at_hand: null,
         street: 'preflop',
         my_seat: 0,
         button_seat: 0,
@@ -197,6 +204,8 @@ describe('viewFor', () => {
       hand_number: 1,
       to_act_seat: 0,
       view: {
+        blinds: [1, 2],
+        next_blinds_at_hand: null,
         street: 'preflop',
         my_seat: 1,
         button_seat: 0,
@@ -230,6 +239,8 @@ describe('viewFor', () => {
       hand_number: 1,
       to_act_seat: 0,
       view: {
+        blinds: [1, 2],
+        next_blinds_at_hand: null,
         street: 'flop',
         my_seat: 0,
         button_seat: 0,
@@ -248,6 +259,8 @@ describe('viewFor', () => {
       hand_number: 1,
       to_act_seat: 0,
       view: {
+        blinds: [1, 2],
+        next_blinds_at_hand: null,
         street: 'flop',
         my_seat: 1,
         button_seat: 0,
@@ -267,6 +280,7 @@ describe('viewFor', () => {
   it('hand 2 after a preflop fold: seat 1 has the button, history is this hand only', () => {
     const state = playFrom({}, [[0, FOLD]]);
     const lastHand: LastHand = {
+      blinds: [1, 2],
       hand_number: 1,
       winner_seat: 1,
       pot: 2,
@@ -279,6 +293,8 @@ describe('viewFor', () => {
       hand_number: 2,
       to_act_seat: 1,
       view: {
+        blinds: [1, 2],
+        next_blinds_at_hand: null,
         street: 'preflop',
         my_seat: 1,
         button_seat: 1,
@@ -319,6 +335,7 @@ describe('viewFor', () => {
     for (const seat of [0, 1] as const) {
       const seen = viewFor(state, seat);
       expect(seen.last_hand).toEqual({
+        blinds: [1, 2],
         hand_number: 1,
         winner_seat: 1,
         pot: 4,
@@ -350,6 +367,8 @@ describe('viewFor', () => {
       hand_number: 2,
       to_act_seat: 1,
       view: {
+        blinds: [1, 2],
+        next_blinds_at_hand: null,
         street: 'preflop',
         button_seat: 1,
         my_cards: ['Qc', 'Th'],
@@ -366,11 +385,13 @@ describe('viewFor', () => {
   });
 
   it('match over after a showdown: to_act_seat null, pot 0, final stacks, last_hand = final hand', () => {
-    const state = playFrom({ hands: 1 }, CHECK_DOWN_HAND_1);
+    const state = playFrom({ maxHands: 1 }, CHECK_DOWN_HAND_1);
     expect(viewFor(state, 0)).toEqual({
       hand_number: 1,
       to_act_seat: null,
       view: {
+        blinds: [1, 2],
+        next_blinds_at_hand: null,
         street: 'river',
         my_seat: 0,
         button_seat: 0,
@@ -393,7 +414,7 @@ describe('viewFor', () => {
   });
 
   it('match over after a fold: the final opponent cards stay hidden', () => {
-    const state = playFrom({ hands: 2 }, [
+    const state = playFrom({ maxHands: 2 }, [
       [0, FOLD],
       [1, FOLD],
     ]);
@@ -402,6 +423,8 @@ describe('viewFor', () => {
       hand_number: 2,
       to_act_seat: null,
       view: {
+        blinds: [1, 2],
+        next_blinds_at_hand: null,
         street: 'preflop',
         my_seat: 0,
         button_seat: 1,
@@ -419,6 +442,7 @@ describe('viewFor', () => {
         ],
       },
       last_hand: {
+        blinds: [1, 2],
         hand_number: 2,
         winner_seat: 0,
         pot: 2,
@@ -469,7 +493,7 @@ describe('viewFor', () => {
       [1, raise(2)],
       [0, FOLD],
     ];
-    let state = startMatch(config({ hands: 6 }));
+    let state = startMatch(config({ maxHands: 6 }));
     const endings = new Set<string>();
     const inspect = () => {
       for (const seat of [0, 1] as const) {

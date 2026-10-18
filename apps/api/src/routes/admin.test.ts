@@ -100,7 +100,12 @@ const record = async (
   const match: MatchRecordInput = {
     match_id: `r_${String(++matchCounter).padStart(10, '0')}`,
     players: ['Alice', 'Bob'],
-    settings: { hands: 1, turn_seconds: 30, starting_stack: 200 },
+    settings: {
+      max_hands: 1,
+      turn_seconds: 30,
+      blind_every: 50,
+      starting_stack: 200,
+    },
     seed: '2a'.repeat(32),
     result: 'seat0_win',
     ended_at: '2026-10-18T10:00:00.000Z',
@@ -109,6 +114,7 @@ const record = async (
       {
         hand_number: 1,
         button_seat: 0,
+        blinds: [1, 2],
         winner_seat: 0,
         pot: 20,
         ended_by: 'showdown',

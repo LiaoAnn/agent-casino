@@ -20,6 +20,21 @@ export function resultLabel(match: Pick<MatchSummary, 'players' | 'result'>) {
   }
 }
 
+// A match's settings in one line. `blind_every: null` is a match from
+// before T34: a fixed number of hands at blinds 1/2 (A19).
+export function settingsLabel(settings: MatchDetail['settings']) {
+  const { starting_stack, blind_every, max_hands, turn_seconds } = settings;
+  const format =
+    blind_every === null
+      ? `固定盲注 1/2 · ${max_hands} 手`
+      : `盲注每 ${blind_every} 手翻倍 · 最多 ${max_hands} 手`;
+  return `起始籌碼 ${starting_stack} · ${format} · 每步 ${turn_seconds} 秒`;
+}
+
+// `[small, big]` → `1/2`.
+export const blindsLabel = ([small, big]: MatchHand['blinds']) =>
+  `${small}/${big}`;
+
 // `2026-10-01T00:37:00.000Z` → `2026-10-01 00:37 UTC`. Always UTC, so the
 // server and the browser render the same text.
 export function formatTime(iso: string) {

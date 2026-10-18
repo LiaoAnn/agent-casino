@@ -20,7 +20,8 @@ const raise = (amount: number): Action => ({ type: 'raise', amount });
 
 const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
   seed: '0000000000000000000000000000000000000000000000000000000000000005',
-  hands: 10,
+  maxHands: 10,
+  blindEvery: 50,
   startingStack: 40,
   ...overrides,
 });
@@ -240,15 +241,15 @@ describe('randomAction', () => {
     for (const overrides of [
       {
         seed: '0000000000000000000000000000000000000000000000000000000000000005',
-        hands: 50,
+        maxHands: 50,
         startingStack: 10,
       },
       {
         seed: '0000000000000000000000000000000000000000000000000000000000000016',
-        hands: 30,
+        maxHands: 30,
         startingStack: 40,
       },
-      { seed: 'f'.repeat(64), hands: 20, startingStack: 2000 },
+      { seed: 'f'.repeat(64), maxHands: 20, startingStack: 2000 },
     ]) {
       let state = startMatch(config(overrides));
       let steps = 0;

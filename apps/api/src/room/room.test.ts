@@ -38,7 +38,12 @@ const INPUT: CreateInput = {
   room_id: 'r_abcde12345',
   invite_code: 'ABCDEF',
   name: 'alice',
-  settings: { hands: 1, turn_seconds: 5, starting_stack: 40 },
+  settings: {
+    max_hands: 1,
+    turn_seconds: 5,
+    blind_every: 50,
+    starting_stack: 40,
+  },
   seed: '0'.repeat(64),
   test: null,
 };
@@ -206,7 +211,10 @@ describe('match_over record links (T32, A15)', () => {
           expect(
             await referee.create({
               ...INPUT,
-              settings: { ...INPUT.settings, hands: ending === 'draw' ? 2 : 1 },
+              settings: {
+                ...INPUT.settings,
+                max_hands: ending === 'draw' ? 2 : 1,
+              },
             }),
           ).toMatchObject({ ok: true });
           if (joined) {

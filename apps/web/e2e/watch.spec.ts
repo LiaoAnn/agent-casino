@@ -97,6 +97,7 @@ const expectTimeline = async (page: Page, w: WatchResponse) => {
         : `${w.players[h.winner_seat]} 贏得 ${h.pot}（${h.ended_by === 'showdown' ? '攤牌' : '對手棄牌'}）`;
     await expectPairs(section.locator('dl'), [
       ['莊家', w.players[h.button_seat] as string],
+      ['盲注', `${h.blinds[0]}/${h.blinds[1]}`],
       ...(h.board.length > 0
         ? ([['公共牌', cards(h.board)]] as [string, string][])
         : []),
@@ -144,7 +145,7 @@ const expectWatchInfo = async (
     ['狀態', status],
     [
       '設定',
-      `${w.settings.hands} 手 · 每步 ${w.settings.turn_seconds} 秒 · 起始籌碼 ${w.settings.starting_stack}`,
+      `起始籌碼 ${w.settings.starting_stack} · 盲注每 ${w.settings.blind_every} 手翻倍 · 最多 ${w.settings.max_hands} 手 · 每步 ${w.settings.turn_seconds} 秒`,
     ],
     ['最後更新', localTime(updatedAt)],
   ]);
@@ -174,12 +175,20 @@ test('playing shows the current hand, countdown, timeline and private notes', as
   await expect(current.getByRole('heading', { level: 3 })).toHaveText(
     `目前這一手：第 ${w.hand_number} 手`,
   );
-  // The middle of the table: the board, the pot, then street and dealer.
+  // The middle of the table: the board, the pot, then street, dealer,
+  // blinds and when they next rise.
   await expectPairs(current.locator('dl[aria-label="牌桌"]'), [
     ['公共牌', v.board.length === 0 ? '尚未發出' : cards(v.board)],
     ['底池', String(v.pot)],
     ['街', streets[v.street]],
     ['莊家', w.players[v.button_seat] as string],
+    ['盲注', `${v.blinds[0]}/${v.blinds[1]}`],
+    ...(v.next_blinds_at_hand === null
+      ? []
+      : ([['下次升盲', `第 ${v.next_blinds_at_hand} 手`]] as [
+          string,
+          string,
+        ][])),
   ]);
   const seats = current.getByRole('region', { name: /^座位：/ });
   await expect(seats).toHaveCount(2);

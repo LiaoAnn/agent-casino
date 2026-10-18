@@ -324,6 +324,7 @@ const stripNote = <T extends { note?: string }>(event: T): Omit<T, 'note'> => {
 
 interface LastHandSeen {
   hand_number: number;
+  blinds: readonly [number, number];
   winner_seat: Seat | null;
   pot: number;
   ended_by: 'fold' | 'showdown';
@@ -347,8 +348,9 @@ interface LoggedNote {
 }
 
 interface RoomSettings {
-  hands: number;
+  max_hands: number;
   turn_seconds: number;
+  blind_every: number;
   starting_stack: number;
 }
 
@@ -368,7 +370,8 @@ const openRig = async (
 ): Promise<Rig> => {
   const settings: RoomSettings = {
     ...SETTINGS_DEFAULTS,
-    hands: 3,
+    max_hands: 3,
+    blind_every: 50,
     ...overrides,
   };
   const t = makeEnv(options);
@@ -522,6 +525,7 @@ const checkParity = async (rig: Rig) => {
       const last = seen.lastHands.get(hand.hand_number);
       if (last !== undefined) {
         expect(hand).toMatchObject({
+          blinds: [1, 2],
           winner_seat: last.winner_seat,
           pot: last.pot,
           ended_by: last.ended_by,
@@ -752,7 +756,12 @@ describe('GET /v1/rooms/{room_id}/watch while waiting for an opponent', () => {
   it('answers at once with the room and no view, hands or deadline', async () => {
     const t = makeEnv({ waitMs: 2000 });
     const room = await createRoom(t.env, {
-      settings: { hands: 5, turn_seconds: 20, starting_stack: 100 },
+      settings: {
+        max_hands: 5,
+        turn_seconds: 20,
+        blind_every: 50,
+        starting_stack: 100,
+      },
     });
     const started = performance.now();
     const { watch, json } = await watchOf(
@@ -765,7 +774,12 @@ describe('GET /v1/rooms/{room_id}/watch while waiting for an opponent', () => {
       room_id: room.room_id,
       seat: 0,
       players: ['alice', null],
-      settings: { hands: 5, turn_seconds: 20, starting_stack: 100 },
+      settings: {
+        max_hands: 5,
+        turn_seconds: 20,
+        blind_every: 50,
+        starting_stack: 100,
+      },
       room_status: 'waiting',
       hand_number: null,
       to_act_seat: null,
@@ -847,7 +861,7 @@ describe('GET /v1/rooms/{room_id}/watch during play', () => {
 
 describe('a watch response holds nothing the same seat could not get from state (A16)', () => {
   it('matches the seat state at every step of a 3-hand match, to match_over', async () => {
-    const rig = await openRig({ hands: 3 });
+    const rig = await openRig({ max_hands: 3 });
     await checkParity(rig);
     for (let i = 0; i < 100; i++) {
       if (!(await step(rig))) break;
@@ -863,7 +877,7 @@ describe('a watch response holds nothing the same seat could not get from state 
 
 describe('hole cards in watch hands (A16)', () => {
   it('shows the seat its own hole cards in a hand that ended by a fold, and not the opponent', async () => {
-    const rig = await openRig({ hands: 3 });
+    const rig = await openRig({ max_hands: 3 });
     // Hand 1: seat 0 folds at once.
     await step(rig);
     const deal = dealHand(SEED, 1);
@@ -884,7 +898,7 @@ describe('hole cards in watch hands (A16)', () => {
   });
 
   it('shows both hole cards for a hand that went to showdown, while the match goes on', async () => {
-    const rig = await openRig({ hands: 3 });
+    const rig = await openRig({ max_hands: 3 });
     // Hand 1 by fold; hand 2 passive to showdown; stop before hand 3 is played.
     while (true) {
       const statuses = await observeBoth(rig);
@@ -915,7 +929,7 @@ describe('hole cards in watch hands (A16)', () => {
 
 describe('note on POST /actions (A16)', () => {
   it('shows in the own seat watch, in the current view and in the finished hand', async () => {
-    const rig = await openRig({ hands: 2 });
+    const rig = await openRig({ max_hands: 2 });
     await step(rig, () => ({ type: 'call' }));
     const afterCall = await watchOf(rig.t.env, rig.roomId, rig.watchTokens[0]);
     expect(afterCall.watch.view?.history.at(-1)).toMatchObject({
@@ -967,7 +981,7 @@ describe('note on POST /actions (A16)', () => {
   });
 
   it("never appears in the opponent's wait, state or watch, nor in /v1/matches/{id}", async () => {
-    const rig = await openRig({ hands: 3 });
+    const rig = await openRig({ max_hands: 3 });
     const check = async () => {
       for (const seat of [0, 1] as const) {
         const other = seat === 0 ? 1 : 0;
@@ -1008,7 +1022,7 @@ describe('note on POST /actions (A16)', () => {
   });
 
   it('is stored in D1 match_events for both seats, and nowhere else', async () => {
-    const rig = await openRig({ hands: 3 });
+    const rig = await openRig({ max_hands: 3 });
     await playOut(rig);
     const rows = await testD1.db
       .select()
@@ -1188,7 +1202,7 @@ describe('note on POST /actions (A16)', () => {
 
 describe('GET /v1/rooms/{room_id}/watch after the match', () => {
   it('has the result and every hand with both hole cards and the own notes', async () => {
-    const rig = await openRig({ hands: 3 });
+    const rig = await openRig({ max_hands: 3 });
     await playOut(rig);
     const over = await state(rig.t.env, rig.roomId, rig.tokens[0]);
     expect(over.status.status).toBe('match_over');
@@ -1235,7 +1249,7 @@ describe('GET /v1/rooms/{room_id}/watch after the match', () => {
   });
 
   it('gives each hand as /v1/matches/{id} does, plus the own notes', async () => {
-    const rig = await openRig({ hands: 3 });
+    const rig = await openRig({ max_hands: 3 });
     await playOut(rig);
     const detail = (await (
       await get(rig.t.env, `/v1/matches/${rig.roomId}`)
@@ -1257,7 +1271,7 @@ describe('GET /v1/rooms/{room_id}/watch after the match', () => {
   });
 
   it('still answers more than an hour after the match ended, when seat tokens are refused (A8)', async () => {
-    const rig = await openRig({ hands: 1 });
+    const rig = await openRig({ max_hands: 1 });
     await playOut(rig);
     rig.t.clock.ms += 2 * 60 * 60 * 1000;
     const { watch } = await watchOf(rig.t.env, rig.roomId, rig.watchTokens[0]);
@@ -1269,7 +1283,12 @@ describe('GET /v1/rooms/{room_id}/watch after the match', () => {
     const t = makeEnv({ waitMs: 1 });
     const room = await createRoom(t.env, {
       opponent: 'bot',
-      settings: { hands: 2, turn_seconds: 5, starting_stack: 40 },
+      settings: {
+        max_hands: 2,
+        turn_seconds: 5,
+        blind_every: 50,
+        starting_stack: 40,
+      },
     });
     const token = tokenOf(room.watch_url);
     const start = await watchOf(t.env, room.room_id, token);
@@ -1309,7 +1328,7 @@ describe('GET /v1/rooms/{room_id}/watch after the match', () => {
 
 describe('GET /v1/rooms/{room_id}/watch after the room is over without a full match', () => {
   it('shows a leave during play as a finished match won by the other seat, with no unplayed hand', async () => {
-    const rig = await openRig({ hands: 3 });
+    const rig = await openRig({ max_hands: 3 });
     await step(rig, () => ({ type: 'call' }));
     const left = await post(
       rig.t.env,
@@ -1366,7 +1385,7 @@ describe('GET /v1/rooms/{room_id}/watch after the room is over without a full ma
   });
 
   it('shows an aborted match as void', async () => {
-    const rig = await openRig({ hands: 3 });
+    const rig = await openRig({ max_hands: 3 });
     await step(rig);
     const aborted = await post(
       rig.t.env,
@@ -1394,4 +1413,114 @@ describe('GET /v1/rooms/{room_id}/watch after the room is over without a full ma
       });
     }
   });
+});
+
+describe('T34 freezeout views and results', () => {
+  it('reports the current blinds and next upgrade in wait, state and watch across the boundary', async () => {
+    const rig = await openRig({ blind_every: 2, max_hands: 6 });
+    for (const [hand, blinds, next] of [
+      [1, [1, 2], 3],
+      [2, [1, 2], 3],
+      [3, [2, 4], 5],
+    ] as const) {
+      for (const seat of [0, 1] as const) {
+        // wait is also checked for the non-acting seat (short local poll).
+        for (const read of [state, wait]) {
+          const { status } = await read(
+            rig.t.env,
+            rig.roomId,
+            rig.tokens[seat],
+          );
+          expect(status.hand_number).toBe(hand);
+          expect(status.settings).toEqual(rig.settings);
+          expect(status.view).toMatchObject({
+            blinds,
+            next_blinds_at_hand: next,
+          });
+          if (hand > 1 && status.status === 'your_turn') {
+            expect(status.last_hand).toMatchObject({
+              hand_number: hand - 1,
+              blinds: [1, 2],
+            });
+          }
+        }
+        const { watch } = await watchOf(
+          rig.t.env,
+          rig.roomId,
+          rig.watchTokens[seat],
+        );
+        expect(watch.settings).toEqual(rig.settings);
+        expect(watch.view).toMatchObject({ blinds, next_blinds_at_hand: next });
+        expect(watch.hands.map(h => h.blinds)).toEqual(
+          Array.from({ length: hand - 1 }, () => [1, 2]),
+        );
+      }
+      const seat = hand % 2 === 1 ? 0 : 1;
+      const turn = await yourTurn(rig.t.env, rig.roomId, rig.tokens[seat]);
+      expect(
+        (
+          await actPost(rig.t.env, rig.roomId, rig.tokens[seat], {
+            turn_id: turn.turn_id,
+            type: 'fold',
+          })
+        ).status,
+      ).toBe(200);
+    }
+    const { watch } = await watchOf(rig.t.env, rig.roomId, rig.watchTokens[0]);
+    expect(watch.hands.map(h => h.blinds)).toEqual([
+      [1, 2],
+      [1, 2],
+      [2, 4],
+    ]);
+  });
+
+  it('ends at max_hands and reports a draw when alternating small-blind folds restore equal stacks', async () => {
+    const rig = await openRig({ blind_every: 50, max_hands: 2 });
+    for (const seat of [0, 1] as const) {
+      const turn = await yourTurn(rig.t.env, rig.roomId, rig.tokens[seat]);
+      expect(
+        (
+          await actPost(rig.t.env, rig.roomId, rig.tokens[seat], {
+            turn_id: turn.turn_id,
+            type: 'fold',
+          })
+        ).status,
+      ).toBe(200);
+    }
+    for (const seat of [0, 1] as const) {
+      for (const read of [state, wait]) {
+        const { status } = await read(rig.t.env, rig.roomId, rig.tokens[seat]);
+        expect(status).toMatchObject({
+          status: 'match_over',
+          result: 'draw',
+          hand_number: 2,
+          final_stacks: [40, 40],
+          last_hand: { hand_number: 2, blinds: [1, 2] },
+          view: { blinds: [1, 2], next_blinds_at_hand: null },
+        });
+      }
+    }
+  });
+});
+
+it('fills freezeout defaults in create, join, wait, state and watch responses', async () => {
+  const t = makeEnv();
+  const expected = {
+    starting_stack: 40,
+    blind_every: 5,
+    max_hands: 50,
+    turn_seconds: 30,
+  };
+  const room = await createRoom(t.env);
+  expect(room.settings).toEqual(expected);
+  const joined = await joinRoom(t.env, room);
+  expect(joined.settings).toEqual(expected);
+  for (const read of [state, wait]) {
+    expect(
+      (await read(t.env, room.room_id, room.token)).status.settings,
+    ).toEqual(expected);
+  }
+  const { watch } = await watchOf(t.env, room.room_id, tokenOf(room.watch_url));
+  expect(watch.settings).toEqual(expected);
+  expect(watch.view).toMatchObject({ blinds: [1, 2], next_blinds_at_hand: 6 });
 });

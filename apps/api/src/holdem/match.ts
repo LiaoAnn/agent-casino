@@ -7,8 +7,11 @@ export type Street = 'preflop' | 'flop' | 'turn' | 'river';
 
 export interface MatchConfig {
   seed: string;
-  hands: number;
   startingStack: number;
+  /** Blinds double after every this many hands (holdem-rules 賽制). */
+  blindEvery: number;
+  /** The safety cap: after this hand the bigger stack wins. */
+  maxHands: number;
 }
 
 export type Action =
@@ -38,6 +41,8 @@ export interface HistoryEvent {
 /** The `last_hand` response shape (casino-api A15). */
 export interface LastHand {
   hand_number: number;
+  /** [small, big] as scheduled; a short stack posts less. */
+  blinds: [number, number];
   /** `null` is a split pot. */
   winner_seat: Seat | null;
   /** Chips won: everything put in, minus any uncalled bet returned. */
@@ -93,8 +98,6 @@ export type ApplyResult =
       message: string;
     };
 
-const SMALL_BLIND = 1;
-const BIG_BLIND = 2;
 const STREETS: Street[] = ['preflop', 'flop', 'turn', 'river'];
 /** Board cards showing on each street. */
 const BOARD_SIZE: Record<Street, number> = {
@@ -106,22 +109,33 @@ const BOARD_SIZE: Record<Street, number> = {
 
 export const otherSeat = (seat: Seat): Seat => (seat === 0 ? 1 : 0);
 
+/** [small, big] for hand `handNumber` (from 1): 1/2, doubling every `blindEvery` hands. */
+export function blindsAt(
+  handNumber: number,
+  blindEvery: number,
+): [number, number] {
+  const small = 2 ** Math.floor((handNumber - 1) / blindEvery);
+  return [small, 2 * small];
+}
+
+const bigBlind = (state: MatchState) =>
+  blindsAt(state.handNumber, state.config.blindEvery)[1];
+
+function checkRange(name: string, value: number, min: number, max: number) {
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new RangeError(
+      `${name} must be an integer from ${min} to ${max}: ${value}`,
+    );
+  }
+}
+
 /** Deals hand 1 and posts its blinds. Throws RangeError on a bad config. */
 export function startMatch(config: MatchConfig): MatchState {
   // dealHand checks the seed.
-  const { hands, startingStack } = config;
-  if (!Number.isInteger(hands) || hands < 1 || hands > 200) {
-    throw new RangeError(`hands must be an integer from 1 to 200: ${hands}`);
-  }
-  if (
-    !Number.isInteger(startingStack) ||
-    startingStack < 10 ||
-    startingStack > 2000
-  ) {
-    throw new RangeError(
-      `startingStack must be an integer from 10 to 2000: ${startingStack}`,
-    );
-  }
+  const { startingStack, blindEvery, maxHands } = config;
+  checkRange('startingStack', startingStack, 10, 2000);
+  checkRange('blindEvery', blindEvery, 1, 50);
+  checkRange('maxHands', maxHands, 1, 100);
   const state = dealNextHand(
     { ...config },
     1,
@@ -300,7 +314,7 @@ function proceed(
       );
       state.bets = [0, 0];
       state.acted = [false, false];
-      state.minRaise = BIG_BLIND;
+      state.minRaise = bigBlind(state);
       preferred = otherSeat(state.button);
     }
   }
@@ -347,6 +361,7 @@ function endHand(
   }
   const lastHand: LastHand = {
     hand_number: state.handNumber,
+    blinds: blindsAt(state.handNumber, state.config.blindEvery),
     winner_seat: winner,
     pot,
     ended_by: endedBy,
@@ -364,7 +379,7 @@ function endHand(
   });
 
   const over =
-    state.handNumber >= state.config.hands ||
+    state.handNumber >= state.config.maxHands ||
     state.stacks[0] === 0 ||
     state.stacks[1] === 0;
   if (over) {
@@ -391,6 +406,7 @@ function dealNextHand(
   lastHand: LastHand | null,
 ): MatchState {
   const button: Seat = handNumber % 2 === 1 ? 0 : 1;
+  const [small, big] = blindsAt(handNumber, config.blindEvery);
   const state: MatchState = {
     config,
     handNumber,
@@ -406,11 +422,11 @@ function dealNextHand(
     history: [],
     lastHand,
     acted: [false, false],
-    minRaise: BIG_BLIND,
+    minRaise: big,
   };
   for (const [seat, blind] of [
-    [button, SMALL_BLIND],
-    [otherSeat(button), BIG_BLIND],
+    [button, small],
+    [otherSeat(button), big],
   ] as const) {
     const posted = Math.min(blind, state.stacks[seat]);
     put(state, seat, posted);

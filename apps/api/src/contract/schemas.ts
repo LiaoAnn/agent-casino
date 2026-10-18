@@ -10,16 +10,20 @@ export const RESERVED_NAMES = ['house-bot'] as const;
 // (A17); checked by the handler, like names.
 export const QUEUE_KEY_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
 
+// A freezeout: blinds double every `blind_every` hands and the match ends
+// when a stack is empty, or after `max_hands` (holdem-rules 賽制, A19).
 export const SETTINGS_DEFAULTS = {
-  hands: 10,
-  turn_seconds: 60,
   starting_stack: 40,
+  blind_every: 5,
+  max_hands: 50,
+  turn_seconds: 30,
 } as const;
 
 export const SETTINGS_LIMITS = {
-  hands: [1, 200],
-  turn_seconds: [5, 300],
   starting_stack: [10, 2000],
+  blind_every: [1, 50],
+  max_hands: [1, 100],
+  turn_seconds: [5, 300],
 } as const;
 
 const pattern = (regExp: RegExp) =>
@@ -45,6 +49,9 @@ const Token = Schema.String;
 const HoleCards = Schema.Tuple([Card, Card]);
 const Board = Schema.Array(Card).check(Schema.isMaxLength(5));
 const Stacks = Schema.Tuple([NonNegativeInt, NonNegativeInt]);
+const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+// [small, big] of one hand, as scheduled (A19).
+const Blinds = Schema.Tuple([PositiveInt, PositiveInt]);
 
 // --- Requests ---------------------------------------------------------------
 
@@ -54,9 +61,18 @@ const limited = (key: keyof typeof SETTINGS_LIMITS) => {
 };
 
 export const Settings = Schema.Struct({
-  hands: Schema.optionalKey(limited('hands')),
-  turn_seconds: Schema.optionalKey(limited('turn_seconds')),
   starting_stack: Schema.optionalKey(limited('starting_stack')),
+  blind_every: Schema.optionalKey(limited('blind_every')),
+  max_hands: Schema.optionalKey(limited('max_hands')),
+  turn_seconds: Schema.optionalKey(limited('turn_seconds')),
+  // Before T34 a match was a fixed number of hands; say so instead of
+  // quietly ignoring it.
+  hands: Schema.optionalKey(
+    Schema.Never.annotate({
+      message:
+        'hands is no longer a setting: a match is played until one player has no chips; use max_hands for the safety cap',
+    }),
+  ),
 });
 
 // Only honoured where ALLOW_TEST_ROOMS=true (A11).
@@ -115,9 +131,10 @@ export const ActionRequest = Schema.Struct({
 
 // The settings a room is played with, defaults filled in.
 const RoomSettings = Schema.Struct({
-  hands: limited('hands'),
-  turn_seconds: limited('turn_seconds'),
   starting_stack: limited('starting_stack'),
+  blind_every: limited('blind_every'),
+  max_hands: limited('max_hands'),
+  turn_seconds: limited('turn_seconds'),
 });
 
 // `<WEB_URL>/watch/{room_id}?token=<watch token>`: the owner's read-only
@@ -190,6 +207,9 @@ const LegalAction = Schema.Union([
 ]);
 
 const View = Schema.Struct({
+  blinds: Blinds,
+  // The first hand of the next blind level; `null` when there is none.
+  next_blinds_at_hand: Schema.NullOr(PositiveInt),
   street: Street,
   my_seat: Seat,
   button_seat: Seat,
@@ -211,6 +231,7 @@ const ShownCards = Schema.NullOr(BothHoleCards);
 
 const LastHand = Schema.Struct({
   hand_number: Schema.Int,
+  blinds: Blinds,
   winner_seat: Schema.NullOr(Seat),
   pot: NonNegativeInt,
   ended_by: EndedBy,
@@ -324,6 +345,7 @@ export type MatchList = typeof MatchList.Type;
 
 export const MatchHand = Schema.Struct({
   hand_number: Schema.Int,
+  blinds: Blinds,
   button_seat: Seat,
   board: Board,
   // Every hand: the seed is public once the match is over (A13).
@@ -345,7 +367,11 @@ const RatingChange = Schema.Struct({
 export const MatchDetail = Schema.Struct({
   match_id: MatchId,
   players: Players,
-  settings: RoomSettings,
+  // `blind_every` is `null` for a match from before T34: fixed 1/2 blinds.
+  settings: Schema.Struct({
+    ...RoomSettings.fields,
+    blind_every: Schema.NullOr(limited('blind_every')),
+  }),
   seed: Seed,
   result: SeatResult,
   rated: Schema.Boolean,

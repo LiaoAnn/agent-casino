@@ -57,6 +57,8 @@ const BAD_SEEDS = [
 ] as const;
 
 const view = {
+  blinds: [1, 2],
+  next_blinds_at_hand: null,
   street: 'flop',
   my_seat: 0,
   button_seat: 0,
@@ -70,7 +72,12 @@ const view = {
   history: [{ seat: 1, street: 'flop', type: 'raise', amount: 4 }],
 };
 
-const settings = { hands: 10, turn_seconds: 60, starting_stack: 40 };
+const settings = {
+  max_hands: 10,
+  turn_seconds: 60,
+  blind_every: 50,
+  starting_stack: 40,
+};
 const watchUrl = `https://web.test/watch/${ROOM}?token=abc.def`;
 
 const yourTurn = {
@@ -91,6 +98,7 @@ const yourTurn = {
   ],
   last_hand: {
     hand_number: 2,
+    blinds: [1, 2],
     winner_seat: 1,
     pot: 8,
     ended_by: 'showdown',
@@ -127,13 +135,15 @@ const matchOver = {
 describe('constants', () => {
   it('match the skill defaults and holdem-rules ranges', () => {
     expect(SETTINGS_DEFAULTS).toEqual({
-      hands: 10,
-      turn_seconds: 60,
+      max_hands: 50,
+      turn_seconds: 30,
+      blind_every: 5,
       starting_stack: 40,
     });
     expect(SETTINGS_LIMITS).toEqual({
-      hands: [1, 200],
+      max_hands: [1, 100],
       turn_seconds: [5, 300],
+      blind_every: [1, 50],
       starting_stack: [10, 2000],
     });
     expect(RESERVED_NAMES).toEqual(['house-bot']);
@@ -184,7 +194,12 @@ describe('requests', () => {
       decodes(CreateRoomRequest, {
         game: 'holdem',
         name: 'alice',
-        settings: { hands: 10, turn_seconds: 60, starting_stack: 40 },
+        settings: {
+          max_hands: 10,
+          turn_seconds: 60,
+          blind_every: 50,
+          starting_stack: 40,
+        },
       }),
     ).toBe(true);
     expect(
@@ -250,24 +265,34 @@ describe('requests', () => {
   it('accepts settings at the limits and rejects them outside', () => {
     expect(decodes(Settings, {})).toBe(true);
     expect(
-      decodes(Settings, { hands: 1, turn_seconds: 5, starting_stack: 10 }),
+      decodes(Settings, {
+        max_hands: 1,
+        turn_seconds: 5,
+        blind_every: 1,
+        starting_stack: 10,
+      }),
     ).toBe(true);
     expect(
       decodes(Settings, {
-        hands: 200,
+        max_hands: 100,
         turn_seconds: 300,
+        blind_every: 50,
         starting_stack: 2000,
       }),
     ).toBe(true);
     for (const bad of [
-      { hands: 0 },
-      { hands: 201 },
-      { hands: 2.5 },
+      { max_hands: 0 },
+      { max_hands: 101 },
+      { max_hands: 2.5 },
       { turn_seconds: 4 },
       { turn_seconds: 301 },
-      { starting_stack: 9 },
-      { starting_stack: 2001 },
-      { hands: '10' },
+      { blind_every: 50, starting_stack: 9 },
+      { blind_every: 50, starting_stack: 2001 },
+      { max_hands: '10' },
+      { blind_every: 0 },
+      { blind_every: 51 },
+      { blind_every: 1.5 },
+      { blind_every: '5' },
     ]) {
       expect(decodes(Settings, bad), JSON.stringify(bad)).toBe(false);
     }
@@ -450,9 +475,9 @@ describe('responses', () => {
       expect(decodes(RoomStatus, { ...status, opponent_name: null })).toBe(
         true,
       );
-      expect(decodes(RoomStatus, { ...status, settings: { hands: 10 } })).toBe(
-        false,
-      );
+      expect(
+        decodes(RoomStatus, { ...status, settings: { max_hands: 10 } }),
+      ).toBe(false);
     }
   });
 
@@ -522,7 +547,12 @@ describe('responses', () => {
   const detail = {
     match_id: ROOM,
     players: ['alice', 'bob'],
-    settings: { hands: 1, turn_seconds: 60, starting_stack: 40 },
+    settings: {
+      max_hands: 1,
+      turn_seconds: 60,
+      blind_every: 50,
+      starting_stack: 40,
+    },
     seed: SEED,
     result: 'seat1_win',
     rated: true,
@@ -546,6 +576,7 @@ describe('responses', () => {
           { seat: 1, street: 'preflop', type: 'post_blind', amount: 2 },
           { seat: 0, street: 'preflop', type: 'fold' },
         ],
+        blinds: [1, 2],
         winner_seat: 1,
         pot: 2,
         ended_by: 'fold',
@@ -598,6 +629,26 @@ describe('responses', () => {
     },
   );
 
+  it('accepts legacy match settings with a null blind interval', () => {
+    expect(
+      decodes(MatchDetail, {
+        ...detail,
+        settings: { ...detail.settings, blind_every: null },
+      }),
+    ).toBe(true);
+    expect(
+      decodes(RoomStatus, {
+        ...yourTurn,
+        settings: { ...settings, blind_every: null },
+      }),
+    ).toBe(false);
+  });
+
+  it('requires blinds on each public hand', () => {
+    const hands = detail.hands.map(({ blinds: _blinds, ...hand }) => hand);
+    expect(decodes(MatchDetail, { ...detail, hands })).toBe(false);
+  });
+
   it('decodes the skill error example', () => {
     const [schema] = apiErrors('invalid_action');
     if (schema === undefined) throw new Error('no schema');
@@ -635,6 +686,7 @@ describe('WatchResponse', () => {
       { seat: 1, street: 'preflop', type: 'check' },
       { seat: 1, street: 'flop', type: 'fold' },
     ],
+    blinds: [1, 2],
     winner_seat: 0,
     pot: 4,
     ended_by: 'fold',
@@ -892,5 +944,47 @@ describe('T28 S3 seconds_remaining contract', () => {
 
   it.each([-1, 29.4, '30', null])('rejects %j seconds', seconds_remaining => {
     expect(decodes(RoomStatus, { ...yourTurn, seconds_remaining })).toBe(false);
+  });
+});
+
+describe('T34 required freezeout fields', () => {
+  it.each(['blinds', 'next_blinds_at_hand'] as const)(
+    'requires view.%s',
+    key => {
+      const { [key]: _removed, ...without } = view;
+      expect(decodes(RoomStatus, { ...yourTurn, view: without })).toBe(false);
+    },
+  );
+
+  it.each(['your_turn', 'match_over'] as const)(
+    '%s requires last_hand.blinds',
+    status => {
+      const { blinds: _blinds, ...without } = yourTurn.last_hand;
+      const envelope = status === 'your_turn' ? yourTurn : matchOver;
+      expect(decodes(RoomStatus, { ...envelope, last_hand: without })).toBe(
+        false,
+      );
+    },
+  );
+
+  it.each([
+    'starting_stack',
+    'blind_every',
+    'max_hands',
+    'turn_seconds',
+  ] as const)('requires complete response settings: %s', key => {
+    const { [key]: _removed, ...without } = settings;
+    expect(decodes(RoomStatus, { ...yourTurn, settings: without })).toBe(false);
+  });
+
+  it('preserves both a future upgrade and null when decoding', () => {
+    for (const next of [6, null]) {
+      const response = {
+        ...yourTurn,
+        settings: { ...settings, blind_every: 5 },
+        view: { ...view, next_blinds_at_hand: next },
+      };
+      expect(Schema.decodeUnknownSync(RoomStatus)(response)).toEqual(response);
+    }
   });
 });

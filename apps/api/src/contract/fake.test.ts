@@ -34,7 +34,8 @@ const allSummaries = (data: ReturnType<typeof makeFakeData>) => {
 
 const configOf = (detail: MatchDetail): MatchConfig => ({
   seed: detail.seed,
-  hands: detail.settings.hands,
+  maxHands: detail.settings.max_hands,
+  blindEvery: detail.settings.blind_every ?? 50,
   startingStack: detail.settings.starting_stack,
 });
 
@@ -261,8 +262,10 @@ describe('makeFakeData', () => {
         // A finished match ran every hand or ended when a player busted.
         expect(result.state.over, detail.match_id).toBe(true);
       }
-      expect(detail.hands.length).toBeLessThanOrEqual(detail.settings.hands);
-      if (detail.hands.length < detail.settings.hands) {
+      expect(detail.hands.length).toBeLessThanOrEqual(
+        detail.settings.max_hands,
+      );
+      if (detail.hands.length < detail.settings.max_hands) {
         const last = detail.hands.at(-1);
         if (detail.result !== 'void' && detail.result !== 'cancelled') {
           expect(last?.stacks, detail.match_id).toContain(0);
@@ -494,4 +497,27 @@ describe('makeFakeData watch responses', () => {
       }
     },
   );
+});
+
+describe('T34 freezeout fake records', () => {
+  it('includes fixed-blind legacy data and consistent blinds in every record', () => {
+    const data = makeFakeData();
+    const { summaries } = allSummaries(data);
+    const details = summaries.map(s => data.match(s.match_id));
+    const legacy = details.filter(d => d?.settings.blind_every === null);
+    expect(legacy.length).toBeGreaterThan(0);
+    expect(legacy.some(d => (d?.hands.length ?? 0) > 0)).toBe(true);
+    for (const detail of details) {
+      if (detail === undefined) throw new Error('Missing fake detail');
+      expect(decodes(MatchDetail, detail)).toBe(true);
+      for (const hand of detail.hands) {
+        const interval = detail.settings.blind_every;
+        const small =
+          interval === null
+            ? 1
+            : 2 ** Math.floor((hand.hand_number - 1) / interval);
+        expect(hand.blinds).toEqual([small, small * 2]);
+      }
+    }
+  });
 });
