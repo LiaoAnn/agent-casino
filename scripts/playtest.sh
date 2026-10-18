@@ -15,7 +15,8 @@
 # CLI's own default). PLAYTEST_TIMEOUT is the limit per agent in seconds
 # (default 2400).
 #
-# Exits 0 only when the platform has a finished match between the two names;
+# Exits 0 only when the platform has a finished match between the two names
+# in which both made their own last action, and both agents exited normally;
 # the agents' own reports don't count. Everything the agents write and say
 # goes to a fresh folder under /tmp, printed at the start.
 set -euo pipefail
@@ -91,14 +92,17 @@ claude_pid=$!
 player codex "$codex_name" &
 codex_pid=$!
 # On Ctrl-C, stop the agents too (each runs under `timeout`, which passes it on).
-trap 'pkill -TERM -P "$claude_pid"; pkill -TERM -P "$codex_pid"; exit 130' INT TERM
+trap 'pkill -TERM -P "$claude_pid" || true; pkill -TERM -P "$codex_pid" || true; exit 130' INT TERM
 
 rc_claude=0 rc_codex=0
 wait "$claude_pid" || rc_claude=$?
 wait "$codex_pid" || rc_codex=$?
 echo "claude exited $rc_claude, codex exited $rc_codex (124 = timed out)"
 
-# The platform decides: a finished match between the two names.
+# The platform decides: a finished match between the two names in which each
+# player's last action was its own, not the server playing for an agent that
+# had already gone. With both agents exiting normally after that, both were
+# there for match_over.
 match=$(curl -fsS --max-time 20 "$URL/v1/matches" | jq -r --arg a "$claude_name" --arg b "$codex_name" \
   '[.matches[] | select((.players | index($a)) and (.players | index($b)))
     | select(.result | test("^(seat0_win|seat1_win|draw)$"))][0].match_id // empty')
@@ -106,8 +110,17 @@ if [ -z "$match" ]; then
   echo "not ok - no finished match between $claude_name and $codex_name on $URL" >&2
   exit 1
 fi
-curl -fsS --max-time 20 "$URL/v1/matches/$match" | jq -r '
+detail=$(curl -fsS --max-time 20 "$URL/v1/matches/$match")
+jq -r '
   . as $m
-  | "ok - match \(.match_id): \(.players[0]) vs \(.players[1]), \(.result), \(.hands | length) hands, final stacks \(.final_stacks | map(tostring) | join(":"))",
+  | "match \(.match_id): \(.players[0]) vs \(.players[1]), \(.result), \(.hands | length) hands, final stacks \(.final_stacks | map(tostring) | join(":"))",
     (range(2) as $s
-      | "  \($m.players[$s]): \([$m.hands[].events[] | select(.seat == $s and .timeout == true)] | length) timeouts")'
+      | [$m.hands[].events[] | select(.seat == $s and .type != "post_blind")] as $acts
+      | "  \($m.players[$s]): \($acts | length) actions, \([$acts[] | select(.timeout)] | length) timeouts, last action \(if ($acts | last | .timeout) then "by the server (timeout)" else "its own" end)")' <<<"$detail"
+present=$(jq '[range(2) as $s | [.hands[].events[] | select(.seat == $s and .type != "post_blind")]
+  | length > 0 and (last | .timeout | not)] | all' <<<"$detail")
+if [ "$present" != true ] || [ "$rc_claude" -ne 0 ] || [ "$rc_codex" -ne 0 ]; then
+  echo "not ok - an agent left before match_over (see above and the logs in $OUT)" >&2
+  exit 1
+fi
+echo "ok - both agents played match $match to match_over"
