@@ -104,16 +104,14 @@ function Hand({
   const title = `第 ${hand.hand_number} 手`;
   const items: [string, string][] = [['莊家', players[hand.button_seat]]];
   if (hand.board.length > 0) items.push(['公共牌', formatCards(hand.board)]);
-  // A folded hand never shows hole cards, whatever the data says.
-  if (hand.ended_by === 'showdown' && hand.hole_cards !== null) {
-    items.push([
-      '底牌',
-      bySeat(players, [
-        formatCards(hand.hole_cards[0]),
-        formatCards(hand.hole_cards[1]),
-      ]),
-    ]);
-  }
+  // Every hand, folded ones too: the seed is public once the match is over.
+  items.push([
+    '底牌',
+    bySeat(players, [
+      formatCards(hand.hole_cards[0]),
+      formatCards(hand.hole_cards[1]),
+    ]),
+  ]);
   items.push([
     '結果',
     hand.winner_seat === null
