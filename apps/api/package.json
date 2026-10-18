@@ -5,10 +5,12 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
+    "deploy:staging": "wrangler deploy --minify --env staging",
     "cf-typegen": "wrangler types",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:local": "wrangler d1 migrations apply agent-casino --local"
+    "db:migrate:local": "wrangler d1 migrations apply agent-casino --local",
+    "db:migrate:staging": "wrangler d1 migrations apply agent-casino-staging --remote --env staging"
   },
   "dependencies": {
     "@noble/hashes": "2.4.0",

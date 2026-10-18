@@ -38,5 +38,8 @@ The api Worker is available at `http://localhost:8787`.
 Tests must not use `.skip` or `.only`: Biome rejects both, and Vitest also
 fails on `.only`.
 
+Deploying to Cloudflare (staging, and how to add another environment):
+`docs/deploy.md`.
+
 For Cloudflare authentication inside the container, run `bash wrangler_login.sh`.
 It uses `socat` to forward the local OAuth callback between IPv4 and IPv6.
