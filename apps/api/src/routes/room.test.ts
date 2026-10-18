@@ -568,7 +568,7 @@ describe('room settings', () => {
     expect(bob.status.view).toMatchObject({ my_stack: 38, opponent_stack: 39 });
   });
 
-  it('omitted settings use turn_seconds 60 for the deadline', async () => {
+  it('omitted settings use turn_seconds 30 for the deadline', async () => {
     const t = makeEnv();
     const room = await createRoom(t.env);
     const joinedAt = t.clock.ms;
@@ -576,7 +576,7 @@ describe('room settings', () => {
     const { status } = await state(t.env, room.room_id, room.token);
     expect(status.status).toBe('your_turn');
     if (status.status === 'your_turn') {
-      expect(Date.parse(status.deadline)).toBe(joinedAt + 60_000);
+      expect(Date.parse(status.deadline)).toBe(joinedAt + 30_000);
     }
   });
 
@@ -2137,7 +2137,7 @@ describe('a room that ended over an hour ago answers invalid_token (A8)', () => 
     // spec requires timeouts: a room left idle for 2 hours would be played
     // out, so the players act every 240 s (under turn_seconds 300) for 2 hours.
     const { roomId, tokens } = await seededRoom(t, {
-      max_hands: 200,
+      max_hands: 100,
       turn_seconds: 300,
     });
     const startedAt = t.clock.ms;
@@ -2315,7 +2315,7 @@ describe('Durable Object errors map to the contract errors (A4)', () => {
 describe('Durable Object storage stays under the per-value limit', () => {
   // Cloudflare DO storage refuses a single value over 128 KiB.
   const MAX_VALUE_BYTES = 131_072;
-  const HANDS = 200;
+  const HANDS = 100;
   const STACK = 2000;
 
   it(`a full ${HANDS}-hand match with starting_stack ${STACK} never puts a value over 128 KiB`, async () => {
@@ -2667,7 +2667,7 @@ describe('opponent_name and settings in room responses (A16)', () => {
       starting_stack: 40,
       blind_every: 5,
       max_hands: 50,
-      turn_seconds: 60,
+      turn_seconds: 30,
     });
     expect(
       (await createRoom(env, { settings: { max_hands: 5 } })).settings,
@@ -2805,7 +2805,7 @@ describe('freezeout settings requests', () => {
     },
   );
 
-  it.each([{ blind_every: 0 }, { blind_every: 51 }, { max_hands: 201 }])(
+  it.each([{ blind_every: 0 }, { blind_every: 51 }, { max_hands: 101 }])(
     'rejects out-of-range freezeout settings %j',
     async settings => {
       const { env } = makeEnv();

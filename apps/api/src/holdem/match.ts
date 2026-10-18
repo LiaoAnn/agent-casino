@@ -135,7 +135,7 @@ export function startMatch(config: MatchConfig): MatchState {
   const { startingStack, blindEvery, maxHands } = config;
   checkRange('startingStack', startingStack, 10, 2000);
   checkRange('blindEvery', blindEvery, 1, 50);
-  checkRange('maxHands', maxHands, 1, 200);
+  checkRange('maxHands', maxHands, 1, 100);
   const state = dealNextHand(
     { ...config },
     1,

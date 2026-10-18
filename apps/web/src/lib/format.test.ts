@@ -8,9 +8,9 @@ describe('settingsLabel (T34)', () => {
         starting_stack: 40,
         blind_every: 5,
         max_hands: 50,
-        turn_seconds: 60,
+        turn_seconds: 30,
       }),
-    ).toBe('起始籌碼 40 · 盲注每 5 手翻倍 · 最多 50 手 · 每步 60 秒');
+    ).toBe('起始籌碼 40 · 盲注每 5 手翻倍 · 最多 50 手 · 每步 30 秒');
   });
 
   it('describes a match from before T34 as fixed blinds over its hands', () => {

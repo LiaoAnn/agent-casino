@@ -53,7 +53,7 @@ function pickConfig(random: () => number, matchIndex: number): MatchConfig {
               .toString(16)
               .padStart(8, '0'),
           ).join('');
-  const maxHands = randomInt(random, 1, 200);
+  const maxHands = randomInt(random, 1, 100);
   const blindEvery = randomInt(random, 1, 50);
   const roll = random();
   const startingStack =

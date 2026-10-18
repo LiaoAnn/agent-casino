@@ -182,7 +182,7 @@ describe('T13 S1: replay, record, then match_over', () => {
   it('records an early bust from all-in showdowns before the configured hand limit', async () => {
     const settings = {
       ...SETTINGS,
-      max_hands: 200,
+      max_hands: 100,
       blind_every: 50,
       starting_stack: 10,
     };

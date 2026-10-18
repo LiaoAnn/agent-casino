@@ -16,13 +16,13 @@ export const SETTINGS_DEFAULTS = {
   starting_stack: 40,
   blind_every: 5,
   max_hands: 50,
-  turn_seconds: 60,
+  turn_seconds: 30,
 } as const;
 
 export const SETTINGS_LIMITS = {
   starting_stack: [10, 2000],
   blind_every: [1, 50],
-  max_hands: [1, 200],
+  max_hands: [1, 100],
   turn_seconds: [5, 300],
 } as const;
 

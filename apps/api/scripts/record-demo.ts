@@ -44,7 +44,7 @@ const settings = {
   starting_stack: 40,
   blind_every: 5,
   max_hands: 50,
-  turn_seconds: 60,
+  turn_seconds: 30,
 };
 
 const random = mulberry32(firstSeed);

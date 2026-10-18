@@ -40,7 +40,7 @@ const SETTINGS = {
   starting_stack: 40,
   blind_every: 5,
   max_hands: 50,
-  turn_seconds: 60,
+  turn_seconds: 30,
 };
 const watchUrl = (token: string) =>
   `${EXAMPLE_ORIGIN}/watch/${ROOM}?token=${token}`;

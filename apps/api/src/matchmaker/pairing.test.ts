@@ -519,7 +519,17 @@ describe('MatchQueue (A2)', () => {
     expect(
       await Promise.all([
         queue.queue(withKey({ name: 'Alice' })),
-        queue.queue(withKey({ name: 'Bob', settings: SETTINGS_DEFAULTS })),
+        queue.queue(
+          withKey({
+            name: 'Bob',
+            settings: {
+              starting_stack: 40,
+              blind_every: 5,
+              max_hands: 50,
+              turn_seconds: 30,
+            },
+          }),
+        ),
       ]),
     ).toEqual([matched(0), matched(1)]);
   });

@@ -220,7 +220,7 @@ describe('replay', () => {
     for (const matchConfig of [
       config(),
       config({ seed: '0'.repeat(64), maxHands: 1, startingStack: 10 }),
-      config({ seed: 'f'.repeat(64), maxHands: 200, startingStack: 2000 }),
+      config({ seed: 'f'.repeat(64), maxHands: 100, startingStack: 2000 }),
     ]) {
       const start = startMatch(matchConfig);
       expectReplayed(replay(matchConfig, []), {
@@ -447,7 +447,7 @@ describe('replay rejects', () => {
 
   it.each([
     ['maxHands 0', { maxHands: 0 }],
-    ['maxHands 201', { maxHands: 201 }],
+    ['maxHands 101', { maxHands: 101 }],
     ['startingStack 5', { startingStack: 5 }],
     ['startingStack 2001', { startingStack: 2001 }],
     ['uppercase seed', { seed: 'A'.repeat(64) }],

@@ -665,7 +665,7 @@ describe('freezeout queue settings', () => {
     },
   );
 
-  it.each([{ blind_every: 0 }, { blind_every: 51 }, { max_hands: 201 }])(
+  it.each([{ blind_every: 0 }, { blind_every: 51 }, { max_hands: 101 }])(
     'rejects out-of-range freezeout settings %j',
     async settings => {
       const { env } = makeEnv();
@@ -683,7 +683,7 @@ describe('freezeout queue settings', () => {
         starting_stack: 40,
         blind_every: 5,
         max_hands: 50,
-        turn_seconds: 60,
+        turn_seconds: 30,
       });
     }
   });

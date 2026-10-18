@@ -121,8 +121,11 @@ check "POST /v1/rooms with the old settings.hands: 400 pointing to max_hands" \
   '.[0].code == "invalid_request" and .[1] == 400
    and (.[0].hint | contains("max_hands"))' "$(jq -s . <<<"$r")"
 room=$(post /v1/rooms \
-  "{\"game\":\"holdem\",\"name\":\"$human\",\"opponent\":\"bot\",\"settings\":{\"starting_stack\":40,\"blind_every\":5,\"max_hands\":50,\"turn_seconds\":30}}")
-check "POST /v1/rooms with house-bot" '.seat == 0 and (.token | length > 0)' "$room"
+  "{\"game\":\"holdem\",\"name\":\"$human\",\"opponent\":\"bot\"}")
+# No settings: the defaults (holdem-rules 設定表).
+check "POST /v1/rooms with house-bot and the default settings" \
+  '.seat == 0 and (.token | length > 0)
+   and .settings == {starting_stack: 40, blind_every: 5, max_hands: 50, turn_seconds: 30}' "$room"
 bot_room=$(jq -r .room_id <<<"$room")
 play "$bot_room" "$(jq -r .token <<<"$room")" "$TMP/bot" ||
   fail "play house-bot to match_over"

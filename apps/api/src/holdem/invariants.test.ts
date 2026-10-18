@@ -226,7 +226,7 @@ const RANDOM_MATCHES: [Partial<MatchConfig>, number][] = [
   [
     {
       seed: '000000000000000000000000000000000000000000000000000000000000000d',
-      maxHands: 200,
+      maxHands: 100,
       startingStack: 15,
     },
     5,
@@ -263,7 +263,7 @@ describe('checkState on legal play', () => {
     for (const overrides of [
       {},
       { seed: '0'.repeat(64), maxHands: 1, startingStack: 10 },
-      { seed: 'f'.repeat(64), maxHands: 200, startingStack: 2000 },
+      { seed: 'f'.repeat(64), maxHands: 100, startingStack: 2000 },
     ]) {
       expect(checkState(startMatch(config(overrides)))).toEqual([]);
     }

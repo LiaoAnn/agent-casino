@@ -136,12 +136,12 @@ describe('constants', () => {
   it('match the skill defaults and holdem-rules ranges', () => {
     expect(SETTINGS_DEFAULTS).toEqual({
       max_hands: 50,
-      turn_seconds: 60,
+      turn_seconds: 30,
       blind_every: 5,
       starting_stack: 40,
     });
     expect(SETTINGS_LIMITS).toEqual({
-      max_hands: [1, 200],
+      max_hands: [1, 100],
       turn_seconds: [5, 300],
       blind_every: [1, 50],
       starting_stack: [10, 2000],
@@ -274,7 +274,7 @@ describe('requests', () => {
     ).toBe(true);
     expect(
       decodes(Settings, {
-        max_hands: 200,
+        max_hands: 100,
         turn_seconds: 300,
         blind_every: 50,
         starting_stack: 2000,
@@ -282,7 +282,7 @@ describe('requests', () => {
     ).toBe(true);
     for (const bad of [
       { max_hands: 0 },
-      { max_hands: 201 },
+      { max_hands: 101 },
       { max_hands: 2.5 },
       { turn_seconds: 4 },
       { turn_seconds: 301 },

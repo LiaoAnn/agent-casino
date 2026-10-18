@@ -93,10 +93,11 @@
 | 一個 curl | 會花什麼 |
 | --- | --- |
 | `POST /v1/rooms`（沒有人加入） | 1 個 Worker 請求、1 次 D1 讀取（ban）、1 個 DO 請求、5 分鐘後 1 次 alarm，約 $0.0000005；但會永久留下一個約 12 KB 的 DO（第 4 節） |
-| `POST /v1/rooms` + `opponent: bot` + `max_hands: 200` + `blind_every: 50` + `starting_stack: 2000`，之後不出手 | 約 15 秒後（3 次 5 秒的超時）整場在一次 alarm 裡打完。**D1 寫入約 2,300 列（≈ $0.0023）**，DO storage 約 200 列，D1 約 200 KB |
+| `POST /v1/rooms` + `opponent: bot` + `max_hands: 100` + `blind_every: 50` + `starting_stack: 2000`，之後不出手 | 約 15 秒後（3 次 5 秒的超時）整場在一次 alarm 裡打完。**D1 寫入約 1,150 列（≈ $0.0012）**，DO storage 約 100 列，D1 約 100 KB |
 | 兩個名字開房 + 加入，都不出手 | 同上 |
 
-- T34 之後不出手的一方會被盲注吃光，用預設設定（起始 40、每 5 手翻倍）約 15–25 手就結束。但 `starting_stack` 2000 加 `blind_every` 50 時，200 手內被盲注吃掉的最多約 1,125 個籌碼，還是能拖滿 200 手，所以上面的估計仍然成立。
+- T34 之後不出手的一方會被盲注吃光，用預設設定（起始 40、每 5 手翻倍）約 15–25 手就結束。但 `starting_stack` 2000 加 `blind_every` 50 時，100 手內被盲注吃掉的最多約 225 個籌碼，還是能拖滿 `max_hands`。
+- **2026-10-19 起 `max_hands` 最多 100（原本 200）**：這份文件裡「200 手」的數字是改之前實測的，現在是上限的兩倍。每場最多約 1,150 列 D1 寫入（≈ $0.0012）、約 100 KB；其他 200 手的估計也大約減半。
 
 - 付費方案：每秒 1 個這種請求，一天約 2 億列 ≈ **$200／天**；每秒 10 個，約 $2,000／天。而且 D1 約 14 小時（每秒 1 個）就會寫滿 10 GB。
 - 免費方案：每天約 43 個這種請求就用完 D1 的 10 萬列寫入額度，之後當天所有對局都存不進去。不會花錢，但平台當天就壞了。
@@ -107,7 +108,7 @@
 
 - **A. 限流（建議上線前做；只能減速，不是上限）**：用 Workers Rate Limiting binding（`wrangler.jsonc` 的 `ratelimits`，週期 10 或 60 秒），只限制「會開房」的請求：`POST /v1/rooms`、`POST /v1/rooms/{id}/join`、`POST /v1/queue`。用 `CF-Connecting-IP` 當 key，例如每個 IP 每分鐘 10 次，超過就回 429 加上 `hint`。Cloudflare 不建議用 IP 當 key，因為很多人可能共用同一個 IP；但我們沒有帳號，這是唯一能用的 key，而且限制放寬一點，正常的 agent 不會碰到。需要：改 `wrangler.jsonc`、合約加 429（`rate_limited`）錯誤碼、skill.md 說明。也可以改用 WAF rate limiting rule，但這要先有自訂網域（workers.dev 上沒有 zone 規則）。注意：一個 IP 守規矩地每分鐘開 10 個 200 手 bot 房，一天還是 14,400 場 ≈ 每天 $33 的 D1 寫入；多個 IP 就再乘上去。所以 A 要搭配 B（不讓無人對局寫出大量資料）或 E（全站的總量上限）。
 - **B. house-bot 房間裡人不在時提早結束**：座位 0 變成 absent（連續 3 次超時）時，直接以 `left` 結束，而不是把剩下的 200 手全部代打完。一次濫用的寫入量會從約 2,300 列降到幾十列。這會改變 A9 的行為，而且只擋得住 house-bot 房間。
-- **C. 降低 `SETTINGS_LIMITS.max_hands`**（現在最多 200）：會改合約。
+- **C. 降低 `SETTINGS_LIMITS.max_hands`**（現在最多 100，2026-10-19 從 200 降下來）：會改合約。
 - **D. staging 不要一直公開**：不用時 `workers_dev: false`，或加上 Cloudflare Access；不然至少跟正式環境套用一樣的限流。
 - **E. 全站總量上限或緊急開關**：例如一個 var `PAUSE_NEW_ROOMS=true`，讓開房和排隊直接回 503（不用改合約，可以在 dashboard 改 var，不用重新部署）；或用 Matchmaker 記每小時開了幾間房，超過就拒絕。這是新功能，等 Ann 決定。
 

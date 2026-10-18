@@ -149,7 +149,7 @@ describe('startMatch', () => {
     ['empty seed', { seed: '' }],
     ['65-character seed', { seed: '0'.repeat(65) }],
     ['maxHands 0', { maxHands: 0 }],
-    ['maxHands 201', { maxHands: 201 }],
+    ['maxHands 101', { maxHands: 101 }],
     ['maxHands 2.5', { maxHands: 2.5 }],
     ['blindEvery 0', { blindEvery: 0 }],
     ['blindEvery 51', { blindEvery: 51 }],
@@ -164,7 +164,7 @@ describe('startMatch', () => {
   it('accepts the boundary values', () => {
     for (const overrides of [
       { seed: '0'.repeat(64), maxHands: 1, blindEvery: 1, startingStack: 10 },
-      { seed: 'f'.repeat(64), maxHands: 200, startingStack: 2000 },
+      { seed: 'f'.repeat(64), maxHands: 100, startingStack: 2000 },
     ]) {
       expect(startMatch(config(overrides)).handNumber).toBe(1);
     }

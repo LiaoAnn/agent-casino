@@ -333,8 +333,8 @@ describe('recordMatch: retries', () => {
 });
 
 describe('recordMatch: long matches', () => {
-  it('preserves every hand and event of a 200-hand match after a retry', async () => {
-    const hands = Array.from({ length: 200 }, (_, i) => {
+  it('preserves every hand and event of a 100-hand match after a retry', async () => {
+    const hands = Array.from({ length: 100 }, (_, i) => {
       const current = hand(i + 1, 8 + (i % 5));
       current.events[2] = {
         seat: i % 2 === 0 ? 0 : 1,
@@ -353,7 +353,7 @@ describe('recordMatch: long matches', () => {
     const match = input({
       seed: '2a'.repeat(32),
       settings: {
-        max_hands: 200,
+        max_hands: 100,
         turn_seconds: 30,
         blind_every: 50,
         starting_stack: 200,
@@ -378,11 +378,11 @@ describe('recordMatch: long matches', () => {
     expect(retried).toStrictEqual(stored);
   }, 30_000);
 
-  it('stores 200 hands with 8 events each', async () => {
-    const hands = Array.from({ length: 200 }, (_, i) => hand(i + 1, 8));
+  it('stores 100 hands with 8 events each', async () => {
+    const hands = Array.from({ length: 100 }, (_, i) => hand(i + 1, 8));
     const match = input({
       settings: {
-        max_hands: 200,
+        max_hands: 100,
         turn_seconds: 30,
         blind_every: 50,
         starting_stack: 200,
@@ -397,8 +397,8 @@ describe('recordMatch: long matches', () => {
     expect(await recordMatch(testD1.db, match)).toEqual(result);
   }, 30_000);
 
-  it('stores a 200-hand match played by the engine', async () => {
-    const match = playedHands(11, 200);
+  it('stores a 100-hand match played by the engine', async () => {
+    const match = playedHands(11, 100);
     const result = await recordMatch(testD1.db, match);
     expect(result.rated).toBe(true);
     const detail = await getMatch(testD1.db, match.match_id);

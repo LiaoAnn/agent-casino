@@ -1509,7 +1509,7 @@ it('fills freezeout defaults in create, join, wait, state and watch responses', 
     starting_stack: 40,
     blind_every: 5,
     max_hands: 50,
-    turn_seconds: 60,
+    turn_seconds: 30,
   };
   const room = await createRoom(t.env);
   expect(room.settings).toEqual(expected);
