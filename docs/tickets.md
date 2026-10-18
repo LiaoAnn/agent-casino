@@ -33,6 +33,7 @@
 | 7 | T14 ★（arena）、T21 | 2 + 試玩 agent |
 | 7.5 | T23 → T24、T26（E5 與排隊修正） | 2 |
 | 7.6 | T27、T28（arena 回饋）、T29（網頁風格） | 3 |
+| 7.7 | T30（arena 第 3 輪回饋） | 1 |
 | 8 | T15 ★🔒 | 1 + 3 個試玩 agent |
 
 最長的一條路是 T01 → T02 → T04 → T09 → T11 → T13 → T14 → T15，共 8 步（T21 跟 T14 同時進行）；其他 ticket 都在旁邊同時進行。
@@ -210,6 +211,18 @@
 - 驗證：`pnpm test:web`（既有的 e2e 照樣全過）。另外檢查一遍 web-design skill 的對比表：沒有用到禁止的配對。
 - 功能驗證：在 worktree 網址跟 house-bot 打一場。排行榜、對局紀錄、觀戰頁（進行中和結束後）各截一張桌機和手機（390px）的圖貼在 PR；再開「減少動態效果」截一張觀戰頁。截圖照 web-design skill 自我檢查後就可以合併，不用等 Ann。
 
+### T30 等不到對手時回報主人（約 300 行）· Blocked by：T28
+- 照 casino-api skill A18：`waiting` 加 `waited_seconds`、`queue_size`；等滿 180 秒後 hint 改成建議回報主人；skill.md 的排隊段落改成「約 3 分鐘回報主人，由主人決定繼續等、改跟 house-bot 打或停止」，拿掉「約 10 分鐘就停」。
+- skill.md 另外補一句（arena 第 3 輪）：打完刪不掉 `.casino/` 的檔案時（例如工具擋了 `rm`），告訴主人哪些檔案還在。
+- 合約 ticket：可以改 `apps/api/src/contract/`，只限 `waiting` 的兩個欄位和假資料。
+- 只改：`contract/`（如上）、`apps/api/src/matchmaker/`、`apps/api/src/routes/queue.ts`、`apps/api/src/skill/`。
+- 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`。測試至少要涵蓋：
+  - `waited_seconds` 在連續續等時遞增；資格過期後重新排隊會歸零；
+  - `queue_size` 算的是不同 settings 的所有排隊者，包括自己；
+  - 180 秒前後的 hint 不同。
+  - 時間要用可控的時鐘，不要真的等。
+- 功能驗證：在 worktree 網址用 curl 讓一個名字單獨排隊，看 `waited_seconds` 和 `queue_size`；再用另一組 settings 排第二個名字，`queue_size` 變成 2。
+
 ## Epic E3 Skill 與接入
 
 **完成定義**：全新的 Claude Code、Codex 只收到一句話就能自己打完一場，不問人。
@@ -261,7 +274,7 @@
 
 **完成定義**：正式環境可用，三個 agent 試玩通過。
 
-### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26
+### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26、T30
 - 正式環境部署（人同意後）、管理員金鑰、試玩發現的小修正。
 - 部署前先跑 `db:migrate:<環境>`（T22 的 `0001_ratings_rank.sql`、T23 的 note 欄位）；部署後第一週每天看 DO 請求、D1 寫入列數、log 筆數，看到 `gave up storing the match` 就是 D1 有問題（見 `docs/cost.md`）。
 - 驗證：`pnpm e2e --target=prod`。
