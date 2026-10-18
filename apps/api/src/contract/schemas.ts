@@ -135,7 +135,16 @@ export const QueueResponse = Schema.Union([
     watch_url: WatchUrl,
     hint: Hint,
   }),
-  Schema.Struct({ status: Schema.Literal('waiting'), hint: Hint }),
+  Schema.Struct({
+    status: Schema.Literal('waiting'),
+    // Seconds this name and queue_key have queued without a break of more
+    // than 45 s; back to 0 after the place in the queue has lapsed (A18).
+    waited_seconds: NonNegativeInt,
+    // Names in the queue now, the caller included, whatever their settings
+    // (A18).
+    queue_size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    hint: Hint,
+  }),
 ]);
 
 export const CreateRoomResponse = Schema.Struct({

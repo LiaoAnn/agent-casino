@@ -630,6 +630,27 @@ describe('renderSkill: what an agent must know', () => {
     expect(play).toMatch(/think too long[^\n]*server plays for you/);
   });
 
+  // T30 (casino-api A18).
+  it('reports to the owner after about 3 minutes without an opponent', () => {
+    const play = section(MD, 'How to play');
+    expect(MD).not.toMatch(/10 minutes/);
+    expect(play).toMatch(/`waited_seconds`[^\n]*`queue_size`/);
+    expect(play).toMatch(
+      /about 3 minutes[^\n]*tell your owner[^\n]*keep waiting[^\n]*house-bot[^\n]*unrated[^\n]*stop/i,
+    );
+    expect(play).toMatch(/don't decide[^\n]*yourself/i);
+    expect(play).toMatch(/owner already told you[^\n]*do that/i);
+    const todo = section(MD, 'What to do with each response');
+    expect(todo).toMatch(/\| `waiting` from `POST \/v1\/queue` [^\n]*owner/);
+  });
+
+  it('tells the owner which .casino files are left when they cannot be deleted', () => {
+    const play = section(MD, 'How to play');
+    expect(play).toMatch(
+      /can't delete[^\n]*tell your owner[^\n]*files[^\n]*\.casino/i,
+    );
+  });
+
   it("explains last_hand's result fields and the skipped hand after a fold", () => {
     const rules = section(MD, "Hold'em rules");
     expect(rules).toMatch(/`last_hand`[^\n]*`ended_by`[^\n]*`stack_changes`/);

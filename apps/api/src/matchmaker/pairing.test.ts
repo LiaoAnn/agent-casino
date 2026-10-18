@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiError } from '../contract/errors';
 import { SETTINGS_DEFAULTS } from '../contract/schemas';
 import {
@@ -36,9 +36,15 @@ const waiting = {
   ok: true,
   value: {
     status: 'waiting',
+    waited_seconds: 0,
+    queue_size: 1,
     hint: 'No opponent yet. Call POST /v1/queue again',
   },
 };
+const waitingFor = (waited_seconds: number, queue_size = 1) => ({
+  ...waiting,
+  value: { ...waiting.value, waited_seconds, queue_size },
+});
 const matched = (seat: 0 | 1) => ({
   ok: true,
   value: {
@@ -133,9 +139,9 @@ describe('MatchQueue (A2)', () => {
 
       expect.soft(openMatch).not.toHaveBeenCalled();
       expect(await Promise.all([alice, bob, aliceRetry])).toEqual([
-        waiting,
-        waiting,
-        waiting,
+        waitingFor(0, 2),
+        waitingFor(0, 2),
+        waitingFor(0, 2),
       ]);
     } finally {
       vi.useRealTimers();
@@ -232,7 +238,7 @@ describe('MatchQueue (A2)', () => {
       await vi.advanceTimersByTimeAsync(29_999);
       expect(settled).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      expect(await alice).toEqual(waiting);
+      expect(await alice).toEqual(waitingFor(30));
       expect(settled).toHaveBeenCalledTimes(1);
       expect(openMatch).not.toHaveBeenCalled();
     } finally {
@@ -406,7 +412,7 @@ describe('MatchQueue (A2)', () => {
     const { queue, clock } = fixture();
     const alice = start(queue, { name: 'Alice' });
     clock.ms += 1_000;
-    expect(await alice).toEqual(waiting);
+    expect(await alice).toEqual(waitingFor(1));
     clock.ms += HOLD_MS - 1;
     expect(await queue.queue(withKey({ name: 'Bob' }))).toEqual(matched(1));
     expect(await queue.queue(withKey({ name: 'Alice' }))).toEqual(matched(0));
@@ -493,7 +499,7 @@ describe('MatchQueue (A2)', () => {
           queue.queue(withKey({ name: 'Alice', ...a })),
           queue.queue(withKey({ name: 'Bob', ...b })),
         ]),
-      ).toEqual([waiting, waiting]);
+      ).toEqual([waitingFor(0, 2), waitingFor(0, 2)]);
       expect(openMatch).not.toHaveBeenCalled();
     },
   );
@@ -609,6 +615,150 @@ describe('MatchQueue (A2)', () => {
       openMatch.mock.calls[1]?.map(player => player.name.toLowerCase()).sort(),
     ).toEqual(['alice', 'carol']);
   });
+});
+
+describe('MatchQueue waiting information (A18)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const poll = async (
+    queue: MatchQueue,
+    input: Omit<QueueInput, 'queue_key'> & { queue_key?: string },
+  ) => {
+    const pending = start(queue, input);
+    await vi.advanceTimersByTimeAsync(WAIT_MS);
+    return pending;
+  };
+
+  it('accumulates continuous waiting for the same name and key, rounding down seconds', async () => {
+    const { queue, clock, openMatch } = fixture();
+    await poll(queue, { name: 'Alice' });
+    clock.ms = 30_999;
+    expect.soft(await poll(queue, { name: 'ALICE' })).toEqual(waitingFor(30));
+    clock.ms = 61_999;
+    expect.soft(await poll(queue, { name: 'alice' })).toEqual(waitingFor(61));
+    expect(openMatch).not.toHaveBeenCalled();
+  });
+
+  it('counts time spent in the current long poll using the injected clock', async () => {
+    const { queue, clock } = fixture();
+    const pending = start(queue, { name: 'Alice' });
+    await vi.advanceTimersByTimeAsync(0);
+    clock.ms = 30_999;
+    await vi.advanceTimersByTimeAsync(WAIT_MS);
+    expect(await pending).toEqual(waitingFor(30));
+  });
+
+  it.each(['same-key', 'new-key'] as const)(
+    'starts waiting from zero after eligibility expires with %s',
+    async key => {
+      const { queue, clock } = fixture();
+      await poll(queue, { name: 'Alice' });
+      clock.ms = 30_000;
+      await poll(queue, { name: 'Alice' });
+      clock.ms += HOLD_MS + 1;
+      expect(
+        await poll(queue, {
+          name: 'Alice',
+          ...(key === 'new-key' ? { queue_key: 'new-alice-key-123' } : {}),
+        }),
+      ).toEqual(waiting);
+    },
+  );
+
+  it('preserves the continuous start time and renewed hold period across recreation', async () => {
+    const { queue, recreate, clock } = persistentFixture();
+    await poll(queue, { name: 'Alice' });
+    clock.ms = 30_000;
+    await poll(queue, { name: 'Alice' });
+    clock.ms = 60_000;
+    await poll(queue, { name: 'Alice' });
+    clock.ms = 90_999;
+    const restored = recreate();
+    expect(await poll(restored, { name: 'ALICE' })).toEqual(waitingFor(90));
+  });
+
+  it('counts all live names across settings, includes self, deduplicates retries and excludes expired names', async () => {
+    const { queue, clock, openMatch } = fixture();
+    const alice = {
+      name: 'Alice',
+      settings: { ...SETTINGS_DEFAULTS, hands: 2 },
+    };
+    const bob = { name: 'Bob', settings: { ...SETTINGS_DEFAULTS, hands: 3 } };
+    const carol = {
+      name: 'Carol',
+      settings: { ...SETTINGS_DEFAULTS, hands: 4 },
+    };
+    expect.soft(await poll(queue, alice)).toEqual(waitingFor(0, 1));
+    clock.ms = 30_000;
+    expect.soft(await poll(queue, bob)).toEqual(waitingFor(0, 2));
+    clock.ms = HOLD_MS + 1;
+    expect.soft(await poll(queue, carol)).toEqual(waitingFor(0, 2));
+    clock.ms = 46_999;
+    expect
+      .soft(await poll(queue, { ...bob, name: 'BOB' }))
+      .toEqual(waitingFor(16, 2));
+    expect(openMatch).not.toHaveBeenCalled();
+  });
+
+  it.each([179_999, 180_000])(
+    'uses the correct hint at %s milliseconds of continuous waiting',
+    async elapsed => {
+      const { queue, clock } = fixture();
+      await poll(queue, { name: 'Alice' });
+      for (clock.ms = 30_000; clock.ms < elapsed; clock.ms += 30_000)
+        await poll(queue, { name: 'Alice' });
+      clock.ms = elapsed;
+      const expected = waitingFor(Math.floor(elapsed / 1_000));
+      if (elapsed >= 180_000)
+        expected.value.hint =
+          'No opponent for 3 minutes. Tell your owner how long you have waited and ask whether to keep waiting (and for how long), play the house-bot instead (unrated), or stop.';
+      expect(await poll(queue, { name: 'Alice' })).toEqual(expected);
+    },
+  );
+
+  it.each(['Alice', 'Bob'])(
+    'discards a legacy waiter with a queue key but no start time before %s queues',
+    async name => {
+      const storage: QueueStorage = new MemoryQueueStorage();
+      const openMatch = vi.fn<OpenMatch>().mockResolvedValue(opened);
+      const options = {
+        storage,
+        waitMs: WAIT_MS,
+        holdMs: HOLD_MS,
+        now: () => 1_000,
+      };
+      await poll(new MatchQueue(openMatch, options), { name: 'Alice' });
+      const saved = await storage.get<{
+        waiting: {
+          key: string;
+          input: QueueInput;
+          pairingKey: string;
+          expiresAt: number;
+        }[];
+        pairings: unknown[];
+      }>('queue');
+      expect(saved?.waiting).toHaveLength(1);
+      // Keep exactly the pre-T30 fields, including the real pairing key and
+      // queue_key; discard the new start time to simulate persisted old data.
+      await storage.put('queue', {
+        ...saved,
+        waiting: saved?.waiting.map(
+          ({ key, input, pairingKey, expiresAt }) => ({
+            key,
+            input,
+            pairingKey,
+            expiresAt,
+          }),
+        ),
+      });
+      const queue = new MatchQueue(openMatch, options);
+      expect(
+        await poll(queue, { name, queue_key: 'new-owner-key-123' }),
+      ).toEqual(waiting);
+      expect(openMatch).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('MatchQueue queue_key ownership (A17)', () => {
@@ -771,7 +921,9 @@ describe('MatchQueue queue_key ownership (A17)', () => {
     const { queue, clock, openMatch } = fixture();
     expect(await queue.queue(alice)).toEqual(waiting);
     clock.ms = HOLD_MS - 1;
-    expect(await queue.queue({ ...alice, name: 'ALICE' })).toEqual(waiting);
+    expect(await queue.queue({ ...alice, name: 'ALICE' })).toEqual(
+      waitingFor(44),
+    );
     clock.ms += HOLD_MS - 1;
     expect(await queue.queue(bob)).toEqual(matched(1));
     const first = await queue.queue(alice);

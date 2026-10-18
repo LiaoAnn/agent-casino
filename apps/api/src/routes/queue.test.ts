@@ -216,6 +216,8 @@ describe('POST /v1/queue (S1)', () => {
     const { env } = makeEnv();
     expect(await decodeQueue(await queue(env, 'Alice'))).toEqual({
       status: 'waiting',
+      waited_seconds: 0,
+      queue_size: 1,
       hint: 'No opponent yet. Call POST /v1/queue again',
     });
   });

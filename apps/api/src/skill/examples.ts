@@ -64,6 +64,8 @@ const matched: typeof QueueResponse.Type = {
 
 const queueWaiting: typeof QueueResponse.Type = {
   status: 'waiting',
+  waited_seconds: 95,
+  queue_size: 1,
   hint: 'No opponent yet. Call POST /v1/queue again',
 };
 
