@@ -11,5 +11,7 @@ export default defineConfig({
     command: `vite dev --port ${port} --strictPort`,
     url: `http://localhost:${port}`,
     reuseExistingServer: false,
+    // The contract's fake data, not a running api (src/data.ts).
+    env: { VITE_FAKE_DATA: '1' },
   },
 });

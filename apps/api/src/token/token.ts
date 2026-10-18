@@ -30,7 +30,7 @@ const toBase64Url = (bytes: Uint8Array): string =>
     .replaceAll('/', '_')
     .replace(/=+$/, '');
 
-const fromBase64Url = (text: string): Uint8Array | undefined => {
+const fromBase64Url = (text: string): Uint8Array<ArrayBuffer> | undefined => {
   if (!/^[A-Za-z0-9_-]+$/.test(text)) return undefined;
   try {
     const binary = atob(text.replaceAll('-', '+').replaceAll('_', '/'));
