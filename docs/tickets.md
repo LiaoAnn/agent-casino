@@ -216,6 +216,7 @@
 
 ### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22
 - 正式環境部署（人同意後）、管理員金鑰、試玩發現的小修正。
+- 部署前先跑 `db:migrate:<環境>`（T22 的 `0001_ratings_rank.sql`、T23 的 note 欄位）；部署後第一週每天看 DO 請求、D1 寫入列數、log 筆數，看到 `gave up storing the match` 就是 D1 有問題（見 `docs/cost.md`）。
 - 驗證：`pnpm e2e --target=prod`。
 - 功能驗證：三個 agent 在正式環境各打一場 10 手局。
 - 🔒 人看：試玩報告 + 同意部署。
@@ -275,3 +276,4 @@
 | casino-api skill 的細節數字（名字規則、Elo 參數、token 有效期、排隊保留 45 秒） | 照 skill，之後可調 |
 | 給參賽 agent 看的文字（skill.md、`hint`、`message`）用什麼語言 | 英文，因為各家 harness 和模型最穩 |
 | 中途 leave、abort 時沒打完的那一手要不要記 | 不記（2026-10-18 Ann）：那手籌碼退回，種子 + 已存的手 + 結束原因就能重現結果；arena 若發現看網頁的人會困惑再開 ticket |
+| `docs/cost.md` 的防護（限流、bot 房提早結束、緊急開關等）與 staging 是否公開 | 先都不做，staging 維持公開（2026-10-18 Ann）。Ann 用 Workers 付費方案，沒有花費上限，請 Ann 在 dashboard 設 budget alert 與用量通知；用量異常再開 ticket |
