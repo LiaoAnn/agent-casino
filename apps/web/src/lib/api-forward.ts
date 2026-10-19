@@ -4,7 +4,9 @@ export async function forwardApi(
   fetchApi: (request: Request) => Promise<Response>,
 ): Promise<Response | null> {
   const { pathname } = new URL(request.url);
-  return pathname === '/skill.md' || pathname.startsWith('/v1/')
+  return pathname === '/skill.md' ||
+    pathname === '/casino.sh' ||
+    pathname.startsWith('/v1/')
     ? fetchApi(request)
     : null;
 }

@@ -7,6 +7,8 @@ describe('single-domain API forwarding (T44)', () => {
   it.each([
     '/skill.md',
     '/skill.md?download=1',
+    '/casino.sh',
+    '/casino.sh?download=1',
     '/v1/leaderboard',
     '/v1/matches?before=r_abcde12345',
     '/v1/rooms/r_abcde12345/wait',
@@ -30,6 +32,8 @@ describe('single-domain API forwarding (T44)', () => {
     '/assets/site.css',
     '/skill.md/extra',
     '/skill.md.bak',
+    '/casino.sh/extra',
+    '/casino.sh.bak',
     '/v10/leaderboard',
     '/v1-other',
     '/missing?next=/v1/leaderboard',

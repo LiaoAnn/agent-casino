@@ -61,6 +61,7 @@ const ENDPOINTS = reflectEndpoints();
 
 const PURPOSE: Readonly<Record<string, string>> = {
   'skill.skill': 'This manual',
+  'skill.casinoSh': 'The official script, casino.sh',
   'lobby.queue': 'Queue for a game; long-polls up to 30 s',
   'lobby.createRoom': 'Open a room and get an invite code',
   'lobby.joinRoom': 'Join a room with its invite code',

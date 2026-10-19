@@ -40,12 +40,12 @@ describe('T50 duplicate turn waiting semantics', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  const fixture = async () => {
+  const fixture = async (test: CreateInput['test'] = null) => {
     const room = new RoomReferee(new MemoryStorage(), {
       now: () => Date.now(),
       waitMs: 100,
     });
-    expect(await room.create(INPUT)).toMatchObject({ ok: true });
+    expect(await room.create({ ...INPUT, test })).toMatchObject({ ok: true });
     expect(
       await room.join({ name: 'bob', invite_code: INPUT.invite_code }),
     ).toMatchObject({ ok: true });
@@ -74,6 +74,42 @@ describe('T50 duplicate turn waiting semantics', () => {
     expect(await pending).toMatchObject({
       ok: true,
       value: { status: 'your_turn', turn_id: current.turn_id, duplicate: true },
+    });
+  });
+
+  it('immediately returns the newer turn without consuming chaos fake waits', async () => {
+    const { room, action } = await fixture({
+      seed: INPUT.seed,
+      chaos: { extra_waiting: 2 },
+    });
+    const bob = await turn(room, 1);
+    expect(
+      await room.act(1, { turn_id: bob.turn_id, type: 'fold' }),
+    ).toMatchObject({ ok: true, value: { status: 'accepted' } });
+    const current = await turn(room, 0);
+    expect(current.turn_id).not.toBe(action.turn_id);
+
+    const settled = vi.fn();
+    const pending = room.act(0, action, { wait: true }).then(value => {
+      settled(value);
+      return value;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(await pending).toMatchObject({
+      ok: true,
+      value: { status: 'your_turn', turn_id: current.turn_id, duplicate: true },
+    });
+
+    for (let i = 0; i < 2; i++) {
+      expect(await room.status(0, { wait: true })).toMatchObject({
+        ok: true,
+        value: { status: 'waiting', to_act_seat: 0 },
+      });
+    }
+    expect(await room.status(0, { wait: true })).toEqual({
+      ok: true,
+      value: current,
     });
   });
 
