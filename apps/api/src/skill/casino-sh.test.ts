@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -122,7 +123,15 @@ interface Exchange {
   userAgent: string | undefined;
 }
 
-async function serve(chaos = false) {
+async function serve(
+  chaos = false,
+  faults: {
+    drop?: (path: string, body: Record<string, unknown>) => boolean;
+    unavailableRooms?: number;
+    deadlineMs?: number;
+    tellOwner?: string;
+  } = {},
+) {
   const env = makeEnv(chaos);
   const exchanges: Exchange[] = [];
   const errors: unknown[] = [];
@@ -131,6 +140,20 @@ async function serve(chaos = false) {
       const chunks: Buffer[] = [];
       for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
       const body = Buffer.concat(chunks).toString();
+      const path = incoming.url ?? '';
+      const parsedBody = body ? JSON.parse(body) : {};
+      if (faults.drop?.(path, parsedBody)) {
+        exchanges.push({
+          path,
+          method: incoming.method ?? 'GET',
+          body: parsedBody,
+          response: {},
+          status: 0,
+          userAgent: incoming.headers['user-agent'],
+        });
+        incoming.socket.destroy();
+        return;
+      }
       const headers = new Headers();
       for (const [key, value] of Object.entries(incoming.headers)) {
         if (value !== undefined)
@@ -144,8 +167,32 @@ async function serve(chaos = false) {
           ...(body ? { body } : {}),
         },
       );
-      const response = await handle(request, env);
-      const text = await response.text();
+      let response: Response;
+      if (path === '/v1/rooms' && (faults.unavailableRooms ?? 0) > 0) {
+        faults.unavailableRooms = (faults.unavailableRooms ?? 0) - 1;
+        response = Response.json(
+          {
+            status: 'error',
+            code: 'unavailable',
+            message: 'Retry',
+            retryable: true,
+          },
+          { status: 503 },
+        );
+      } else response = await handle(request, env);
+      const answer = JSON.parse(await response.text());
+      if (answer.status === 'your_turn' && faults.deadlineMs !== undefined) {
+        answer.deadline = new Date(
+          Date.now() + faults.deadlineMs,
+        ).toISOString();
+        answer.seconds_remaining = Math.floor(faults.deadlineMs / 1000);
+      }
+      if (
+        typeof answer.tell_owner === 'string' &&
+        faults.tellOwner !== undefined
+      )
+        answer.tell_owner = faults.tellOwner;
+      const text = JSON.stringify(answer);
       exchanges.push({
         path: incoming.url ?? '',
         method: incoming.method ?? 'GET',
@@ -154,7 +201,9 @@ async function serve(chaos = false) {
         status: response.status,
         userAgent: incoming.headers['user-agent'],
       });
-      outgoing.writeHead(response.status, Object.fromEntries(response.headers));
+      const responseHeaders = new Headers(response.headers);
+      responseHeaders.set('content-length', String(Buffer.byteLength(text)));
+      outgoing.writeHead(response.status, Object.fromEntries(responseHeaders));
       outgoing.end(text);
     } catch (error) {
       errors.push(error);
@@ -297,6 +346,74 @@ function checkRequests(api: Awaited<ReturnType<typeof serve>>) {
   }
 }
 
+function tableSummary(result: Result, response: Record<string, unknown>) {
+  expect(result.code, `${result.out}\n${result.err}`).toBe(0);
+  const view = response.view as {
+    my_cards: string[];
+    board: string[];
+    pot: number;
+    my_stack: number;
+    opponent_stack: number;
+    my_seat: number;
+    history: { seat: number; street: string; type: string; amount?: number }[];
+  };
+  expect(view, result.out).toBeDefined();
+  const tableAt = result.out.search(
+    new RegExp(`^Hand\\s+${response.hand_number}\\b`, 'm'),
+  );
+  expect(tableAt, result.out).toBeGreaterThanOrEqual(0);
+  const table = result.out.slice(tableAt, result.out.indexOf('Legal:'));
+  const escaped = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const opponent = String(
+    response.opponent_display_name ?? response.opponent_name,
+  );
+  expect(table, result.out).toMatch(
+    new RegExp(`\\bpot\\s*:?\\s*${view.pot}\\b`, 'i'),
+  );
+  expect(table, result.out).toMatch(
+    new RegExp(`\\b(?:you|your stack)\\s*:?\\s*${view.my_stack}\\b`, 'i'),
+  );
+  expect(table, result.out).toMatch(
+    new RegExp(`${escaped(opponent)}\\s*:?\\s*${view.opponent_stack}\\b`, 'i'),
+  );
+  for (const card of [...view.my_cards, ...view.board])
+    expect(table, JSON.stringify(response)).toContain(card);
+  if (view.board.length === 0) expect(table).toMatch(/board[^\n]*none/i);
+  const happened = result.out.slice(
+    result.out.indexOf('This hand so far:'),
+    tableAt,
+  );
+  for (const move of view.history) {
+    const actor = move.seat === view.my_seat ? 'you' : escaped(opponent);
+    const verb = move.type === 'post_blind' ? 'post' : move.type;
+    expect(happened, JSON.stringify(view.history)).toContain(move.street);
+    expect(happened, `${result.out}\n${JSON.stringify(view.history)}`).toMatch(
+      new RegExp(
+        `${actor}\\s+${verb}\\w*${move.amount === undefined ? '' : `\\s+(?:to\\s+)?${move.amount}\\b`}`,
+        'i',
+      ),
+    );
+  }
+  if (response.tell_owner)
+    expect(result.out.indexOf('This hand so far:'), result.out).toBeGreaterThan(
+      result.out.indexOf(END),
+    );
+  legal(result);
+  const legalAt = result.out.indexOf('Legal:');
+  expect(result.out.indexOf(view.my_cards[0] ?? ''), result.out).toBeLessThan(
+    legalAt,
+  );
+  expect(result.out.indexOf('Time left:'), result.out).toBeGreaterThan(legalAt);
+  expect(result.out.lastIndexOf('Next:'), result.out).toBeGreaterThan(
+    result.out.indexOf('Time left:'),
+  );
+  if (typeof response.tell_owner === 'string') {
+    relay(result.out, response.tell_owner);
+    expect(result.out.startsWith(`${BEGIN}\n`), result.out).toBe(true);
+  }
+}
+
 async function report(
   cwd: string,
   final: Result,
@@ -309,6 +426,7 @@ async function report(
   const result = await run(cwd, 'report');
   expect(result.code, `${result.out}\n${result.err}`).toBe(0);
   relay(result.out, over?.response.tell_owner);
+  expect(result.out, result.out).not.toMatch(/^Next:/m);
   expect(readdirSync(join(cwd, '.casino')).sort()).toEqual([
     'casino.sh',
     'profile.json',
@@ -316,6 +434,193 @@ async function report(
 }
 
 describe('casino.sh in fresh POSIX shells (A23)', () => {
+  it('prints the current table and moves, then reports completed hands before the next table', async () => {
+    const api = await serve();
+    const cwd = player(api.url);
+    await run(cwd, 'profile', 'turn-summary');
+    expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
+    let result = await run(cwd, 'wait');
+    let sawCompletedHand = false;
+    for (let step = 0; step < 100 && result.code !== 3; step++) {
+      const response = api.exchanges.at(-1)?.response;
+      expect(response).toBeDefined();
+      if (!response) throw new Error('Missing response');
+      if (result.code === 0) {
+        tableSummary(result, response);
+        const view = response.view as { board: string[]; my_cards: string[] };
+        const hands = response.hands_since_your_turn as Record<
+          string,
+          unknown
+        >[];
+        if (hands?.length) {
+          sawCompletedHand = true;
+          const sinceAt = result.out.indexOf('Since your last move:');
+          expect(sinceAt, result.out).toBeGreaterThanOrEqual(0);
+          const tableAt = result.out.indexOf(view.my_cards[0] ?? '');
+          expect(sinceAt, result.out).toBeLessThan(tableAt);
+          if (response.tell_owner)
+            expect(sinceAt, result.out).toBeGreaterThan(
+              result.out.indexOf(END),
+            );
+          const happened = result.out.slice(sinceAt, tableAt);
+          for (const hand of hands) {
+            expect(happened, JSON.stringify(hand)).toMatch(
+              new RegExp(`\\b${hand.hand_number}\\b`),
+            );
+            // Completion reason and pot must describe the server's completed hand.
+            expect(happened, JSON.stringify(hand)).toContain(
+              String(hand.ended_by),
+            );
+            expect(happened, JSON.stringify(hand)).toMatch(
+              new RegExp(`\\b${hand.pot}\\b`),
+            );
+          }
+        }
+      }
+      result = await run(
+        cwd,
+        ...(result.code === 2
+          ? ['wait']
+          : step === 0
+            ? ['act', 'fold', NOTE]
+            : action(result)),
+      );
+    }
+    expect(result.code, `${result.out}\n${result.err}`).toBe(3);
+    expect(sawCompletedHand).toBe(true);
+    checkRequests(api);
+  }, 180_000);
+
+  it('retries identical actions after dropped connections', async () => {
+    let drops = 2;
+    const api = await serve(false, {
+      drop: path => path.includes('/actions') && drops-- > 0,
+    });
+    const cwd = player(api.url);
+    await run(cwd, 'profile', 'dropped-action');
+    expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
+    const turn = await run(cwd, 'wait');
+    const result = await run(cwd, ...action(turn));
+    expect([0, 2, 3], `${result.out}\n${result.err}`).toContain(result.code);
+    const actions = api.exchanges.filter(exchange =>
+      exchange.path.includes('/actions'),
+    );
+    expect(actions.map(exchange => exchange.status)).toEqual([0, 0, 200]);
+    for (const exchange of actions)
+      expect(exchange.body).toEqual(actions[0]?.body);
+    expect(actions[0]?.body.turn_id).toBe(
+      api.exchanges.find(exchange => exchange.response.status === 'your_turn')
+        ?.response.turn_id,
+    );
+    checkRequests(api);
+  }, 120_000);
+
+  it('stops retrying dropped actions at the deadline and shows wait instead', async () => {
+    const api = await serve(false, {
+      drop: path => path.includes('/actions'),
+      deadlineMs: 2_000,
+    });
+    const cwd = player(api.url);
+    await run(cwd, 'profile', 'deadline');
+    expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
+    const turn = await run(cwd, 'wait');
+    const before = api.exchanges.length;
+    const result = await run(cwd, ...action(turn));
+    expect(result.code, `${result.out}\n${result.err}`).toBe(0);
+    const calls = api.exchanges.slice(before);
+    const actions = calls.filter(exchange =>
+      exchange.path.includes('/actions'),
+    );
+    expect(actions.length, result.out).toBeGreaterThan(0);
+    expect(actions.every(exchange => exchange.status === 0)).toBe(true);
+    for (const exchange of actions)
+      expect(exchange.body).toEqual(actions[0]?.body);
+    expect(calls.at(-1)?.path).toMatch(/\/wait$/);
+    expect(calls.at(-1)?.response.status).toBe('your_turn');
+    legal(result);
+    checkRequests(api);
+  }, 60_000);
+
+  it.each([['bot'], ['room', 'create']])(
+    'does not reopen %s after a dropped room-creation connection',
+    async (...command) => {
+      let drops = 1;
+      const api = await serve(false, {
+        drop: path => path === '/v1/rooms' && drops-- > 0,
+      });
+      const cwd = player(api.url);
+      await run(cwd, 'profile', 'dropped-create');
+      const result = await run(cwd, ...command);
+      expect(result.code, `${result.out}\n${result.err}`).toBe(1);
+      expect(
+        api.exchanges.filter(
+          exchange =>
+            exchange.method === 'POST' && exchange.path === '/v1/rooms',
+        ),
+      ).toHaveLength(1);
+      checkRequests(api);
+    },
+    60_000,
+  );
+
+  it.each([['bot'], ['room', 'create']])(
+    'retries %s creation after an explicit 503',
+    async (...command) => {
+      const api = await serve(false, { unavailableRooms: 1 });
+      const cwd = player(api.url);
+      await run(cwd, 'profile', 'unavailable-create');
+      const result = await run(cwd, ...command);
+      expect(result.code, `${result.out}\n${result.err}`).toBe(0);
+      const calls = api.exchanges.filter(
+        exchange => exchange.path === '/v1/rooms',
+      );
+      expect(calls.map(exchange => exchange.status)).toEqual([503, 200]);
+      expect(calls[1]?.body).toEqual(calls[0]?.body);
+      checkRequests(api);
+    },
+    60_000,
+  );
+
+  it('switches from a waiting queue to a bot and clears the queue key when reporting', async () => {
+    const api = await serve();
+    const cwd = player(api.url);
+    await run(cwd, 'profile', 'queue-to-bot');
+    const queued = await run(cwd, 'queue');
+    expect(queued.code, `${queued.out}\n${queued.err}`).toBe(2);
+    expect(api.exchanges.at(-1)?.body.queue_key).toMatch(/^[0-9a-f]{32}$/);
+    const bot = await run(cwd, 'bot');
+    expect(bot.code, `${bot.out}\n${bot.err}`).toBe(0);
+    await report(cwd, await finish(cwd), api);
+    checkRequests(api);
+  }, 180_000);
+
+  it('keeps token files private and sends authorization through a header file', async () => {
+    const api = await serve();
+    const cwd = player(api.url);
+    writeFileSync(
+      join(cwd, 'bin/curl'),
+      '#!/bin/sh\nprintf "%s\\n" "$@" >> curl-argv\nexec /usr/bin/curl "$@"\n',
+      { mode: 0o755 },
+    );
+    await run(cwd, 'profile', 'private-token');
+    expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
+    const token = api.exchanges.find(exchange => exchange.path === '/v1/rooms')
+      ?.response.token;
+    expect(typeof token).toBe('string');
+    const turn = await run(cwd, 'wait');
+    expect(turn.code, `${turn.out}\n${turn.err}`).toBe(0);
+    const files = readdirSync(join(cwd, '.casino')).filter(file =>
+      readFileSync(join(cwd, '.casino', file), 'utf8').includes(String(token)),
+    );
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files)
+      expect(statSync(join(cwd, '.casino', file)).mode & 0o077, file).toBe(0);
+    const argv = readFileSync(join(cwd, 'curl-argv'), 'utf8');
+    expect(argv).not.toContain(String(token));
+    expect(argv).toMatch(/(?:^|\n)-H\n@[^\n]+/);
+    checkRequests(api);
+  }, 60_000);
+
   it('has no dependencies on the forbidden tools or shell extensions', () => {
     const script = renderCasinoSh('https://casino.example');
     for (const forbidden of [
@@ -362,14 +667,16 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
   }, 120_000);
 
   it('preserves a generated identity and plays a complete bot match with Unicode data', async () => {
-    const api = await serve();
+    const display = '中文 玩家 "鯊魚" C:\\new \\ 🃏';
+    const api = await serve(false, {
+      tellOwner: `Your player is ${display}. Watch: https://web.test/watch/escaped`,
+    });
     const cwd = player(api.url);
     expect(await run(cwd, 'profile', '第一次', 'codex')).toMatchObject({
       code: 0,
     });
     const first = profile(cwd);
     expect(first.name).toMatch(/^codex-[0-9a-f]{4}$/);
-    const display = '中文 玩家 "鯊魚" \\ 🃏';
     expect(await run(cwd, 'profile', display, 'different')).toMatchObject({
       code: 0,
     });
@@ -392,6 +699,7 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
       opponent: 'bot',
     });
     relay(bot.out, created?.response.tell_owner);
+    expect(created?.response.tell_owner).toContain(display);
     const turn = await run(cwd, 'wait');
     const final = await finish(cwd, turn);
     expect(api.exchanges.some(exchange => exchange.body.note === NOTE)).toBe(
@@ -483,6 +791,9 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
     const left = await run(cwd, 'leave');
     expect(left).toMatchObject({ code: 3 });
     await report(cwd, left, api);
+    const queuedAgain = await run(cwd, 'queue');
+    expect(queuedAgain.code, `${queuedAgain.out}\n${queuedAgain.err}`).toBe(2);
+    expect(api.exchanges.at(-1)?.path).toBe('/v1/queue');
     checkRequests(api);
   }, 120_000);
 

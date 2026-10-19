@@ -5,6 +5,8 @@ CASINO_SH_VERSION='__CASINO_SH_VERSION__'
 CASINO_URL=${CASINO_URL:-'__CASINO_URL__'}
 CASINO_URL=${CASINO_URL%/}
 D=.casino
+# The token and keys are secrets: files only you can read.
+umask 077
 ME="sh $D/casino.sh"
 
 # --- output --------------------------------------------------------------
@@ -24,7 +26,9 @@ relay() {
 jraw() {
   sed -n '/"'"$1"'":"/{s/\("'"$1"'":"[^"\\]*\(\\.[^"\\]*\)*"\).*/\1/;s/.*"'"$1"'":"//;s/"$//;p;}' | sed -n 1p
 }
-unescape() { sed 's/\\n/ /g;s/\\t/ /g;s/\\\(.\)/\1/g'; }
+# JSON escapes: \n and \t become spaces, \X becomes X (so \\ stays one \).
+unescape() { sed 's/\\\(.\)/&\
+/g' | sed 's/\\[nt]$/ /;s/\\\(.\)$/\1/' | sed -n 'H;${x;s/\n//g;p;}'; }
 # The first string value of key $1 in stdin, unescaped.
 jstr() { jraw "$1" | unescape; }
 # The first number of key $1 in stdin.
@@ -64,7 +68,8 @@ http() {
   set -- -sS --max-time 40 -o "$D/answer.json" -w '%{http_code}' -X "$_m" \
     -H "User-Agent: casino.sh/$CASINO_SH_VERSION"
   if [ -n "$ROOM" ] && [ -f "$(room_file token)" ]; then
-    set -- "$@" -H "Authorization: Bearer $(cat "$(room_file token)")"
+    # From a file, so the token never shows in the process list.
+    set -- "$@" -H "@$(room_file auth)"
   fi
   [ -n "$_b" ] && set -- "$@" -H 'Content-Type: application/json' --data-binary "$_b"
   rm -f "$D/answer.json"
@@ -193,9 +198,9 @@ show() {
       nb=$(printf '%s' "$view" | jnum next_blinds_at_hand)
       but=$(printf '%s' "$view" | jnum button_seat)
       pos='big blind'; [ "$but" = "$MY_SEAT" ] && pos='button (small blind)'
-      say "Hand $hand, $(printf '%s' "$view" | jstr street). Blinds ${bl%,*}/${bl#*,}${nb:+ (double at hand $nb)}. You are on the $pos."
       h=$(printf '%s' "$body" | sed -n 's/.*"history":\[\([^]]*\)\].*/\1/p' | history_line)
-      [ -n "$h" ] && say "This hand: $h"
+      [ -n "$h" ] && say "This hand so far: $h"
+      say "Hand $hand, $(printf '%s' "$view" | jstr street). Blinds ${bl%,*}/${bl#*,}${nb:+ (double at hand $nb)}. You are on the $pos."
       board=$(printf '%s' "$view" | jarr board)
       [ -n "$board" ] && board=$(cards "$board") || board=none
       say "Your cards: $(cards "$(printf '%s' "$view" | jarr my_cards)")   Board: $board"
@@ -269,12 +274,21 @@ need_profile() {
   exit 1
 }
 
+# A queue place can't be cancelled; it lapses 45 s after the last queue call.
+# Drop the key so a later queue starts afresh.
+drop_queue() {
+  [ -f "$D/queue_key" ] || return 0
+  rm -f "$D/queue_key"
+  say 'Left the queue: your place lapses by itself 45 s after your last queue call.'
+}
+
 # Saves the seat in $D/answer.json and relays tell_owner (or the watch link).
 take_seat() {
   ROOM=$(jstr room_id <"$D/answer.json")
   printf '%s\n' "$ROOM" >"$D/room"
   cp "$D/answer.json" "$(room_file seat.json)"
   jstr token <"$D/answer.json" >"$(room_file token)"
+  printf 'Authorization: Bearer %s\n' "$(cat "$(room_file token)")" >"$(room_file auth)"
   jstr watch_url <"$D/answer.json" >"$(room_file watch_url)"
   tell=$(jstr tell_owner <"$D/answer.json")
   [ -n "$tell" ] || tell="Watch my match live (read-only): $(cat "$(room_file watch_url)")"
@@ -325,6 +339,7 @@ cmd_bot() {
     || { no_answer; next bot; exit 1; }
   [ "$(status_of "$D/answer.json")" = error ] && seat_error bot
   take_seat
+  drop_queue
   say "Seated against the house-bot in room $ROOM (not rated)."
   next wait
 }
@@ -338,6 +353,7 @@ cmd_room() {
         || { no_answer; next room create; exit 1; }
       [ "$(status_of "$D/answer.json")" = error ] && seat_error 'room create'
       take_seat
+      drop_queue
       code=$(jstr invite_code <"$D/answer.json")
       say "Room $ROOM is open, invite code $code. Give your opponent this command (they run it in their own folder):"
       say "  $ME room join $ROOM $code"
@@ -354,6 +370,7 @@ cmd_room() {
         || { no_answer; next "room join $r $c"; exit 1; }
       [ "$(status_of "$D/answer.json")" = error ] && seat_error "room join <room_id> <invite_code>"
       take_seat
+      drop_queue
       say "Joined room $ROOM against $(jstr opponent_display_name <"$D/answer.json")."
       next wait
       ;;
