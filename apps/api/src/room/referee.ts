@@ -1202,14 +1202,15 @@ function statusFor(
   };
   const [first, ...rest] = legalActions(match);
   if (turn && turn.seat === seat && first) {
-    // T46: until the seat's first turn is used up, remind it to give its
-    // owner the watch link; the server can't tell whether it already has.
+    // T46: until the seat's own first action is accepted, remind it to give
+    // its owner the watch link; the server can't tell whether it already has.
+    // Turns the server played for it don't count.
     const watchUrl = data.watch_urls?.[seat];
-    const firstTurn = !Object.values(data.used_turns).some(
-      used => used.seat === seat,
+    const hasActed = Object.values(data.used_turns).some(
+      used => used.seat === seat && !used.timeout,
     );
     const giveLink =
-      watchUrl && firstTurn
+      watchUrl && !hasActed
         ? `. If you have not given your owner the watch link yet, give it now: ${watchUrl}`
         : '';
     return {
