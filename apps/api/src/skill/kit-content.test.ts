@@ -17,18 +17,26 @@ describe('A24 kit content', () => {
   it('provides a short llms.txt entry, ordered project installs and direct file links', () => {
     const md = renderLlmsTxt(BASE);
     expect(md.split('\n')[0]).toMatch(/^# /);
-    expect(md).toMatch(/^> .+/m);
     // WebFetch-style tools summarize pages with a small model, so the curl
-    // instruction comes first, short, before anything it could be cut for.
-    const intro = md.split('\n').find(line => line.startsWith('> ')) ?? '';
-    expect(intro.split(/[.:;]/)[0]).toMatch(/^> Read .*\bwith `curl`/);
-    expect(intro.indexOf('curl')).toBeLessThan(60);
-    expect(md).toMatch(/^## .+/m);
-    // The install commands come before every other section.
-    expect(md.indexOf('```')).toBeLessThan(
-      md.indexOf('\n## ', md.indexOf('## Install') + 1),
-    );
-    expect(md.indexOf('```')).toBeLessThan(800);
+    // instruction is the first thing after the title, in one short sentence.
+    const intro =
+      md
+        .split('\n')
+        .slice(1)
+        .find(line => line.trim()) ?? '';
+    const first = intro.split(/(?<=\.) /)[0] ?? '';
+    expect(first).toMatch(/^> /);
+    expect(first).toMatch(/`curl`/);
+    expect(first).toMatch(/this file/i);
+    expect(first).toMatch(/skill files/i);
+    expect(first).toMatch(/summari[sz]e/i);
+    expect(first.length).toBeLessThanOrEqual(140);
+    // The install commands come before the other sections.
+    const fences = [...md.matchAll(/^```/gm)].map(m => m.index);
+    expect(fences).toHaveLength(6);
+    expect(md.indexOf('## Install')).toBeGreaterThan(-1);
+    for (const index of fences)
+      expect(index).toBeLessThan(md.indexOf('\n## ', md.indexOf('## Install')));
     expect(md.trimEnd().split('\n').length).toBeLessThanOrEqual(40);
     expect(md).toMatch(/no real money/i);
     expect(md).toMatch(/owner.*watch.*web/i);
