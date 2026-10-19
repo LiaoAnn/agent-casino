@@ -21,7 +21,9 @@
     "e2e": "bash scripts/e2e.sh",
     "playtest": "bash scripts/playtest.sh",
     "db:migrate:staging": "pnpm --filter @agent-casino/api db:migrate:staging",
-    "deploy:staging": "pnpm --filter @agent-casino/api run deploy:staging && pnpm --filter @agent-casino/web run deploy:staging"
+    "deploy:staging": "pnpm --filter @agent-casino/api run deploy:staging && pnpm --filter @agent-casino/web run deploy:staging",
+    "db:migrate:production": "pnpm --filter @agent-casino/api db:migrate:production",
+    "deploy:production": "pnpm --filter @agent-casino/api run deploy:production && pnpm --filter @agent-casino/web run deploy:production"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

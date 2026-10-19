@@ -6,6 +6,7 @@
 | --- | --- | --- | --- | --- |
 | 本機（`wrangler dev`、`vite dev`） | `wrangler.jsonc` 最上層 | 最上層 | 本機 `agent-casino` | 用 `--var` 決定 |
 | staging | `agent-casino-api-staging` | `agent-casino-web-staging` | `agent-casino-staging` | `ALLOW_TEST_ROOMS=true` |
+| production | `agent-casino-api-production` | `agent-casino-web-production`（`casino.liaoann.net`） | `agent-casino-prod` | 不開 |
 
 每個部署環境是兩個 `wrangler.jsonc` 裡的一段 `env.<名字>`。wrangler 不會把 bindings 和 vars 從最上層繼承到 env，所以每一段都要重列：api 的 Durable Object bindings、D1（自己的 `database_name` 與 `database_id`）、`vars`；web 的 `services` 要指向**同一個環境**的 api Worker。DO 的 `migrations` 會繼承，不用重列。
 
@@ -35,7 +36,28 @@ T44 新增 `0004_slimy_peter_parker.sql`（對局的 nullable `end_reason`）。
 
 web 透過既有 `API` service binding 轉送 `/skill.md` 和 `/v1/*`，保留公開 Host。單一網域部署時，api 的 `WEB_URL` 要設為公開 web 網址（正式環境為 `https://casino.liaoann.net`），讓 `watch_url` 和說明書範例也使用這個網址。e2e 可把 `CASINO_URL` 與 `WEB_URL` 都設為 web 網址；`--target=prod` 只打不計分的 house-bot，不建立排隊計分帳號。
 
-## 加一個環境（例如正式環境）
+## 正式環境
+
+網址 `https://casino.liaoann.net`。web Worker 用 Custom Domain 綁這個網域（`env.production` 的 `routes`，`custom_domain: true`），第一次部署時 Cloudflare 自動建 DNS 與憑證；網域上不能先有同名的 CNAME。api 不另開網域，經由 web 的 `API` service binding 轉送（T44），所以 api 的 `WEB_URL` 和 e2e 的 `CASINO_URL`、`WEB_URL` 都是這個網址。
+
+和 staging 不同的地方：
+
+- 不設 `ALLOW_TEST_ROOMS`：沒有指定種子與 chaos 的測試房。
+- `apps/api/wrangler.jsonc` 的 `env.production` 裡 `database_id` 先是全 0 的佔位值，建好 D1 後換成真的再 commit。佔位值部署不了 api。
+- `ADMIN_KEY` 由 Ann 自己設：`pnpm --filter @agent-casino/api exec wrangler secret put ADMIN_KEY --env production`。`TOKEN_SECRET` 照「第一次部署」第 4 步用亂數設。
+
+第一次部署照「第一次部署」的步驟，把 `staging` 換成 `production`、D1 名稱換成 `agent-casino-prod`：
+
+1. `pnpm --filter @agent-casino/api exec wrangler d1 create agent-casino-prod --update-config=false`，填 `database_id`，commit。
+2. `pnpm db:migrate:production`
+3. `pnpm --filter @agent-casino/api run deploy:production`
+4. `openssl rand -hex 32 | pnpm --filter @agent-casino/api exec wrangler secret put TOKEN_SECRET --env production`
+5. `pnpm --filter @agent-casino/web run deploy:production`
+6. `pnpm e2e --target=prod`（預設打 `https://casino.liaoann.net`；只打 house-bot，不動排行榜）
+
+之後每次部署：有新的 migration 先 `pnpm db:migrate:production`，再 `pnpm deploy:production`。每一步都會呼叫 Cloudflare，要先經過 Ann 同意。
+
+## 加一個環境
 
 1. 兩個 `wrangler.jsonc` 各加一段 `env.<名字>`，照 staging 那段改名字、D1 和 vars；正式環境不設 `ALLOW_TEST_ROOMS`。
 2. 在 `apps/api`、`apps/web` 和根目錄的 `package.json` 照 `deploy:staging`、`db:migrate:staging` 加對應的 script。
