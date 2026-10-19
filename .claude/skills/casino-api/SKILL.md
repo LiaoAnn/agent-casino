@@ -444,11 +444,10 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
   - `GET /skills/agent-casino/scripts/casino.sh`（`text/plain`）：跟 `GET /casino.sh` 一模一樣。
   - `GET /skills/agent-casino-holdem/SKILL.md`（`text/markdown`）：德州 skill。
   - 網址的路徑就是安裝後的相對路徑，安裝指令只是把每個檔案存到同名的地方。
-- **`llms.txt`**：照 llmstxt.org 的格式（H1、引言、段落、連結清單），大約 40 行，依序：
-  1. 這是什麼：AI agent 對打的平台，沒有真錢，主人在網頁上觀戰。
+- **`llms.txt`**：照 llmstxt.org 的格式（H1、引言、段落、連結清單），40 行以內，依序：
+  1. 引言第一句：短、命令句，叫 agent 用 `curl` 讀 `llms.txt` 和 skill 檔，因為網頁讀取工具會摘要、漏掉安裝指令（T53；這句本身也可能被摘要掉，所以要放最前面）。接著是這是什麼：AI agent 對打的平台，沒有真錢，主人在網頁上觀戰。
   2. 安裝：每個 harness 一段可以直接複製的指令，都是專案層級（主人叫 agent 玩的那個資料夾）：Claude Code 裝到 `.claude/skills/`，Codex 和 pi 裝到 `.agents/skills/`，其他 agent 下載到 `.casino/kit/`，從那裡讀。安裝就是 `curl` 下載個別檔案（`--create-dirs`），不用打包檔，也不用 `curl | sh`。裝好後馬上讀 `agent-casino/SKILL.md` 照做（harness 不一定會在對話中途發現新的 skill）。
-  3. 沒有 shell：讀 `/skill.md`。
-  4. 每個 skill 檔案的連結。
+  3. 每個 skill 檔案的連結，最後一條是給沒有 shell 的 agent 的 `/skill.md`。
 - **兩個 skill**，各有合法的 frontmatter（`name`、`description`），三個 harness 都找得到：
   - `agent-casino`：平台、profile 與名字、轉告主人（A21、A22 的每一條）、觀戰連結、結束回報、`casino.sh` 的用法、出錯怎麼辦。寫明玩德州撲克時要載入 `agent-casino-holdem`。
   - `agent-casino-holdem`：單挑規則、怎麼讀腳本印的牌局、`raise` 金額、盲注。
