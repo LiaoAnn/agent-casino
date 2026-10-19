@@ -1,13 +1,14 @@
 #!/bin/sh
 # casino.sh: the official Agent Casino client. Needs only sh, curl, sed and
-# grep. Run it from the folder you play in: sh .casino/casino.sh help
+# grep. Run it from the folder you play in, e.g.: sh .casino/casino.sh help
 CASINO_SH_VERSION='__CASINO_SH_VERSION__'
 CASINO_URL=${CASINO_URL:-'__CASINO_URL__'}
 CASINO_URL=${CASINO_URL%/}
 D=.casino
 # The token and keys are secrets: files only you can read.
 umask 077
-ME="sh $D/casino.sh"
+# The way you ran this script, also from a skill folder (A24).
+ME="sh $0"
 
 # --- output --------------------------------------------------------------
 
@@ -124,6 +125,7 @@ hand_lines() { # stdin: hands_since_your_turn entries, one per line
     by=$(printf '%s' "$h" | jstr ended_by)
     ch=$(printf '%s' "$h" | jarr stack_changes)
     st=$(printf '%s' "$h" | jarr stacks)
+    bl=$(printf '%s' "$h" | jarr blinds)
     mine=$(printf '%s' "$ch" | cut -d, -f$((MY_SEAT + 1)))
     if [ "$w" = null ]; then res="split pot of $pot"
     elif [ "$w" = "$MY_SEAT" ]; then res="you won the pot of $pot"
@@ -139,6 +141,10 @@ hand_lines() { # stdin: hands_since_your_turn entries, one per line
     case $mine in -*) d="you lost ${mine#-}" ;; 0) d="even" ;; *) d="you won $mine" ;; esac
     me=$(printf '%s' "$st" | cut -d, -f$((MY_SEAT + 1)))
     op=$(printf '%s' "$st" | cut -d, -f$((2 - MY_SEAT)))
+    # Seat 0 is the button (small blind) in hand 1, then it alternates.
+    if [ $(((n - 1) % 2)) = "$MY_SEAT" ]; then blind=${bl%,*}; else blind=${bl#*,}; fi
+    [ $((me - mine)) -le "$blind" ] &&
+      d="$d; you were all-in from posting the blind, so this hand needed no move from you"
     say "  Hand $n: $res; $d. Stacks: you $me, $OPP $op."
   done
 }
@@ -481,14 +487,17 @@ cmd_report() {
   body=$(cat "$last")
   tell=$(printf '%s' "$body" | jstr tell_owner)
   name=$(profile_field name)
+  dn=$(profile_field display_name | unescape)
+  who=$name
+  [ -n "$dn" ] && [ "$dn" != "$name" ] && who="$dn ($name)"
   case $body in
     *'"ratings":null'*) rank='This match was not rated, so the leaderboard did not change.' ;;
     *)
-      rank="Not in the leaderboard's top 100."
+      rank="$who is not in the leaderboard's top 100."
       if call GET /v1/leaderboard; then
         e=$(sed 's/},{/}\
 {/g' "$D/answer.json" | grep -i "\"name\":\"$name\"" | sed -n 1p)
-        [ -n "$e" ] && rank="Leaderboard rank: #$(printf '%s' "$e" | jnum rank) with Elo $(printf '%s' "$e" | jnum rating)."
+        [ -n "$e" ] && rank="Leaderboard rank for $who: #$(printf '%s' "$e" | jnum rank) with Elo $(printf '%s' "$e" | jnum rating)."
       else
         rank='Could not read the leaderboard just now.'
       fi
@@ -535,7 +544,7 @@ overview() {
   cat <<EOF
 casino.sh $CASINO_SH_VERSION: play heads-up Texas Hold'em on Agent Casino ($CASINO_URL).
 
-Run every command from the folder you play in: sh .casino/casino.sh <command>
+Run every command from the folder you play in: $ME <command>
 Each command prints a short summary and, last, the command to run next.
 
 Commands:

@@ -347,6 +347,63 @@ describe('match_over record links (T32, A15)', () => {
 });
 
 describe('T35 persisted room display names', () => {
+  it.each([true, false])(
+    'T51: match_over uses display names for chips and identity-qualified Elo (rated=%s)',
+    async rated => {
+      const room = new RoomReferee(new MemoryStorage(), {
+        waitMs: 1,
+        record: async () => ({
+          rated,
+          ratings: rated
+            ? [
+                { name: 'haiku-cf62', rating: 1516, change: 16 },
+                { name: 'alice', rating: 1484, change: -16 },
+              ]
+            : null,
+        }),
+      });
+      expect(
+        await room.create({
+          ...INPUT,
+          name: 'haiku-cf62',
+          display_name: '海庫',
+        }),
+      ).toMatchObject({ ok: true });
+      expect(
+        await room.join({
+          name: 'alice',
+          display_name: 'alice',
+          invite_code: INPUT.invite_code,
+        }),
+      ).toMatchObject({ ok: true });
+      expect(await room.leave(1)).toMatchObject({ ok: true });
+      for (const seat of [0, 1] as const) {
+        const response = await room.status(seat, { wait: false });
+        if (!response.ok || response.value.status !== 'match_over')
+          throw new Error('Expected match_over');
+        const message = response.value.tell_owner ?? '';
+        const chips = message.split('Elo:')[0] ?? '';
+        expect.soft(chips).toContain('海庫');
+        expect.soft(chips).toContain('alice');
+        expect.soft(chips).not.toContain('haiku-cf62');
+        for (const stack of response.value.final_stacks)
+          expect.soft(chips).toContain(String(stack));
+        if (rated) {
+          expect
+            .soft(message)
+            .toContain(
+              seat === 0
+                ? 'Elo: 海庫 (haiku-cf62): 1516 (+16), alice: 1484 (-16)'
+                : 'Elo: alice: 1484 (-16), 海庫 (haiku-cf62): 1516 (+16)',
+            );
+          expect.soft(message).not.toContain('alice (alice)');
+        } else {
+          expect.soft(message).toContain('unrated (no change)');
+        }
+      }
+    },
+  );
+
   it('persists both display names across a RoomReferee recreation and passes them to the match recorder', async () => {
     const storage = new MemoryStorage();
     const record = vi.fn(

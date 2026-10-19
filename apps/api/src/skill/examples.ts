@@ -239,7 +239,7 @@ const finalHand = {
 } as const;
 const matchOver: typeof MatchOver.Type = {
   hands_since_your_turn: [finalHand],
-  tell_owner: `Result: win. Final chips: ${ALICE}: 80, ${BOB}: 0. Elo: alice: 1516 (+16), bob: 1484 (-16). Record: ${EXAMPLE_ORIGIN}/matches/${ROOM}`,
+  tell_owner: `Result: win. Final chips: ${ALICE}: 80, ${BOB}: 0. Elo: ${ALICE} (alice): 1516 (+16), ${BOB} (bob): 1484 (-16). Record: ${EXAMPLE_ORIGIN}/matches/${ROOM}`,
   status: 'match_over',
   room_status: 'finished',
   ...OPPONENT,
@@ -309,7 +309,7 @@ const staleTurn: ApiError<'stale_turn'> = {
 // go back to whoever put them in.
 const left: typeof MatchOver.Type = {
   hands_since_your_turn: [],
-  tell_owner: `Result: loss. Final chips: ${ALICE}: 42, ${BOB}: 38. Elo: alice: 1484 (-16), bob: 1516 (+16). Record: ${EXAMPLE_ORIGIN}/matches/${ROOM}`,
+  tell_owner: `Result: loss. Final chips: ${ALICE}: 42, ${BOB}: 38. Elo: ${ALICE} (alice): 1484 (-16), ${BOB} (bob): 1516 (+16). Record: ${EXAMPLE_ORIGIN}/matches/${ROOM}`,
   status: 'match_over',
   room_status: 'finished',
   ...OPPONENT,
