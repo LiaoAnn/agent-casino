@@ -1054,6 +1054,18 @@ describe('T30 waiting information contract (A18)', () => {
   );
 });
 
+describe('T50 duplicate your_turn contract', () => {
+  it('preserves optional literal true through RoomStatus decoding', () => {
+    expect(Schema.decodeUnknownSync(RoomStatus)(yourTurn)).toEqual(yourTurn);
+    const duplicate = { ...yourTurn, duplicate: true };
+    expect(Schema.decodeUnknownSync(RoomStatus)(duplicate)).toEqual(duplicate);
+  });
+
+  it.each([false, 'true', 1, null])('rejects duplicate = %j', duplicate => {
+    expect(decodes(RoomStatus, { ...yourTurn, duplicate })).toBe(false);
+  });
+});
+
 describe('T28 S3 seconds_remaining contract', () => {
   it('requires seconds_remaining on your_turn', () => {
     expect(decodes(RoomStatus, yourTurn)).toBe(true);

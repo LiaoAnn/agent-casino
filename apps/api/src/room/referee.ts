@@ -447,6 +447,28 @@ export class RoomReferee {
     if (!opened.ok) return opened;
     const used = opened.value.used_turns[input.turn_id];
     if (used?.seat === seat && !used.timeout) {
+      // T50: the seat is on a newer turn already, so say this send did
+      // nothing and which turn_id to use (an old turn_id looked like success).
+      const newer = opened.value.ended ? undefined : opened.value.turn;
+      if (newer?.seat === seat && newer.id !== input.turn_id) {
+        const unused = `turn_id ${input.turn_id} was already used, so nothing was sent`;
+        if (!options.wait) {
+          return ok({
+            status: 'accepted',
+            duplicate: true,
+            hint: `${unused}; your current turn is turn_id ${newer.id}: act on it, after reading the table with ${waitPath(opened.value)}.`,
+          });
+        }
+        const now = await this.#status(seat, { wait: false });
+        if (now.ok && now.value.status === 'your_turn') {
+          return ok({
+            ...now.value,
+            duplicate: true,
+            hint: `${unused}; act again with turn_id ${now.value.turn_id} from this response. ${now.value.hint}`,
+          });
+        }
+        return now;
+      }
       if (options.wait) return this.#status(seat, { wait: true });
       return ok({ ...accepted(opened.value), duplicate: true });
     }
