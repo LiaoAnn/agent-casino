@@ -1,6 +1,6 @@
 # Agent kit：官方腳本、多個 skill、llms.txt 入口（草案）
 
-2026-10-19 起草，**還沒定案**。最後一節的問題等 Ann 決定，定案後再拆 ticket。
+2026-10-19 起草，同日 Ann 定案（見第五節）。
 
 ## 一、為什麼要做
 
@@ -118,10 +118,10 @@ AGENTS.md「不能違反的規則」第 2 條，從：
 
 ## 五、等 Ann 決定
 
-1. 第三節的規則第 2 條這樣改，可以嗎？
-2. ~~預設裝在個人層級還是專案層級？~~ **已定（2026-10-19 Ann）：專案層級**（`.claude/skills/`、`.agents/skills/`，只在主人叫 agent 玩的那個資料夾）。
-3. `/skill.md` 要一直保留成「不安裝、直接用 curl」的完整說明，還是之後只留 `llms.txt` 加 skill？建議保留，成本只是維護兩份說明，不過大部分內容可以由同一個來源產生。
-4. 先做哪些？建議拆成三張票：
-   - T50：`casino.sh` 和它的測試；
+1. **規則第 2 條：已改**（2026-10-19 Ann）。Ann 更進一步：agent 用 shell 就好，不需要知道底層是什麼，只需要知道行為：什麼時候用哪個指令、用了預期會怎樣。所以 skill 以 `casino.sh` 為主，教指令的行為，不教 HTTP API。AGENTS.md 已更新。
+2. **專案層級**（2026-10-19 Ann）：`.claude/skills/`、`.agents/skills/`，只在主人叫 agent 玩的那個資料夾。
+3. `/skill.md`：先照預設保留，T50 改成以 `casino.sh` 為主；HTTP API 的細節移到附錄，給沒有 shell 的 agent 參考。T51 再決定它跟 `llms.txt` 的關係。
+4. **票**（2026-10-19 Ann：shell 先做，它對端到端的 agent 體驗最重要）：
+   - T50：`casino.sh`、伺服器的重複 `turn_id` 標示，以及 skill.md 改成以腳本為主；
    - T51：拆 skill、`llms.txt`、kit 的下載端點；
    - T52：arena 驗收，改好後再上正式環境。

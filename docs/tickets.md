@@ -42,6 +42,7 @@
 | 7.13 | T46（arena 第 7 輪回饋） | 1 |
 | 7.14 | T47（送出動作並等下一步） | 1 |
 | 7.15 | T48（arena 第 9 輪回饋） | 1 |
+| 7.16 | T50（官方腳本 casino.sh）→ T51（拆 skill、llms.txt）→ T52（arena 驗收、上正式環境） | 1 |
 | 9 | T36、T37（多人：規則、合約；⏸ 等 Ann 說開始） | 2 |
 | 10 | T38、T40、T41（Room DO、積分、網頁） | 3 |
 | 11 | T39 → T42（大廳、skill.md 與試玩） | 1 |
@@ -382,6 +383,37 @@
   - 計時：每個座位在這場的**第一個回合**期限是 `turn_seconds` 的兩倍（預設 60 秒），之後照舊。逾時代打規則不變。`deadline` 照實際值給。更新 casino-api skill 與 skill.md 的計時說明；只動 Room DO 的計時，不動 `src/holdem/`。
 - 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`、`pnpm e2e --target=local`。單元測試涵蓋：第一次出手前的每種 `your_turn` 都有 `tell_owner`、出手後沒有、逾時代打不算出手；第一個回合 60 秒、第二個 30 秒；兩個座位各算各的。另外把 skill.md 的存檔區塊和主迴圈照抄，每段用新的 shell 跑，對 worktree 網址打完一場。
 - 功能驗證：合併後 coordinator 跑 arena 第 10 輪，陣容同第 7 輪，看「開局給觀戰連結」和「回報用主人的字」。
+
+### T50 官方腳本 casino.sh ★（約 1200 行）· Blocked by：T48
+- 設計：`docs/design/agent-kit.md`（2026-10-19 Ann 定案）。規則第 2 條已改：參賽 agent 只需要 shell。
+- 來源：arena 第 6～10 輪、正式環境第 1 輪（`docs/playtests/prod-1.md` 第 1 點：用舊的 `turn_id` 送 `?wait=1`，回應看起來跟成功一樣，動作沒生效，被超時代打）。
+- 合約 ticket：可以改 `apps/api/src/contract/`，範圍只限重複 `turn_id` 的標示和 `/casino.sh` 端點。
+- 要做的：
+  - **`casino.sh`**：
+    - POSIX `sh`，只用 `curl`、`sed`、`grep`（加上 `mkdir`、`cat`、`printf` 這類內建或基本指令）。不用 `jq`，不用 GNU 才有的選項，macOS 和 Linux 都要能跑。
+    - 指令照設計第 2 點：`help`、`profile`、`queue`、`bot`、`room create|join`、`act`、`wait`、`state`、`leave`、`report`。
+    - `help`、`-h`、`--help` 和 `help <指令>` 都要有。每個指令寫清楚：什麼時候用、會發生什麼、印出什麼、接下來做什麼，附範例。
+    - 狀態放在 `.casino/`：token、`turn_id`、`ROOM_ID`、`CASINO_URL`、profile。agent 不碰這些檔案；`name` 照 T15 自動產生。
+    - 輸出精簡：牌局狀態、上一步之後發生的事、合法動作與範圍、剩幾秒、下一步的指令。要轉告主人的話用固定格式印在最上面。完整 JSON 留在 `.casino/`。
+    - exit code 區分：輪到你、結束、等待中、錯誤。
+    - 錯誤自己處理：網路斷了用同一個 `turn_id` 重送；過期回合改打 `wait`。印出一句人話說明發生了什麼、接下來怎麼做。
+  - **`GET /casino.sh`**：從 api 提供（經 web 轉送），`CASINO_URL` 預設填好這個環境的網址。腳本帶版本號。
+  - **伺服器的重複標示**：`actions`（含 `?wait=1`）收到已接受過的 `turn_id`，而現在輪到的是另一個回合時，回應要標明這次沒有作用（例如頂層 `"duplicate": true`），hint 第一句寫明用過的和現在該用的 `turn_id`。
+  - **skill.md**：改成以 `casino.sh` 為主。先寫怎麼下載腳本（一行 curl 存到 `.casino/casino.sh`），再照流程寫每個指令的行為。HTTP API 的細節移到最後的附錄。`tell_owner`、主人看不到指令輸出、用主人的語言和字等規則保留。
+- 不做：拆 skill、`llms.txt`、kit 打包（T51）。
+- 驗證：
+  - `pnpm check`、`pnpm test:api`、`pnpm test:skill`、`pnpm e2e --target=local`。
+  - `test:skill` 用 `casino.sh` 對本機打完一場：每個指令都在新的 shell 裡跑，`help` 的輸出每個指令都有。
+  - 用 `busybox sh`（或 `dash`）加 POSIX 模式的 `sed` 跑過一次，確認不依賴 bash 或 GNU。
+  - 單元測試涵蓋重複 `turn_id` 的標示（有 `?wait=1` 和沒有兩種）。
+- 功能驗證：合併後 coordinator 跑 arena 第 11 輪，陣容同第 10 輪，看有沒有人自己寫腳本、有沒有拿錯 `turn_id`、每步花幾秒，以及「主人體驗」一列。
+
+### T51 拆 skill、llms.txt 入口、kit 下載（約 600 行）· Blocked by：T50
+- 照 `docs/design/agent-kit.md` 第 1、3 點：`/llms.txt` 入口、`agent-casino` 和 `agent-casino-holdem` 兩個 skill（`casino.sh` 放在 `agent-casino/scripts/`），以及專案層級的安裝指令（Claude Code 裝到 `.claude/skills/`，Codex、pi 裝到 `.agents/skills/`）。開工前再跟 coordinator 確認細節。
+- 功能驗證：arena 用「讀 llms.txt」的新提示語打一輪。
+
+### T52 kit 上正式環境 ★🔒 · Blocked by：T51
+- coordinator 跑 arena 驗收，通過後經 Ann 同意部署到正式環境，再跑一輪正式環境試玩，打完照 Ann 的要求清掉紀錄。
 
 ## Epic E3 Skill 與接入
 

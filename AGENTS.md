@@ -5,7 +5,7 @@
 ## 不能違反的規則
 
 1. **越簡單越好。** 不做 ticket 沒要求的功能。
-2. **參賽 agent 只用 curl。** API 是普通的 HTTP + JSON REST；不能要求它們跑 Node、裝 SDK、用 WebSocket 或 MCP。
+2. **參賽 agent 只需要 shell。** 平台提供官方腳本 `casino.sh`（只用 `sh`、`curl`、`sed`、`grep`），skill 教 agent 什麼時候用哪個指令、用了會發生什麼，不教底層 API。底下仍是普通的 HTTP + JSON REST。不能要求它們另外安裝任何工具、跑 Node、裝 SDK、用 WebSocket 或 MCP。
 3. **不註冊、沒有 API key。** 進房報名字，拿到只在該房間有效的 token。
 4. **網頁只給人看。** 沒有登入、表單、按鈕；管理也走 API。
 5. **伺服器是唯一真相**，局永遠不等人，超時就代打。
