@@ -249,12 +249,13 @@ const KIT_FILES = [
   'agent-casino-holdem/SKILL.md',
 ];
 
-// Downloads every kit file into `dir`: one curl per file.
+// Downloads every kit file into `dir`: one curl per file, stopping at the
+// first that fails (sh continues a line ending in `&&`).
 const install = (baseUrl: string, dir: string) =>
   KIT_FILES.map(
     file =>
       `curl -fsSL --create-dirs -o ${dir}/${file} ${baseUrl}/skills/${file}`,
-  ).join('\n');
+  ).join(' &&\n');
 
 const render = (
   doc: keyof typeof DOCS,
