@@ -74,6 +74,8 @@ export interface CreateInput {
   test: typeof TestSettings.Type | null;
   // A1: house-bot takes seat 1 and the match starts at once.
   opponent?: 'bot';
+  // Seat 0's watch link (A16), for the reminder on its first turn (T46).
+  watch_url?: string;
 }
 
 type Result<T, C extends ApiError['code']> =
@@ -101,6 +103,9 @@ interface RoomData {
   // What people see of each seat (A20). Missing in rooms saved before T35:
   // read it with displayNames().
   display_names?: [string, string | null];
+  // Each seat's watch link (A16), given on its first turn (T46). Missing in
+  // rooms saved before T46, and `null` for house-bot.
+  watch_urls?: [string | null, string | null];
   // `null` until the second player joins.
   match: MatchState | null;
   turn: Turn | null;
@@ -234,11 +239,12 @@ export class RoomReferee {
         ),
       );
     }
-    const { opponent, display_name, ...room } = input;
+    const { opponent, display_name, watch_url, ...room } = input;
     const data: RoomData = {
       ...room,
       names: [input.name, null],
       display_names: [display_name ?? input.name, null],
+      watch_urls: [watch_url ?? null, null],
       match: null,
       turn: null,
       turn_count: 0,
@@ -271,6 +277,8 @@ export class RoomReferee {
     // Normalized (A20); `name` when left out.
     display_name?: string;
     invite_code: string;
+    // Seat 1's watch link (A16), for the reminder on its first turn (T46).
+    watch_url?: string;
   }): Promise<
     Result<
       {
@@ -322,7 +330,11 @@ export class RoomReferee {
       name: input.name,
       display_name: input.display_name ?? input.name,
     };
-    await this.#save(this.#start(data, player, this.#now()));
+    const watch_urls: RoomData['watch_urls'] = [
+      data.watch_urls?.[0] ?? null,
+      input.watch_url ?? null,
+    ];
+    await this.#save(this.#start({ ...data, watch_urls }, player, this.#now()));
     return ok({
       seat: 1,
       opponent_name: data.names[0],
@@ -1190,6 +1202,17 @@ function statusFor(
   };
   const [first, ...rest] = legalActions(match);
   if (turn && turn.seat === seat && first) {
+    // T46: until the seat's own first action is accepted, remind it to give
+    // its owner the watch link; the server can't tell whether it already has.
+    // Turns the server played for it don't count.
+    const watchUrl = data.watch_urls?.[seat];
+    const hasActed = Object.values(data.used_turns).some(
+      used => used.seat === seat && !used.timeout,
+    );
+    const giveLink =
+      watchUrl && !hasActed
+        ? `. If you have not given your owner the watch link yet, give it now: ${watchUrl}`
+        : '';
     return {
       status: 'your_turn',
       ...common,
@@ -1202,7 +1225,7 @@ function statusFor(
       legal_actions: [first, ...rest],
       last_hand: lastHandOut(seen.last_hand, answering),
       hands_since_your_turn: answering.hands[seat],
-      hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to POST /v1/rooms/${data.room_id}/actions. Write your note in your owner's language and script (Traditional and Simplified Chinese are different scripts)`,
+      hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to POST /v1/rooms/${data.room_id}/actions. Write your note in your owner's language and script (Traditional and Simplified Chinese are different scripts)${giveLink}`,
     };
   }
   return {

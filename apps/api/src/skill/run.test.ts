@@ -375,6 +375,25 @@ describe('skill.md examples, run against the API', () => {
         ran.push({ endpoint: endpoint.key, status: response.status, body });
 
         const value = body as Record<string, unknown>;
+        if (endpoint.key === 'room.leave') {
+          // The story ends via leave; Step 4 reads the final response saved
+          // by the wait loop, just as it would after a normally played match.
+          const finalResponse = await handle(
+            new Request(`${BASE}/v1/rooms/${vars.ROOM_ID}/wait`, {
+              headers: {
+                Authorization: request.headers.get('Authorization') ?? '',
+              },
+            }),
+            env,
+          );
+          expect(finalResponse.status).toBe(200);
+          const finalText = await finalResponse.text();
+          expect(JSON.parse(finalText)).toMatchObject({ status: 'match_over' });
+          writeFileSync(
+            join(cwd, `.casino/${vars.ROOM_ID}.state.json`),
+            finalText,
+          );
+        }
         if (
           endpoint.key === 'lobby.queue' ||
           endpoint.key === 'lobby.createRoom' ||

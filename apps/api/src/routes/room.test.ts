@@ -3034,3 +3034,143 @@ describe('T45 actionable hints at the HTTP boundary', () => {
     }
   });
 });
+
+describe('T46 first assigned turn watch link reminder over HTTP', () => {
+  const expectReminder = (hint: string, watchUrl: string) => {
+    expect.soft(hint).toMatch(/watch link/i);
+    expect.soft(hint).toContain(watchUrl);
+  };
+
+  it('repeats each seat’s own link on wait/state until its first action is accepted', async () => {
+    const t = makeEnv({ waitMs: 1 });
+    const { room, joined } = await startedRoom(t);
+    expect(joined.watch_url).not.toBe(room.watch_url);
+    const first = await yourTurn(t.env, room.room_id, room.token);
+    for (const player of [room, joined]) {
+      const turn = await yourTurn(t.env, room.room_id, player.token);
+      for (const read of [wait, state, wait, state]) {
+        const { status } = await read(t.env, room.room_id, player.token);
+        expect(status).toMatchObject({
+          status: 'your_turn',
+          turn_id: turn.turn_id,
+        });
+        expectReminder(status.hint, player.watch_url);
+        const other = player.seat === 0 ? joined : room;
+        expect.soft(status.hint).not.toContain(other.watch_url);
+      }
+      await act(t.env, room.room_id, player.token, {
+        turn_id: turn.turn_id,
+        type: player.seat === 0 ? 'call' : 'check',
+      });
+    }
+    // The big blind acts first on the flop, then the button acts again.
+    for (const player of [joined, room]) {
+      const turn = await yourTurn(t.env, room.room_id, player.token);
+      expect(turn.turn_id).not.toBe(first.turn_id);
+      for (const read of [wait, state]) {
+        const { status } = await read(t.env, room.room_id, player.token);
+        expect(status.status).toBe('your_turn');
+        expect.soft(status.hint).not.toMatch(/watch link/i);
+        expect.soft(status.hint).not.toContain(player.watch_url);
+      }
+      await act(t.env, room.room_id, player.token, {
+        turn_id: turn.turn_id,
+        type: 'check',
+      });
+    }
+  });
+
+  it.each([0, 1] as const)(
+    'reminds seat %s after its unread first turn times out until its own action is accepted',
+    async seat => {
+      const t = makeEnv({ waitMs: 1 });
+      const { room, joined } = await startedRoom(t, {
+        settings: { max_hands: 10, turn_seconds: 10 },
+      });
+      if (seat === 1) {
+        const first = await yourTurn(t.env, room.room_id, room.token);
+        await act(t.env, room.room_id, room.token, {
+          turn_id: first.turn_id,
+          type: 'call',
+        });
+      }
+      // Requests advance the injected clock's due timeout, as in timeouts.test.ts.
+      t.clock.ms += 10_000;
+      if (seat === 0) {
+        const nextHand = await yourTurn(t.env, room.room_id, joined.token);
+        expect(nextHand.hand_number).toBe(2);
+        expectReminder(nextHand.hint, joined.watch_url);
+        expect.soft(nextHand.hint).not.toContain(room.watch_url);
+        await act(t.env, room.room_id, joined.token, {
+          turn_id: nextHand.turn_id,
+          type: 'call',
+        });
+      }
+      const player = seat === 0 ? room : joined;
+      const turn = await yourTurn(t.env, room.room_id, player.token);
+      for (const read of [wait, state]) {
+        const { status } = await read(t.env, room.room_id, player.token);
+        expect(status).toMatchObject({
+          status: 'your_turn',
+          turn_id: turn.turn_id,
+        });
+        expectReminder(status.hint, player.watch_url);
+      }
+      const accepted = await act(t.env, room.room_id, player.token, {
+        turn_id: turn.turn_id,
+        type: 'check',
+      });
+      expect(accepted.status).toBe('accepted');
+      if (seat === 1) {
+        const opponentTurn = await yourTurn(t.env, room.room_id, room.token);
+        await act(t.env, room.room_id, room.token, {
+          turn_id: opponentTurn.turn_id,
+          type: 'check',
+        });
+      }
+      for (const read of [wait, state]) {
+        const { status } = await read(t.env, room.room_id, player.token);
+        expect(status.status).toBe('your_turn');
+        expect(status).not.toMatchObject({ turn_id: turn.turn_id });
+        expect.soft(status.hint).not.toMatch(/watch link/i);
+        expect.soft(status.hint).not.toContain(player.watch_url);
+      }
+    },
+  );
+
+  it('keeps the reminder and own link on the same turn after an invalid action is rejected', async () => {
+    const t = makeEnv({ waitMs: 1 });
+    const { room, joined } = await startedRoom(t);
+    const turn = await yourTurn(t.env, room.room_id, room.token);
+    expectReminder(turn.hint, room.watch_url);
+    await expectError(
+      await actPost(t.env, room.room_id, room.token, {
+        turn_id: turn.turn_id,
+        type: 'raise',
+        amount: 3,
+      }),
+      'invalid_action',
+      true,
+    );
+    for (const read of [wait, state]) {
+      const { status } = await read(t.env, room.room_id, room.token);
+      expect(status).toMatchObject({
+        status: 'your_turn',
+        turn_id: turn.turn_id,
+        deadline: turn.deadline,
+      });
+      expectReminder(status.hint, room.watch_url);
+      expect.soft(status.hint).not.toContain(joined.watch_url);
+    }
+  });
+
+  it('includes seat 0’s create response watch URL on its first turn against house-bot', async () => {
+    const { env } = makeEnv({ waitMs: 1 });
+    const room = await createRoom(env, { opponent: 'bot' });
+    for (const read of [wait, state, wait, state]) {
+      const { status } = await read(env, room.room_id, room.token);
+      expect(status.status).toBe('your_turn');
+      expectReminder(status.hint, room.watch_url);
+    }
+  });
+});

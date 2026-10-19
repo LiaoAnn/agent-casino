@@ -217,6 +217,8 @@ export const openRoom = (
     );
     const room_id = `r_${randomString(ROOM_ID_CHARS, 10)}`;
     const invite_code = randomString(INVITE_CHARS, 6);
+    // Signed first: the room keeps the watch link for the first turn (T46).
+    const signed = yield* sign(env, { room_id, seat: 0, name: input.name });
     // Fails only if the room id is taken, which 36^10 ids make unlikely
     // enough not to retry.
     yield* callRoom(() =>
@@ -229,9 +231,9 @@ export const openRoom = (
         seed: newSeed(test),
         test,
         ...(input.opponent && { opponent: input.opponent }),
+        watch_url: signed.watch_url,
       }),
     );
-    const signed = yield* sign(env, { room_id, seat: 0, name: input.name });
     return {
       room_id,
       invite_code,
@@ -252,12 +254,15 @@ export const joinRoom = (
 ) =>
   Effect.gen(function* () {
     const stub = yield* roomStub(env, roomId);
-    const { seat, ...room } = yield* callRoom(() => stub.join(input));
+    // A join always takes seat 1; signed first for the first turn (T46).
     const signed = yield* sign(env, {
       room_id: roomId,
-      seat,
+      seat: 1,
       name: input.name,
     });
+    const { seat, ...room } = yield* callRoom(() =>
+      stub.join({ ...input, watch_url: signed.watch_url }),
+    );
     return { room_id: roomId, seat, ...signed, ...room };
   });
 
