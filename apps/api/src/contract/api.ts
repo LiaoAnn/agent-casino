@@ -79,6 +79,13 @@ const SkillGroup = HttpApiGroup.make('skill').add(
     ),
     error: apiErrors('unavailable', 'internal'),
   }),
+  // The official script (A23); text/plain so a browser shows it too.
+  HttpApiEndpoint.get('casinoSh', '/casino.sh', {
+    success: Schema.String.pipe(
+      HttpApiSchema.asText({ contentType: 'text/plain; charset=utf-8' }),
+    ),
+    error: apiErrors('unavailable', 'internal'),
+  }),
 );
 
 const LobbyGroup = HttpApiGroup.make('lobby').add(

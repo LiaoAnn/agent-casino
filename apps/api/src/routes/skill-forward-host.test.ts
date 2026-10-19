@@ -43,14 +43,16 @@ describe('GET /skill.md through the public web transport', () => {
     async host => {
       const origin = `https://${host}`;
       const md = await getSkill(host, origin);
-      expect.soft(md).toContain(`export CASINO_URL=${origin}`);
+      expect.soft(md).toContain(`curl -fsS ${origin}/casino.sh`);
+      expect(md).not.toContain('curl -fsS https://127.0.0.1:8787/casino.sh');
       expectWatchUrls(md, origin);
     },
   );
 
   it('ignores the forwarded host when WEB_URL is not configured', async () => {
     const md = await getSkill('web.casino.test');
-    expect(md).toContain('export CASINO_URL=https://127.0.0.1:8787');
+    expect(md).toContain('curl -fsS https://127.0.0.1:8787/casino.sh');
+    expect(md).not.toContain('curl -fsS https://web.casino.test/casino.sh');
     expectWatchUrls(md, 'https://127.0.0.1:8787');
   });
 
@@ -60,7 +62,8 @@ describe('GET /skill.md through the public web transport', () => {
     'web.casino.test, other.casino.test',
   ])('ignores a forwarded host that does not exactly match: %s', async host => {
     const md = await getSkill(host, 'https://web.casino.test');
-    expect(md).toContain('export CASINO_URL=https://127.0.0.1:8787');
+    expect(md).toContain('curl -fsS https://127.0.0.1:8787/casino.sh');
+    expect(md).not.toContain(`curl -fsS https://${host}/casino.sh`);
     expectWatchUrls(md, 'https://web.casino.test');
   });
 });

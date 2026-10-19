@@ -202,14 +202,20 @@ describe('T47 actions?wait=1 HTTP contract', () => {
     ).toBe('accepted');
     const bob = await t.turn(1);
     await t.request(1, 'actions', { turn_id: bob.turn_id, type: 'fold' });
-    // A resend must wait for the current next step, even with a different payload.
+    // A resend on a newer turn marks the duplicate, even with a different payload.
     const response = await t.request(0, 'actions?wait=1', {
       ...action,
       type: 'check',
     });
     expect(response.status).toBe(200);
     const raw = await response.json();
-    expect(raw).toEqual(await t.status(0, 'wait'));
+    const current = await t.status(0, 'wait');
+    if (current.status !== 'your_turn') throw new Error('Expected your_turn');
+    expect(raw).toEqual({
+      ...current,
+      duplicate: true,
+      hint: `turn_id ${first.turn_id} was already used, so nothing was sent; act again with turn_id ${current.turn_id} from this response. ${current.hint}`,
+    });
     const body = Schema.decodeUnknownSync(RoomStatus)(raw);
     expect(body).toMatchObject({ status: 'your_turn', hand_number: 3 });
     expect(body.hint).toContain(`POST /v1/rooms/${t.roomId}/actions?wait=1`);

@@ -277,6 +277,48 @@ check "queued match: over and rated for both" \
    and (.[0].ratings | map(.change) | add | fabs) <= 1" \
   "$(jq -s . "$TMP/a" "$TMP/b")"
 
+# --- the official script, casino.sh (T50) --------------------------------
+# Downloaded from this deployment and played against house-bot the way an
+# agent does: every command a new POSIX shell, nothing kept between them but
+# .casino/. CASINO_URL points it at the target (the script's default is the
+# https address it was downloaded from).
+SH=$(command -v dash || echo sh)
+kit=$TMP/kit
+mkdir -p "$kit/.casino"
+curl -fsS --max-time 40 "$URL/casino.sh" -o "$kit/.casino/casino.sh" ||
+  fail "GET /casino.sh"
+head -n 1 "$kit/.casino/casino.sh" | grep -qx '#!/bin/sh' &&
+  ok "GET /casino.sh is a POSIX sh script" ||
+  fail "GET /casino.sh is a POSIX sh script"
+casino() { (cd "$kit" && CASINO_URL=$URL "$SH" .casino/casino.sh "$@"); }
+casino help >/dev/null && casino help act >/dev/null &&
+  ok "casino.sh help" || fail "casino.sh help"
+casino profile "e2e 腳本" e2e >/dev/null || fail "casino.sh profile"
+out=$(casino bot) || { echo "$out" >&2; fail "casino.sh bot"; }
+[[ $out == *">>> TELL YOUR OWNER"*"Watch: "* ]] &&
+  ok "casino.sh bot relays the watch link" ||
+  fail "casino.sh bot relays the watch link"
+rc=0
+out=$(casino wait) || rc=$?
+for _ in $(seq 1 400); do
+  case $rc in
+    0)
+      move=$(sed -n 's/^Legal: //p' <<<"$out")
+      case $move in *check*) move=check ;; *call*) move=call ;; *) move=fold ;; esac
+      rc=0; out=$(casino act "$move" "e2e") || rc=$? ;;
+    2) rc=0; out=$(casino wait) || rc=$? ;;
+    3) break ;;
+    *) echo "$out" >&2; fail "casino.sh plays to match over" ;;
+  esac
+done
+[[ $rc == 3 && $out == *"Next: sh .casino/casino.sh report"* ]] &&
+  ok "casino.sh plays a house-bot match to the end" ||
+  { echo "$out" >&2; fail "casino.sh plays a house-bot match to the end"; }
+out=$(casino report) || { echo "$out" >&2; fail "casino.sh report"; }
+[[ $out == *"Result: "*"/matches/"* && $(ls "$kit/.casino") == $'casino.sh\nprofile.json' ]] &&
+  ok "casino.sh report tells the result and cleans up the room" ||
+  { echo "$out" >&2; ls "$kit/.casino" >&2; fail "casino.sh report tells the result and cleans up the room"; }
+
 # --- what the web shows ---------------------------------------------------
 check "GET /v1/matches lists both matches" \
   "[.matches[].match_id] | index(\"$bot_room\") != null and index(\"$pair_room\") != null" \

@@ -316,6 +316,9 @@ const YourTurn = Schema.Struct({
   // Until this seat's own first action is accepted: who it plays and the
   // watch link, as on matched (A22).
   tell_owner: Schema.optionalKey(Schema.String),
+  // From actions?wait=1 with a turn_id already used while this seat is on a
+  // newer turn: nothing was sent (A3, T50).
+  duplicate: Schema.optionalKey(Schema.Literal(true)),
 });
 
 const Waiting = Schema.Struct({

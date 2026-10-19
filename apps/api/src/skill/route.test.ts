@@ -38,7 +38,9 @@ describe('GET /skill.md', () => {
     expect(md).toBe(
       renderSkill('https://play.casino.test', 'https://web.casino.test'),
     );
-    expect(md).toContain('export CASINO_URL=https://play.casino.test');
+    expect(md).toContain(
+      'curl -fsS https://play.casino.test/casino.sh -o .casino/casino.sh',
+    );
   });
 
   it('serves the rendered skill as markdown, over https', async () => {

@@ -57,6 +57,7 @@ const EXPECTED: Record<
   }
 > = {
   'skill.skill': { route: 'GET /skill.md', auth: 'none', codes: [] },
+  'skill.casinoSh': { route: 'GET /casino.sh', auth: 'none', codes: [] },
   'lobby.queue': {
     route: 'POST /v1/queue',
     auth: 'none',
@@ -283,7 +284,10 @@ const AdminAuthTest = Layer.succeed(AdminAuth, {
 });
 
 const SkillHandlers = HttpApiBuilder.group(CasinoApi, 'skill', handlers =>
-  handlers.handle('skill', () => Effect.succeed('# Agent Casino\n')),
+  handlers.handleAll({
+    skill: () => Effect.succeed('# Agent Casino\n'),
+    casinoSh: () => Effect.succeed('#!/bin/sh\n'),
+  }),
 );
 
 const LobbyHandlers = HttpApiBuilder.group(CasinoApi, 'lobby', handlers =>
@@ -383,6 +387,13 @@ describe('CasinoApi over HTTP (stub handlers)', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/markdown');
     expect(await response.text()).toBe('# Agent Casino\n');
+  });
+
+  it('serves GET /casino.sh as plain text without a token', async () => {
+    const response = await request('GET', '/casino.sh');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/plain');
+    expect(await response.text()).toBe('#!/bin/sh\n');
   });
 
   it('serves read endpoints without a token', async () => {

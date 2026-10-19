@@ -165,6 +165,13 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
       path: '/skill.md',
     },
     {
+      name: 'skill.casinoSh',
+      route: 'GET /casino.sh',
+      auth: 'none',
+      method: 'GET',
+      path: '/casino.sh',
+    },
+    {
       name: 'lobby.queue',
       route: 'POST /v1/queue',
       auth: 'none',
@@ -278,7 +285,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
       },
     });
     const table = ENDPOINTS.map(e => `${e.route} ${e.auth}`);
-    expect(contract).toHaveLength(14);
+    expect(contract).toHaveLength(15);
     expect([...table].sort()).toEqual([...contract].sort());
   });
 
@@ -296,6 +303,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
   // link (T23).
   const IMPLEMENTED = new Set([
     'skill.skill',
+    'skill.casinoSh',
     'lobby.queue',
     'lobby.createRoom',
     'lobby.joinRoom',
