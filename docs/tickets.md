@@ -41,6 +41,7 @@
 | 7.12 | T43（主人端的體驗）、T44（網站上線前修整）、T45（arena 第 6 輪回饋） | 3 |
 | 7.13 | T46（arena 第 7 輪回饋） | 1 |
 | 7.14 | T47（送出動作並等下一步） | 1 |
+| 7.15 | T48（arena 第 9 輪回饋） | 1 |
 | 9 | T36、T37（多人：規則、合約；⏸ 等 Ann 說開始） | 2 |
 | 10 | T38、T40、T41（Room DO、積分、網頁） | 3 |
 | 11 | T39 → T42（大廳、skill.md 與試玩） | 1 |
@@ -370,6 +371,18 @@
 - 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`、`pnpm e2e --target=local`（e2e 主迴圈也改用 `?wait=1`，另外保留一段走舊的兩步）。單元測試要涵蓋：接受後等到 `your_turn`、等到 `match_over`、被拒不等、等待逾時。另外把 skill.md 的主迴圈照抄對 worktree 網址打完一場。
 - 功能驗證：合併後 coordinator 跑 arena 第 9 輪，陣容同第 7 輪，看主迴圈是不是變簡單、有沒有超時代打。
 
+### T48 轉告寫進回覆、第一手 60 秒 ★（約 500 行）· Blocked by：T47
+- 來源：`docs/playtests/arena-9.md` 第 1～4 點。Ann 2026-10-19 同意，包括第一手多給時間。
+- 合約 ticket：可以改 `apps/api/src/contract/`，範圍只限：`your_turn` 加頂層 `tell_owner`；hint 文字；第一手期限（`deadline` 的計算方式不變，只是值變大）。
+- 要改的地方：
+  - `skill/`：最上面的規則與 matched、`match_over` 存檔區塊旁邊都寫明：主人看不到指令輸出，只看得到 agent 自己寫的文字；要把 `tell_owner` 整句（含完整連結）寫進自己的回覆，單獨一則，馬上寫。
+  - `room/`：座位第一次自己出手（被接受的動作）之前，每個 `your_turn`（`GET /wait`、`actions?wait=1`、`state`）都帶頂層 `tell_owner`，內容是觀戰連結那一句（同 matched 的 `tell_owner`）。T46 的 hint 提醒保留。之前的房間（沒有 `watch_urls`）不帶。
+  - hint：`match_over` 提醒用主人的語言和字回報；`your_turn` 的 note 提醒寫明「Traditional and Simplified Chinese are different scripts」。
+  - `skill/`：配對後（queue、create、join 的存檔區塊）把 `CASINO_URL` 和 `ROOM_ID` 寫進 `.casino/env`，之後每個指令區塊都以 `. .casino/env &&` 開頭（Claude Code 每次呼叫是新 shell）。斷線重接一節也改用它。
+  - 計時：每個座位在這場的**第一個回合**期限是 `turn_seconds` 的兩倍（預設 60 秒），之後照舊。逾時代打規則不變。`deadline` 照實際值給。更新 casino-api skill 與 skill.md 的計時說明；只動 Room DO 的計時，不動 `src/holdem/`。
+- 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`、`pnpm e2e --target=local`。單元測試涵蓋：第一次出手前的每種 `your_turn` 都有 `tell_owner`、出手後沒有、逾時代打不算出手；第一個回合 60 秒、第二個 30 秒；兩個座位各算各的。另外把 skill.md 的存檔區塊和主迴圈照抄，每段用新的 shell 跑，對 worktree 網址打完一場。
+- 功能驗證：合併後 coordinator 跑 arena 第 10 輪，陣容同第 7 輪，看「開局給觀戰連結」和「回報用主人的字」。
+
 ## Epic E3 Skill 與接入
 
 **完成定義**：全新的 Claude Code、Codex 只收到一句話就能自己打完一場，不問人。
@@ -421,7 +434,7 @@
 
 **完成定義**：正式環境可用，三個 agent 試玩通過。
 
-### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26、T30、T34、T35、T43、T44、T45、T46、T47
+### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26、T30、T34、T35、T43、T44、T45、T46、T47、T48
 - 正式環境部署（人同意後）、管理員金鑰、試玩發現的小修正。
 - 網域 `casino.liaoann.net`，web Worker 用 Custom Domain 綁定（Cloudflare 自動建 DNS 與憑證），api 經由 web 轉送（T44），不另開網域。`ADMIN_KEY` 由 Ann 自己用 `wrangler secret put ADMIN_KEY --env production` 設。Ann 已設 budget alert。順序：staging 給 Ann 玩過，再上正式環境，上線後在正式環境跑一輪試玩（2026-10-19 Ann）。
 - 部署前先跑 `db:migrate:<環境>`（T22 的 `0001_ratings_rank.sql`、T23 的 note 欄位）；部署後第一週每天看 DO 請求、D1 寫入列數、log 筆數，看到 `gave up storing the match` 就是 D1 有問題（見 `docs/cost.md`）。
