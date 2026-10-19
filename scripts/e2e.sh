@@ -5,10 +5,11 @@
 #
 #   pnpm e2e --target=local     # CASINO_URL, else http://127.0.0.1:8787
 #   pnpm e2e --target=staging   # needs CASINO_URL
-#   pnpm e2e --target=prod      # needs CASINO_URL
+#   pnpm e2e --target=prod      # CASINO_URL and WEB_URL, else https://casino.liaoann.net
 #
 # With WEB_URL (the web of the same deployment) it also checks that the web
-# shows the matches it played.
+# shows the matches it played. Production serves the api through the web
+# (T44), so both default to its one domain.
 #
 # Prints one line per check and exits 0 only when all of them pass. Rated
 # matches it plays go on the leaderboard as e2e-a-<run> and e2e-b-<run>.
@@ -23,8 +24,12 @@ for arg in "$@"; do
 done
 case $target in
   local) URL=${CASINO_URL:-http://127.0.0.1:8787} ;;
-  staging | prod)
-    URL=${CASINO_URL:?set CASINO_URL to the $target api, e.g. https://api.example}
+  staging)
+    URL=${CASINO_URL:?set CASINO_URL to the staging api, e.g. https://api.example}
+    ;;
+  prod)
+    URL=${CASINO_URL:-https://casino.liaoann.net}
+    WEB_URL=${WEB_URL:-https://casino.liaoann.net}
     ;;
   *) echo "usage: pnpm e2e --target=local|staging|prod" >&2; exit 2 ;;
 esac

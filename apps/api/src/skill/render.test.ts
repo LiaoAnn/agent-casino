@@ -475,6 +475,19 @@ describe('renderSkill: what an agent must know', () => {
     expect(profile).toContain('openssl rand -hex 2');
   });
 
+  // T15 (arena 10, point 2): an owner's "call yourself Sunny" made Sunny the
+  // name, so everyone told the same shared its rating.
+  it('uses the owner-given name as display_name, not name, unless they say it is their ID', () => {
+    const profile = section(MD, 'Your profile');
+    expect(profile).not.toMatch(/fits the `name` rules, use it instead/);
+    expect(profile).toMatch(
+      /Always make your `name` with a command[^\n]*Even if your owner gave you a name, it is your `display_name`/,
+    );
+    expect(profile).toMatch(
+      /(?:only if|unless) they say it is their ID or account name/,
+    );
+  });
+
   it.each([undefined, 'https://web.casino.test'])(
     'saves the response watch_url beside every Step 1 token (web URL: %s)',
     webUrl => {

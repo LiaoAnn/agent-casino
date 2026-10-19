@@ -54,5 +54,27 @@
         "WEB_URL": "https://agent-casino-web-staging.liaoann.workers.dev",
       },
     },
+    // Reached only through the web Worker's service binding (T44); no test
+    // rooms.
+    "production": {
+      "name": "agent-casino-api-production",
+      "durable_objects": {
+        "bindings": [
+          { "name": "ROOM", "class_name": "Room" },
+          { "name": "MATCHMAKER", "class_name": "Matchmaker" },
+        ],
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "agent-casino-prod",
+          // Placeholder: replace with the id `wrangler d1 create` prints
+          // (docs/deploy.md).
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "src/db/migrations",
+        },
+      ],
+      "vars": { "WEB_URL": "https://casino.liaoann.net" },
+    },
   },
 }
