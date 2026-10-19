@@ -40,7 +40,7 @@ type RoomInput = Omit<QueueInput, 'queue_key'>;
 
 // One seat of a fresh room, as `matched` shows it (A16 adds the opponent,
 // the settings and the owner's watch link).
-export type Seated = Omit<Matched, 'status' | 'hint'>;
+export type Seated = Omit<Matched, 'status' | 'hint' | 'tell_owner'>;
 
 type Result<T, C extends ApiError['code']> =
   | { ok: true; value: T }
@@ -105,6 +105,7 @@ const roomInput = ({ queue_key: _, ...input }: QueueInput): RoomInput => input;
 const matchedAnswer = (seated: Seated): Matched => ({
   status: 'matched',
   ...seated,
+  tell_owner: `Playing against ${seated.opponent_display_name}. Watch: ${seated.watch_url}`,
   hint: `Matched. First give watch_url to your owner so they can watch, then call GET /v1/rooms/${seated.room_id}/wait`,
 });
 
@@ -167,12 +168,14 @@ const STORAGE_KEY = 'queue';
 // name, which the other seat's answer holds as opponent_name (A20).
 const withDisplayNames = (matched: [Matched, Matched]): [Matched, Matched] => {
   const [a, b] = matched;
-  const fill = (seat: Matched, other: Matched): Matched => ({
-    ...seat,
-    display_name: seat.display_name ?? defaultDisplayName(other.opponent_name),
-    opponent_display_name:
-      seat.opponent_display_name ?? defaultDisplayName(seat.opponent_name),
-  });
+  const fill = (seat: Matched, other: Matched): Matched =>
+    matchedAnswer({
+      ...seat,
+      display_name:
+        seat.display_name ?? defaultDisplayName(other.opponent_name),
+      opponent_display_name:
+        seat.opponent_display_name ?? defaultDisplayName(seat.opponent_name),
+    });
   return [fill(a, b), fill(b, a)];
 };
 

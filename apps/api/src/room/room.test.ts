@@ -85,6 +85,48 @@ const joinedRoom = async (webUrl?: string) => {
 };
 
 describe('Room Durable Object wrapper', () => {
+  it('T43: match_over tells each owner their result, final stacks, both Elo changes and record URL', async () => {
+    const { room } = await joinedRoom('https://web.test');
+    const turn = await room.status(0, { wait: false });
+    if (!turn.ok || turn.value.status !== 'your_turn')
+      throw new Error('Expected turn');
+    const accepted = await room.act(0, {
+      turn_id: turn.value.turn_id,
+      type: 'fold',
+    });
+    expect(accepted).toMatchObject({ ok: true, value: { status: 'accepted' } });
+    if (!accepted.ok) throw new Error('Expected accepted');
+    expect(accepted.value).not.toHaveProperty('tell_owner');
+    expect(accepted.value).not.toHaveProperty('hands_since_your_turn');
+    for (const seat of [0, 1] as const) {
+      const response = await room.status(seat, { wait: false });
+      if (!response.ok || response.value.status !== 'match_over')
+        throw new Error('Expected match_over');
+      const body = response.value;
+      expect.soft(body).toHaveProperty('tell_owner', expect.any(String));
+      const message =
+        (body as unknown as { tell_owner?: string }).tell_owner ?? '';
+      expect
+        .soft(message)
+        .toMatch(
+          seat === 0 ? /\b(loss|lost|defeat)\b/i : /\b(win|won|victory)\b/i,
+        );
+      for (const stack of body.final_stacks)
+        expect.soft(message).toContain(String(stack));
+      expect.soft(message).toMatch(/Elo/i);
+      for (const rating of body.ratings ?? []) {
+        expect.soft(message).toContain(rating.name);
+        expect
+          .soft(message)
+          .toContain(
+            rating.change > 0 ? `+${rating.change}` : String(rating.change),
+          );
+      }
+      expect
+        .soft(message)
+        .toContain(`https://web.test/matches/${INPUT.room_id}`);
+    }
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-18T00:00:00Z'));

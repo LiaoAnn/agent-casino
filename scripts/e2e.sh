@@ -63,6 +63,9 @@ play() {
     status=$(jq -r .status <<<"$r")
     case $status in
       your_turn)
+        check "your_turn includes completed hands and no owner message" \
+          '(.hands_since_your_turn | type) == "array" and (has("tell_owner") | not)
+           and ([.hands_since_your_turn[].hand_number] | . == sort)' "$r"
         turn=$(jq -r .turn_id <<<"$r")
         type=$(jq -r 'if any(.legal_actions[]; .type == "check")
           then "check" else "call" end' <<<"$r")
@@ -74,8 +77,22 @@ play() {
           return 1
         }
         ;;
-      waiting) ;;
-      match_over) echo "$r" >"$out"; return 0 ;;
+      waiting)
+        check "waiting has no owner message or completed-hand array" \
+          '(has("tell_owner") or has("hands_since_your_turn")) | not' "$r" ;;
+      match_over)
+        check "match_over includes a complete owner report and hand history" \
+          '(.hands_since_your_turn | type) == "array"
+           and ([.hands_since_your_turn[].hand_number] | . == sort)
+           and (.tell_owner | type) == "string"' "$r"
+        check "owner report includes result, final chips, Elo and record link" \
+          '. as $r | (.tell_owner | contains($r.result) and contains("Elo")
+           and contains("/matches/" + $r.match_id))
+           and all(.final_stacks[]; . as $chips | $r.tell_owner | contains($chips | tostring))
+           and (if .ratings == null then (.tell_owner | contains("unrated"))
+             else all(.ratings[]; . as $rating | $r.tell_owner |
+               contains($rating.name) and contains($rating.change | tostring)) end)' "$r"
+        echo "$r" >"$out"; return 0 ;;
       *) echo "$r" >&2; return 1 ;;
     esac
   done
@@ -138,6 +155,8 @@ check "POST /v1/rooms with house-bot and the default settings" \
 check "POST /v1/rooms trims and squeezes the display name; house-bot is House Bot" \
   '.display_name == "人類 玩家 🃏" and .opponent_display_name == "House Bot"' \
   "$room"
+check "bot start tells the owner the opponent and exact watch link" \
+  '. as $r | .tell_owner | contains("House Bot") and contains($r.watch_url)' "$room"
 bot_room=$(jq -r .room_id <<<"$room")
 play "$bot_room" "$(jq -r .token <<<"$room")" "$TMP/bot" ||
   fail "play house-bot to match_over"
@@ -177,6 +196,9 @@ queue "$b" "$key_b" "$TMP/qb" || fail "POST /v1/queue pairs $b"
 wait $qa || fail "POST /v1/queue pairs $a"
 check "both queued players got the same room" \
   '.[0].room_id == .[1].room_id and .[0].seat == 0 and .[1].seat == 1' \
+  "$(jq -s . "$TMP/qa" "$TMP/qb")"
+check "matched tells each owner the opponent and their exact watch link" \
+  'all(.[]; . as $r | .tell_owner | contains($r.opponent_display_name) and contains($r.watch_url))' \
   "$(jq -s . "$TMP/qa" "$TMP/qb")"
 check "matched shows both display names to both" \
   ".[0].display_name == \"選手 A 🃏\" and .[0].opponent_display_name == \"$b\"

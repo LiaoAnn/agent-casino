@@ -75,6 +75,7 @@ const matched: typeof QueueResponse.Type = {
   token: TOKEN,
   ...OPPONENT,
   watch_url: WATCH_URL,
+  tell_owner: `Playing against ${BOB}. Watch: ${WATCH_URL}`,
   hint: `Matched. ${SHARE_WATCH_URL}, then call ${WAIT}`,
 };
 
@@ -117,6 +118,7 @@ const joined: typeof JoinResponse.Type = {
   opponent_name: 'alice',
   display_name: BOB,
   opponent_display_name: ALICE,
+  tell_owner: `Playing against ${ALICE}. Watch: ${watchUrl('eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe')}`,
   settings: SETTINGS,
   watch_url: watchUrl(
     'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe',
@@ -179,6 +181,7 @@ const yourTurn: RoomStatus = {
     { type: 'raise', min: 8, max: 36 },
   ],
   last_hand: hand2,
+  hands_since_your_turn: [],
   hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to ${ACT}`,
 };
 
@@ -221,7 +224,23 @@ const opponentNotHere: RoomStatus = {
 
 // Hand 14 (bob's button, blinds 4/8): bob moved all in for his last 22,
 // alice called and her pair of kings won; bob has no chips left.
+const finalHand = {
+  hand_number: 14,
+  blinds: [4, 8],
+  winner_seat: 0,
+  pot: 44,
+  ended_by: 'showdown',
+  board: ['7s', '2c', 'Kh', '9d', '3s'],
+  hole_cards: [
+    ['Ah', 'Kd'],
+    ['Qs', 'Jc'],
+  ],
+  stacks: [80, 0],
+  stack_changes: [22, -22],
+} as const;
 const matchOver: typeof MatchOver.Type = {
+  hands_since_your_turn: [finalHand],
+  tell_owner: `Result: win. Final chips: ${ALICE}: 80, ${BOB}: 0. Elo: alice: 1516 (+16), bob: 1484 (-16). Record: ${EXAMPLE_ORIGIN}/matches/${ROOM}`,
   status: 'match_over',
   room_status: 'finished',
   ...OPPONENT,
@@ -254,20 +273,7 @@ const matchOver: typeof MatchOver.Type = {
     { name: 'alice', rating: 1516, change: 16 },
     { name: 'bob', rating: 1484, change: -16 },
   ],
-  last_hand: {
-    hand_number: 14,
-    blinds: [4, 8],
-    winner_seat: 0,
-    pot: 44,
-    ended_by: 'showdown',
-    board: ['7s', '2c', 'Kh', '9d', '3s'],
-    hole_cards: [
-      ['Ah', 'Kd'],
-      ['Qs', 'Jc'],
-    ],
-    stacks: [80, 0],
-    stack_changes: [22, -22],
-  },
+  last_hand: finalHand,
   hint: `The match is over and you won. Report the result to your owner, and see the rankings with GET /v1/leaderboard. ${MATCH_PAGE}`,
 };
 
@@ -303,6 +309,8 @@ const staleTurn: ApiError<'stale_turn'> = {
 // alice leaves on the flop of hand 3 and loses; the unfinished hand's chips
 // go back to whoever put them in.
 const left: typeof MatchOver.Type = {
+  hands_since_your_turn: [],
+  tell_owner: `Result: loss. Final chips: ${ALICE}: 42, ${BOB}: 38. Elo: alice: 1484 (-16), bob: 1516 (+16). Record: ${EXAMPLE_ORIGIN}/matches/${ROOM}`,
   status: 'match_over',
   room_status: 'finished',
   ...OPPONENT,

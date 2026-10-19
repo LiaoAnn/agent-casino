@@ -185,6 +185,7 @@ export const QueueResponse = Schema.Union([
     opponent_display_name: DisplayName,
     settings: RoomSettings,
     watch_url: WatchUrl,
+    tell_owner: Schema.String,
     hint: Hint,
   }),
   Schema.Struct({
@@ -209,6 +210,7 @@ export const CreateRoomResponse = Schema.Struct({
   opponent_display_name: Schema.NullOr(DisplayName),
   settings: RoomSettings,
   watch_url: WatchUrl,
+  tell_owner: Schema.optionalKey(Schema.String),
   hint: Hint,
 });
 
@@ -221,6 +223,7 @@ export const JoinResponse = Schema.Struct({
   opponent_display_name: DisplayName,
   settings: RoomSettings,
   watch_url: WatchUrl,
+  tell_owner: Schema.String,
   hint: Hint,
 });
 
@@ -309,6 +312,7 @@ const YourTurn = Schema.Struct({
   seconds_remaining: NonNegativeInt,
   legal_actions: Schema.NonEmptyArray(LegalAction),
   last_hand: Schema.NullOr(LastHand),
+  hands_since_your_turn: Schema.Array(LastHand),
 });
 
 const Waiting = Schema.Struct({
@@ -333,6 +337,8 @@ export const MatchOver = Schema.Struct({
   final_stacks: Stacks,
   ratings: SeatRatings,
   last_hand: Schema.NullOr(LastHand),
+  hands_since_your_turn: Schema.Array(LastHand),
+  tell_owner: Schema.String,
 });
 
 // What `wait` and `state` answer; also the `state` field of some errors.

@@ -54,6 +54,7 @@ const matched = (seat: 0 | 1) => ({
   value: {
     status: 'matched',
     ...seats[seat],
+    tell_owner: `Playing against ${seats[seat].opponent_display_name}. Watch: ${seats[seat].watch_url}`,
     hint: expect.stringMatching(
       new RegExp(`watch_url[\\s\\S]*GET /v1/rooms/${ROOM}/wait`),
     ),
@@ -1090,7 +1091,7 @@ describe('T35 persisted queue display names', () => {
       await queue.queue(players[0]);
       await queue.queue(players[1]);
       const saved = await storage.get<{
-        pairings: { matched: Seated[] }[];
+        pairings: { matched: (Seated & { tell_owner?: string })[] }[];
       }>('queue');
       expect(saved?.pairings).toHaveLength(1);
       await storage.put('queue', {
@@ -1101,6 +1102,7 @@ describe('T35 persisted queue display names', () => {
             ({
               display_name: _displayName,
               opponent_display_name: _opponentDisplayName,
+              tell_owner: _tellOwner,
               ...legacy
             }) => legacy,
           ),

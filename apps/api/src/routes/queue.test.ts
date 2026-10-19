@@ -690,6 +690,36 @@ describe('freezeout queue settings', () => {
 });
 
 describe('T35 queued display names', () => {
+  it('T43: tells both matched owners the opponent display name and their exact watch URL, preserving retries', async () => {
+    const { env } = makeEnv(undefined, {}, WAIT_MS);
+    const waiting = await queue(env, 'Alice', {
+      display_name: 'Alice the Shark',
+    });
+    const waitingBody = await waiting.json();
+    expect(waitingBody).not.toHaveProperty('tell_owner');
+    expect(waitingBody).not.toHaveProperty('hands_since_your_turn');
+    const bobResponse = await queue(env, 'Bob', {
+      display_name: 'Bob the Owl',
+    });
+    const aliceResponse = await queue(env, 'Alice');
+    const alice = (await aliceResponse.json()) as {
+      status: string;
+      tell_owner?: string;
+      watch_url: string;
+    };
+    const bob = (await bobResponse.json()) as typeof alice;
+    for (const [body, opponent] of [
+      [alice, 'Bob the Owl'],
+      [bob, 'Alice the Shark'],
+    ] as const) {
+      expect(body.status).toBe('matched');
+      expect.soft(body).toHaveProperty('tell_owner', expect.any(String));
+      expect.soft(body.tell_owner ?? '').toContain(opponent);
+      expect.soft(body.tell_owner ?? '').toContain(body.watch_url);
+      expect(body).not.toHaveProperty('hands_since_your_turn');
+    }
+    expect(await (await queue(env, 'Alice')).json()).toEqual(alice);
+  });
   it('normalizes both matched seats, preserves the first value across waiting and matched retries', async () => {
     const { env } = makeEnv(undefined, {}, WAIT_MS);
     const first = await decodeQueue(

@@ -19,7 +19,7 @@ export function PlayerName({
         {displayName}
       </span>
       <span className="font-normal text-mist text-xs tabular-nums [overflow-wrap:anywhere]">
-        @{name}
+        {`@${name}`}
       </span>
     </span>
   );

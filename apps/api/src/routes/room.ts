@@ -30,6 +30,11 @@ export const createRoom = HttpApiBuilder.handler(
       const wait = `GET /v1/rooms/${room.room_id}/wait`;
       return {
         ...room,
+        ...(room.opponent_display_name === null
+          ? {}
+          : {
+              tell_owner: `Playing against ${room.opponent_display_name}. Watch: ${room.watch_url}`,
+            }),
         hint:
           payload.opponent === 'bot'
             ? `You play house-bot and the match has started. ${SHARE_WATCH_URL}, then call ${wait} for your first turn`
@@ -58,6 +63,7 @@ export const joinRoom = HttpApiBuilder.handler(
       });
       return {
         ...seated,
+        tell_owner: `Playing against ${seated.opponent_display_name}. Watch: ${seated.watch_url}`,
         hint: `Joined. ${SHARE_WATCH_URL}, then call GET /v1/rooms/${roomId}/wait for your first turn`,
       };
     }),
