@@ -1,4 +1,4 @@
-// Execute the manual itself. Full games and script internals live in casino-sh.test.ts.
+// Execute the rendered manual itself, including a complete match.
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import {
@@ -12,11 +12,28 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { handle } from '../app';
+import { startTestD1 } from '../db/test-d1';
+import { RatingWriter } from '../matchmaker/ratings';
+import { RoomReferee, type RoomStorage } from '../room/referee';
+import type { Bindings } from '../routes/env';
 import { renderCasinoSh } from './casino-sh';
 import { renderSkill } from './render';
 
 const blocks = (md: string) =>
   [...md.matchAll(/^```bash\n([\s\S]*?)^```$/gm)].map(m => (m[1] ?? '').trim());
+
+class MemoryStorage implements RoomStorage {
+  readonly data = new Map<string, unknown>();
+  async get<T>(key: string): Promise<T | undefined> {
+    return structuredClone(this.data.get(key)) as T | undefined;
+  }
+  async put<T>(key: string, value: T): Promise<void> {
+    this.data.set(key, structuredClone(value));
+  }
+  async setAlarm(): Promise<void> {}
+  async deleteAlarm(): Promise<void> {}
+}
 
 async function run(cwd: string, block: string) {
   const child = spawn('dash', ['-c', block], {
@@ -43,21 +60,81 @@ async function run(cwd: string, block: string) {
 }
 
 describe('manual commands in fresh POSIX shells', () => {
-  it('downloads, checks profile, creates it and resolves every documented command with help', async () => {
+  it('runs the manual blocks in fresh shells through a bot match, report and reconnect/leave', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'manual-run-'));
+    const d1 = await startTestD1();
+    const ratings = new RatingWriter(d1.db);
+    const rooms = new Map<string, RoomReferee>();
+    const web = 'https://manual-web.test';
+    const env = {
+      TOKEN_SECRET: 'manual-test-secret',
+      WEB_URL: web,
+      DB: d1.d1,
+      ALLOW_TEST_ROOMS: 'true',
+      DEFAULT_SETTINGS_JSON: JSON.stringify({
+        starting_stack: 40,
+        blind_every: 5,
+        max_hands: 3,
+        turn_seconds: 30,
+      }),
+      DEFAULT_TEST_JSON: JSON.stringify({ seed: '0'.repeat(64) }),
+      ROOM: {
+        idFromName: (name: string) => name,
+        get: (id: string) => {
+          let room = rooms.get(id);
+          if (!room) {
+            room = new RoomReferee(new MemoryStorage(), {
+              waitMs: 30,
+              webUrl: web,
+              record: input => ratings.record(input),
+            });
+            rooms.set(id, room);
+          }
+          return room;
+        },
+      },
+    } as unknown as Bindings;
     let base = '';
     const requests: string[] = [];
-    // Like the casino-sh harness, this is real local HTTP. Only download is
-    // needed before queue; profile and help must be entirely local. Render
-    // with the local HTTP base here because the public route enforces HTTPS.
-    const server = createServer((request, response) => {
-      requests.push(request.url ?? '');
-      if (request.url !== '/casino.sh') {
-        response.writeHead(404).end();
-        return;
+    const exchanges: { path: string; response: Record<string, unknown> }[] = [];
+    const errors: unknown[] = [];
+    // Render the download locally because the public route enforces HTTPS;
+    // all game requests go through the real application and referee.
+    const server = createServer(async (incoming, outgoing) => {
+      try {
+        const path = incoming.url ?? '';
+        requests.push(path);
+        if (path === '/casino.sh') {
+          outgoing.writeHead(200, { 'content-type': 'text/plain' });
+          outgoing.end(renderCasinoSh(base));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
+        const body = Buffer.concat(chunks).toString();
+        const headers = new Headers();
+        for (const [key, value] of Object.entries(incoming.headers))
+          if (value !== undefined)
+            headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+        const response = await handle(
+          new Request(`${base}${path}`, {
+            method: incoming.method,
+            headers,
+            ...(body ? { body } : {}),
+          }),
+          env,
+        );
+        const text = await response.text();
+        exchanges.push({ path, response: JSON.parse(text) });
+        outgoing.writeHead(
+          response.status,
+          Object.fromEntries(response.headers),
+        );
+        outgoing.end(text);
+      } catch (error) {
+        errors.push(error);
+        outgoing.writeHead(500).end('test HTTP adapter failed');
       }
-      response.writeHead(200, { 'content-type': 'text/plain' });
-      response.end(renderCasinoSh(base));
     });
     try {
       server.listen(0, '127.0.0.1');
@@ -72,7 +149,7 @@ describe('manual commands in fresh POSIX shells', () => {
         '#!/bin/sh\nexec /usr/bin/sed --posix "$@"\n',
         { mode: 0o755 },
       );
-      const md = renderSkill(base);
+      const md = renderSkill(base, web);
       const game = md.split('## Save as a skill')[0] ?? '';
       const gameBlocks = blocks(game);
       expect(gameBlocks[0], 'first example downloads the official script').toBe(
@@ -111,6 +188,83 @@ describe('manual commands in fresh POSIX shells', () => {
       expect(shown.code).toBe(0);
       expect(shown.out).toContain(profile.name);
       expect(shown.out).toContain(profile.display_name);
+      const commandBlock = (command: string) => {
+        const found = gameBlocks.find(block =>
+          new RegExp(`^sh \\.casino/casino\\.sh ${command}(?:\\s|$)`).test(
+            block,
+          ),
+        );
+        expect(found, `manual ${command} block`).toBeDefined();
+        if (!found) throw new Error(`Missing manual ${command} block`);
+        return found;
+      };
+      const bot = commandBlock('bot');
+      const wait = commandBlock('wait');
+      const act = commandBlock('act');
+      const report = commandBlock('report');
+      // Queue and bot are alternative seat-acquisition paths. Keep the
+      // actual manual commands and their main-flow order unchanged.
+      expect(gameBlocks.indexOf(wait)).toBeGreaterThan(queueAt);
+      expect(gameBlocks.indexOf(act)).toBeGreaterThan(gameBlocks.indexOf(wait));
+      expect(gameBlocks.indexOf(report)).toBeGreaterThan(
+        gameBlocks.indexOf(act),
+      );
+      expect(await run(cwd, bot)).toMatchObject({ code: 0 });
+      let result = await run(cwd, wait);
+      expect(result.code, `${result.out}\n${result.err}`).toBe(0);
+      result = await run(cwd, act);
+      expect([0, 1, 2, 3], `${act}\n${result.out}\n${result.err}`).toContain(
+        result.code,
+      );
+      expect(`${result.out}\n${result.err}`).not.toContain('Usage:');
+      expect(exchanges.at(-1)?.path).toMatch(/\/actions\?wait=1$/);
+      if (result.code === 1) {
+        const response = exchanges.at(-1)?.response;
+        expect(response?.code).toBe('invalid_action');
+        expect(`${result.out}\n${result.err}`).toContain(response?.message);
+      }
+      // Legal continuation is chosen from the server, never from script
+      // internals. A rejected example keeps the same legal turn available.
+      for (let step = 0; step < 200 && result.code !== 3; step++) {
+        if (result.code === 2) {
+          result = await run(cwd, wait);
+          continue;
+        }
+        const response = exchanges.at(-1)?.response;
+        const legal = response?.legal_actions as
+          | {
+              type: string;
+              min?: number;
+            }[]
+          | undefined;
+        const action =
+          legal?.find(entry => entry.type === 'check') ??
+          legal?.find(entry => entry.type === 'call') ??
+          legal?.find(entry => entry.type === 'fold') ??
+          legal?.[0];
+        expect(action, JSON.stringify(response)).toBeDefined();
+        if (!action) throw new Error('No legal continuation');
+        result = await run(
+          cwd,
+          `sh .casino/casino.sh act ${action.type}${action.type === 'raise' ? ` ${action.min}` : ''}`,
+        );
+        expect([0, 2, 3], `${result.out}\n${result.err}`).toContain(
+          result.code,
+        );
+      }
+      expect(result.code, `${result.out}\n${result.err}`).toBe(3);
+      const reported = await run(cwd, report);
+      expect(reported.code, `${reported.out}\n${reported.err}`).toBe(0);
+      expect(reported.out).toContain(`${web}/matches/`);
+
+      // Reconnect and owner-requested leave apply to a live second match.
+      expect(await run(cwd, bot)).toMatchObject({ code: 0 });
+      const state = await run(cwd, commandBlock('state'));
+      expect(state.code, `${state.out}\n${state.err}`).toBe(0);
+      const left = await run(cwd, commandBlock('leave'));
+      expect(left.code, `${left.out}\n${left.err}`).toBe(3);
+      expect(await run(cwd, report)).toMatchObject({ code: 0 });
+
       const mentioned = [
         ...md.matchAll(/sh \.casino\/casino\.sh ([a-z][a-z-]*)/g),
       ].map(m => m[1] ?? '');
@@ -120,13 +274,15 @@ describe('manual commands in fresh POSIX shells', () => {
         expect(result.code, `${command}: ${result.out} ${result.err}`).toBe(0);
         expect(result.out.trim()).not.toBe('');
       }
-      expect(requests).toEqual(['/casino.sh']);
+      expect(requests[0]).toBe('/casino.sh');
+      expect(errors).toEqual([]);
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
         server.close(error => (error ? reject(error) : resolve())),
       );
+      await d1.dispose();
       rmSync(cwd, { recursive: true, force: true });
     }
-  }, 120_000);
+  }, 180_000);
 });

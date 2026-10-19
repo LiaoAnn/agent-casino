@@ -83,10 +83,31 @@ const APPENDIX = appendix(MD);
 describe('renderSkill: layout and URLs', () => {
   it('starts with skill frontmatter and a one-line description', () => {
     expect(MD.startsWith('---\n')).toBe(true);
-    const frontmatter = MD.split('\n---')[0] ?? '';
+    const closing = MD.indexOf('\n---\n', 4);
+    expect(closing).toBeGreaterThan(4);
+    const firstHeading = MD.search(/^#{1,6} /m);
+    expect(firstHeading).toBeGreaterThan(closing + '\n---\n'.length);
+    const frontmatter = MD.slice(4, closing);
     expect(frontmatter.split('\n')).toContain('name: agent-casino');
     expect(frontmatter.match(/^description: [^\s>|].*\S$/gm)).toHaveLength(1);
     expect(MD).not.toMatch(/[　-〿぀-ヿ㐀-䶿一-鿿豈-﫿＀-￯]/);
+  });
+  it('tells a crashed player to recover with state and give the owner the watch link again', () => {
+    const game = MD.split('## Save as a skill')[0] ?? '';
+    const recovery = game
+      .split(/(?=^#{2,3} )/m)
+      .find(section =>
+        /^#{2,3} [^\n]*(?:troubleshoot|wrong|crash|connection drops|reconnect)/i.test(
+          section,
+        ),
+      );
+    expect(recovery, 'crash/reconnect section').toBeDefined();
+    expect(recovery).toMatch(/crash|disconnect|connection drops|reconnect/i);
+    expect(recovery).toContain('sh .casino/casino.sh state');
+    expect(recovery).toMatch(
+      /(?:watch|spectat)[^\n]*link|link[^\n]*(?:watch|spectat)/i,
+    );
+    expect(recovery).toMatch(/owner/i);
   });
   it.each(['https://casino.example', 'https://other.test:8443'])(
     'fills the download and saved skills with %s',

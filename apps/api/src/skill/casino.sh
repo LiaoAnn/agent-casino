@@ -179,6 +179,9 @@ show() {
   view=$(printf '%s' "$body" | sed -n 's/.*"view":{\([^{}]*\)"history":.*/\1/p')
   MY_SEAT=$(printf '%s' "$view" | jnum my_seat)
   [ -n "$tell" ] && relay "$tell"
+  # state: the owner's link again, e.g. after a crash.
+  [ "${SHOW_WATCH-}" = 1 ] && [ -s "$(room_file watch_url)" ] &&
+    say "Watch link for your owner: $(cat "$(room_file watch_url)")"
   case $body in *'"duplicate":true'*)
     say "Not sent: you used turn_id $(cat "$(room_file used)" 2>/dev/null) already. It is your turn again; act on the table below." ;;
   esac
@@ -382,6 +385,7 @@ cmd_room() {
 
 room_get() { # wait | state
   need_room
+  [ "$1" = state ] && SHOW_WATCH=1
   call GET "/v1/rooms/$ROOM/$1" || { no_answer; next "$1"; exit 1; }
   room_answer && return
   error_line
@@ -648,7 +652,8 @@ EOF
 $ME state
 
 When: you are unsure what is going on, without waiting.
-What happens: shows the table now.
+What happens: shows the table now, and your owner's watch link (give it to
+them again after a crash).
 Prints and exit code: like wait (0 your turn, 2 not your turn, 3 match over).
 Example: $ME state
 EOF

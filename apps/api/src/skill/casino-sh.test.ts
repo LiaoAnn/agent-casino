@@ -434,6 +434,31 @@ async function report(
 }
 
 describe('casino.sh in fresh POSIX shells (A23)', () => {
+  it('recovers the table and the seat watch link after an accepted action without tell_owner', async () => {
+    const api = await serve();
+    const cwd = player(api.url);
+    await run(cwd, 'profile', 'reconnected');
+    expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
+    const watchUrl = api.exchanges.at(-1)?.response.watch_url;
+    expect(watchUrl).toEqual(
+      expect.stringMatching(/^https:\/\/web\.test\/watch\//),
+    );
+    const turn = await run(cwd, 'wait');
+    const acted = await run(cwd, ...action(turn));
+    expect(acted.code, `${acted.out}\n${acted.err}`).toBe(0);
+    expect(api.exchanges.at(-1)?.path).toMatch(/\/actions\?wait=1$/);
+    expect(api.exchanges.at(-1)?.status).toBe(200);
+    const state = await run(cwd, 'state');
+    const response = api.exchanges.at(-1)?.response;
+    expect(response).toBeDefined();
+    expect(response?.tell_owner).toBeUndefined();
+    expect(state.code, `${state.out}\n${state.err}`).toBe(0);
+    expect(state.out).toContain(watchUrl);
+    if (!response) throw new Error('Missing state response');
+    tableSummary(state, response);
+    checkRequests(api);
+  }, 60_000);
+
   it('prints the current table and moves, then reports completed hands before the next table', async () => {
     const api = await serve();
     const cwd = player(api.url);
