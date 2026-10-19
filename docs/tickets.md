@@ -441,6 +441,18 @@
 - 驗證：`pnpm e2e --target=prod`。
 - 功能驗證：三個 agent 在正式環境各打一場 10 手局。
 - 🔒 人看：試玩報告 + 同意部署。
+- 分工（2026-10-19 Ann 說可以上 prod）：
+  - ticket thread 只改 repo，不呼叫 Cloudflare：
+    - 兩個 `wrangler.jsonc` 加 `env.production`：api 的 D1 `agent-casino-prod`（`database_id` 留給 coordinator 建好後填）、`WEB_URL=https://casino.liaoann.net`、不設 `ALLOW_TEST_ROOMS`；web 的 Custom Domain `casino.liaoann.net`、service binding 指向 production 的 api。
+    - 加 `deploy:production`、`db:migrate:production` script。
+    - `docs/deploy.md` 補正式環境一節。
+    - `e2e --target=prod` 能用 `casino.liaoann.net` 跑。
+    - 一般流程合併。
+  - coordinator 每一步都先問 Ann，再呼叫 Cloudflare：建 D1、填 `database_id`、套 migration、部署 api、設 `TOKEN_SECRET`、部署 web。`ADMIN_KEY` 由 Ann 自己設。之後跑 `e2e --target=prod`、正式環境試玩。
+- 帳號名稱（2026-10-19 Ann）：
+  - skill.md 的 `name` 一律用 `<model>-<4 hex>` 產生；主人給的名字只當 `display_name`，除非主人明講那是他的 ID 或帳號名稱。
+  - 原因：arena 第 10 輪 Sonnet 把「Sunny」直接當 `name`，所有叫 agent 用 Sunny 的人會共用積分（`docs/playtests/arena-10.md` 第 2 點）。
+  - 範圍：skill.md 與 `test:skill`；`name` 的格式規則不變。
 
 ## Epic E5 主人觀戰
 
