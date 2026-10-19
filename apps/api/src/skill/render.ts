@@ -10,7 +10,7 @@ import {
   ERROR_STATUS,
   type ErrorCode,
 } from '../contract/errors';
-import { EXAMPLE_ORIGIN, EXAMPLES, WATCH_URL } from './examples';
+import { EXAMPLE_ORIGIN, EXAMPLES } from './examples';
 import template from './template.md?raw' with { type: 'text' };
 
 interface Endpoint {
@@ -94,7 +94,7 @@ const ADVICE: Record<ErrorCode, string> = {
   invalid_request:
     'Your JSON body, path or query is malformed. Fix it as `message` says and resend.',
   invalid_token:
-    'The room token is missing, mistyped, or for another room. `message` says which: the header is not exactly `Authorization: Bearer <token>`, or the token differs from the one you got. Send `Authorization: Bearer $(cat .casino/$ROOM_ID.token)` with the token you saved for this room, exactly as saved; do not queue or join again for another one, your seat stays with that token. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
+    'Most often this is a copying error. Read `message` and resend the token you saved for this room with `Authorization: Bearer $(cat .casino/$ROOM_ID.token)`. Extract it again from the saved seat response with `sed`; never retype it. If you queued, POST /v1/queue with the same name and the same `queue_key` returns the same `matched` only for 45 seconds after matching (Step 1). After that, do not queue to recover this seat: use the saved response. Do not change the queue key or join again to recover your seat. For a wrong room, use the room_id that came with the token. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
   room_not_found: 'No such room. Check `$ROOM_ID`.',
   room_full: 'Both seats are taken. Queue or open your own room instead.',
   wrong_invite_code: 'Ask your opponent for the right invite code.',
@@ -163,12 +163,20 @@ const curl = (key: string) => {
     return '$ROOM_ID';
   });
   const request = EXAMPLES[key]?.request;
+  const output = ['lobby.queue', 'lobby.createRoom', 'lobby.joinRoom'].includes(
+    key,
+  )
+    ? '.casino/seat.json'
+    : key === 'room.wait'
+      ? '.casino/$ROOM_ID.state.json'
+      : undefined;
   const parts = [
     `curl -sS --max-time 40${endpoint.method === 'GET' ? '' : ` -X ${endpoint.method}`} "$CASINO_URL${path}"`,
     ...(endpoint.auth === 'room' ? [`-H "${BEARER}"`] : []),
     ...(request === undefined
       ? []
       : ["-H 'Content-Type: application/json'", `-d ${shellBody(request)}`]),
+    ...(output === undefined ? [] : [`-o ${output}`]),
   ];
   return ['```bash', parts.join(' \\\n  '), '```'].join('\n');
 };
@@ -196,8 +204,6 @@ export function renderSkill(baseUrl: string, webUrl = baseUrl): string {
     errors: errorTable,
     curl,
     responses: key => responses(key, webUrl),
-    // The example answers' watch_url, for the blocks that save it (T32).
-    watch_url: () => WATCH_URL.replaceAll(EXAMPLE_ORIGIN, webUrl),
   };
   return template.replace(/\{\{(\w+)(?: ([\w.]+))?\}\}/g, (_, name, arg) => {
     const render = fill[name];

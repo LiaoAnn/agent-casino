@@ -1202,7 +1202,7 @@ function statusFor(
       legal_actions: [first, ...rest],
       last_hand: lastHandOut(seen.last_hand, answering),
       hands_since_your_turn: answering.hands[seat],
-      hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to POST /v1/rooms/${data.room_id}/actions`,
+      hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to POST /v1/rooms/${data.room_id}/actions. Write your note in your owner's language and script (Traditional and Simplified Chinese are different scripts)`,
     };
   }
   return {

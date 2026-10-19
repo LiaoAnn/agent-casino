@@ -215,6 +215,18 @@ describe('tokenRejectionError', () => {
     },
   );
 
+  it.each(['malformed', 'bad_signature'] as const)(
+    'T45 %s hint explains copy errors and recovery of the same matched seat',
+    reason => {
+      const { hint } = tokenRejectionError(reason);
+      expect.soft(hint).toMatch(/cop(?:y|ied|ying)|transcri/i);
+      expect.soft(hint).toMatch(/same[^.\n]*name/i);
+      expect.soft(hint).toMatch(/same[^.\n]*queue_key/i);
+      expect.soft(hint).toMatch(/queue/i);
+      expect.soft(hint).toMatch(/same[^.\n]*matched/i);
+    },
+  );
+
   it('tells the agent what went wrong for each reason', () => {
     expect(tokenRejectionError('malformed').message).toMatch(/Bearer/);
     expect(tokenRejectionError('bad_signature').message).toMatch(/signature/);

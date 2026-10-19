@@ -2994,3 +2994,43 @@ describe('T35 display names over room HTTP', () => {
     },
   );
 });
+
+describe('T45 actionable hints at the HTTP boundary', () => {
+  it.each(['malformed', 'bad_signature'] as const)(
+    '%s tokens explain copying errors and same-key recovery',
+    async reason => {
+      const { env } = makeEnv({ waitMs: 1 });
+      const room = await createRoom(env);
+      const token =
+        reason === 'malformed'
+          ? 'copied-without-signature'
+          : await signRoomToken(
+              { room_id: room.room_id, seat: 0, name: 'alice' },
+              'wrong-secret',
+              Date.now(),
+            );
+      const body = await expectError(
+        await get(env, `/v1/rooms/${room.room_id}/wait`, token),
+        'invalid_token',
+      );
+      expect.soft(body.hint).toMatch(/cop(?:y|ied|ying)|transcri/i);
+      expect.soft(body.hint).toMatch(/same[^.\n]*name/i);
+      expect.soft(body.hint).toMatch(/same[^.\n]*queue_key/i);
+      expect.soft(body.hint).toMatch(/same[^.\n]*matched/i);
+    },
+  );
+
+  it('reminds the acting seat to write note in the owner language and script on wait and state', async () => {
+    const { env } = makeEnv({ waitMs: 1 });
+    const room = await createRoom(env);
+    await joinRoom(env, room);
+    for (const read of [wait, state]) {
+      const { status } = await read(env, room.room_id, room.token);
+      expect(status.status).toBe('your_turn');
+      expect.soft(status.hint).toMatch(/note/i);
+      expect.soft(status.hint).toMatch(/owner/i);
+      expect.soft(status.hint).toMatch(/language/i);
+      expect.soft(status.hint).toMatch(/script|traditional|simplified/i);
+    }
+  });
+});

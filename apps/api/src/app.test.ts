@@ -539,7 +539,9 @@ describe('RoomAuth answers 401 invalid_token', () => {
         expect.soft(error.hint).toMatch(/saved|original/i);
         expect
           .soft(error.hint)
-          .not.toMatch(/POST \/v1\/queue|fresh|new token/i);
+          .toMatch(/POST \/v1\/queue[^.]*same name[^.]*same queue_key/i);
+        expect.soft(error.hint).toMatch(/same matched[^.]*45 seconds/i);
+        expect.soft(error.hint).not.toMatch(/fresh|new token|new queue_key/i);
       }
     },
   );
@@ -569,7 +571,11 @@ describe('RoomAuth answers 401 invalid_token', () => {
     expect.soft(tampered.message).toBe(otherSecret.message);
     expect.soft(tampered.message).not.toBe(malformed.message);
     expect.soft(tampered.hint).toMatch(/saved|original/i);
-    expect.soft(tampered.hint).not.toMatch(/POST \/v1\/queue|fresh|new token/i);
+    expect
+      .soft(tampered.hint)
+      .toMatch(/POST \/v1\/queue[^.]*same name[^.]*same queue_key/i);
+    expect.soft(tampered.hint).toMatch(/same matched[^.]*45 seconds/i);
+    expect.soft(tampered.hint).not.toMatch(/fresh|new token|new queue_key/i);
   });
 
   it('checks the token before the body (no token + malformed JSON)', async () => {

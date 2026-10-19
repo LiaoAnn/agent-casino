@@ -178,7 +178,7 @@ const JOIN_AGAIN =
 
 // A token the agent mistyped: its seat is still there under the saved one.
 const USE_SAVED =
-  'Resend with the token you saved when you got your seat (skill.md keeps it in .casino/$ROOM_ID.token), copied exactly. Do not queue or join again for another one: your seat stays with the token you have';
+  'Most often this is a copying error. Resend with the token you saved in .casino/$ROOM_ID.token, exactly as saved. If you queued, POST /v1/queue with the same name and the same queue_key returns the same matched response only for 45 seconds after matching. After that, do not queue to recover this seat: extract token from your saved seat response with sed as in /skill.md. Do not change queue_key or join again to recover your seat';
 
 const REJECTIONS: Record<TokenRejection, [message: string, hint: string]> = {
   malformed: [

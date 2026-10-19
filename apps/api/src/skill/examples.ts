@@ -44,8 +44,7 @@ const SETTINGS = {
 };
 const watchUrl = (token: string) =>
   `${EXAMPLE_ORIGIN}/watch/${ROOM}?token=${token}`;
-// alice's link, which template.md's save blocks write to a file.
-export const WATCH_URL = watchUrl(
+const WATCH_URL = watchUrl(
   'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MH0.Wt5mK2pQ8vNa',
 );
 // What people see of the two (A20); template.md's profile block saves alice's.
@@ -182,7 +181,7 @@ const yourTurn: RoomStatus = {
   ],
   last_hand: hand2,
   hands_since_your_turn: [],
-  hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to ${ACT}`,
+  hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to ${ACT}. Write your note in your owner's language and script (Traditional and Simplified Chinese are different scripts)`,
 };
 
 const opponentActing: RoomStatus = {
