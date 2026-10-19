@@ -58,6 +58,22 @@ const EXPECTED: Record<
 > = {
   'skill.skill': { route: 'GET /skill.md', auth: 'none', codes: [] },
   'skill.casinoSh': { route: 'GET /casino.sh', auth: 'none', codes: [] },
+  'skill.llms': { route: 'GET /llms.txt', auth: 'none', codes: [] },
+  'skill.kitCore': {
+    route: 'GET /skills/agent-casino/SKILL.md',
+    auth: 'none',
+    codes: [],
+  },
+  'skill.kitScript': {
+    route: 'GET /skills/agent-casino/scripts/casino.sh',
+    auth: 'none',
+    codes: [],
+  },
+  'skill.kitHoldem': {
+    route: 'GET /skills/agent-casino-holdem/SKILL.md',
+    auth: 'none',
+    codes: [],
+  },
   'lobby.queue': {
     route: 'POST /v1/queue',
     auth: 'none',
@@ -283,11 +299,25 @@ const AdminAuthTest = Layer.succeed(AdminAuth, {
         ),
 });
 
+const skillStubs = {
+  skill: () => Effect.succeed('# Agent Casino\n'),
+  casinoSh: () => Effect.succeed('#!/bin/sh\n'),
+  llms: () => Effect.succeed('# Agent Casino\n'),
+  kitCore: () => Effect.succeed('# Core skill\n'),
+  kitScript: () => Effect.succeed('#!/bin/sh\n'),
+  kitHoldem: () => Effect.succeed('# Holdem skill\n'),
+};
+
 const SkillHandlers = HttpApiBuilder.group(CasinoApi, 'skill', handlers =>
-  handlers.handleAll({
-    skill: () => Effect.succeed('# Agent Casino\n'),
-    casinoSh: () => Effect.succeed('#!/bin/sh\n'),
-  }),
+  // Keep the pre-kit contract runnable: absent endpoints should fail as 404s,
+  // rather than crashing registration of unrelated existing stub handlers.
+  handlers.handleAll(
+    Object.fromEntries(
+      Object.entries(skillStubs).filter(
+        ([name]) => reflectApi()[`skill.${name}`],
+      ),
+    ) as typeof skillStubs,
+  ),
 );
 
 const LobbyHandlers = HttpApiBuilder.group(CasinoApi, 'lobby', handlers =>
@@ -395,6 +425,25 @@ describe('CasinoApi over HTTP (stub handlers)', () => {
     expect(response.headers.get('content-type')).toContain('text/plain');
     expect(await response.text()).toBe('#!/bin/sh\n');
   });
+
+  it.each([
+    ['/llms.txt', 'text/plain', '# Agent Casino\n'],
+    ['/skills/agent-casino/SKILL.md', 'text/markdown', '# Core skill\n'],
+    ['/skills/agent-casino/scripts/casino.sh', 'text/plain', '#!/bin/sh\n'],
+    [
+      '/skills/agent-casino-holdem/SKILL.md',
+      'text/markdown',
+      '# Holdem skill\n',
+    ],
+  ])(
+    'serves %s without auth with its declared content type',
+    async (path, contentType, body) => {
+      const response = await request('GET', path);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain(contentType);
+      expect(await response.text()).toBe(body);
+    },
+  );
 
   it('serves read endpoints without a token', async () => {
     const response = await request('GET', '/v1/leaderboard');

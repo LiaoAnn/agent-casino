@@ -628,6 +628,96 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
     }
   }
 
+  for (const seat of [0, 1] as const) {
+    it.each(['busted by blind', 'decision then loss', 'split pot'] as const)(
+      `T51 hardening: seat ${seat}, %s`,
+      async scenario => {
+        const ownBlind = seat === 0 ? 4 : 8; // Hand 5: seat 0 is the button.
+        const start = scenario === 'decision then loss' ? 20 : ownBlind;
+        const change =
+          scenario === 'busted by blind'
+            ? -start
+            : scenario === 'decision then loss'
+              ? -5
+              : 0;
+        const final = start + change;
+        const stacks = seat === 0 ? [final, 80 - final] : [80 - final, final];
+        const hand = {
+          hand_number: 5,
+          blinds: [4, 8],
+          winner_seat: scenario === 'split pot' ? null : 1 - seat,
+          pot:
+            scenario === 'split pot'
+              ? start * 2
+              : scenario === 'busted by blind'
+                ? start * 2
+                : 10,
+          ended_by: 'showdown',
+          board: ['Ts', 'Js', 'Qs', 'Ks', 'As'],
+          hole_cards: [
+            ['2h', '3h'],
+            ['4d', '5d'],
+          ],
+          stacks,
+          stack_changes: seat === 0 ? [change, -change] : [-change, change],
+        };
+        // Losing cases use an opponent-winning board; split uses the royal board.
+        if (scenario !== 'split pot') {
+          Object.assign(hand, {
+            board: ['2s', '3h', '4c', '8d', '9s'],
+            hole_cards:
+              seat === 0
+                ? [
+                    ['Kh', 'Kd'],
+                    ['Ah', 'Ad'],
+                  ]
+                : [
+                    ['Ah', 'Ad'],
+                    ['Kh', 'Kd'],
+                  ],
+          });
+        }
+        const api = await serve(false, {
+          answer: (path, answer) => {
+            if (!path.endsWith('/wait')) return;
+            Object.assign(answer, {
+              status: 'match_over',
+              seat,
+              hand_number: 5,
+              last_hand: hand,
+              hands_since_your_turn: [hand],
+              result: 'loss',
+              final_stacks: stacks,
+              ratings: null,
+              tell_owner:
+                'Match over. Unrated. Record: https://web.test/matches/test',
+            });
+            Object.assign(answer.settings as object, {
+              blind_every: 2,
+              max_hands: 5,
+            });
+            if (answer.view) Object.assign(answer.view, { my_seat: seat });
+          },
+        });
+        const cwd = player(api.url);
+        await run(cwd, 'profile', 'Blind Hardening');
+        expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
+        const result = await run(cwd, 'wait');
+        expect(result.code, `${result.out}\n${result.err}`).toBe(3);
+        const line = result.out
+          .split('\n')
+          .find(value => /\b5\b.*showdown|showdown.*\b5\b/.test(value));
+        expect(line, result.out).toBeDefined();
+        const note =
+          'you were all-in from posting the blind, so this hand needed no move from you';
+        if (scenario === 'decision then loss')
+          expect(line, result.out).not.toContain(note);
+        else expect(line, result.out).toContain(note);
+        checkRequests(api);
+      },
+    );
+  }
+
   it('recovers the table and the seat watch link after an accepted action without tell_owner', async () => {
     const api = await serve();
     const cwd = player(api.url);
