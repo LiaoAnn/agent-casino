@@ -5,6 +5,14 @@ const PUBLIC_ORIGIN = 'https://casino.example';
 
 describe('single-domain API forwarding (T44)', () => {
   it.each([
+    '/llms.txt',
+    '/llms.txt?download=1&tag=a%2Bb',
+    '/skills/agent-casino/SKILL.md',
+    '/skills/agent-casino/SKILL.md?download=1&tag=a%2Bb',
+    '/skills/agent-casino/scripts/casino.sh',
+    '/skills/agent-casino/scripts/casino.sh?download=1&tag=a%2Bb',
+    '/skills/agent-casino-holdem/SKILL.md',
+    '/skills/agent-casino-holdem/SKILL.md?download=1&tag=a%2Bb',
     '/skill.md',
     '/skill.md?download=1',
     '/casino.sh',
@@ -15,7 +23,10 @@ describe('single-domain API forwarding (T44)', () => {
     '/v1/rooms/r_abcde12345/watch?token=watch-token',
     '/v1/not-an-endpoint',
   ])('forwards %s to the API binding', async path => {
-    const fetchApi = vi.fn(async () => new Response('API response'));
+    const fetchApi = vi.fn(async (forwarded: Request) => {
+      expect(forwarded.url).toBe(`${PUBLIC_ORIGIN}${path}`);
+      return new Response('API response');
+    });
     const response = await forwardApi(
       new Request(`${PUBLIC_ORIGIN}${path}`),
       fetchApi,
@@ -30,6 +41,16 @@ describe('single-domain API forwarding (T44)', () => {
     '/matches/r_abcde12345',
     '/watch/r_abcde12345?token=watch-token',
     '/assets/site.css',
+    '/skills/other',
+    '/skills/agent-casino/other',
+    '/llms.txt/x',
+    '/llms.txt.bak',
+    '/skills/agent-casino/SKILL.md/x',
+    '/skills/agent-casino/SKILL.md.bak',
+    '/skills/agent-casino/scripts/casino.sh/x',
+    '/skills/agent-casino/scripts/casino.sh.bak',
+    '/skills/agent-casino-holdem/SKILL.md/x',
+    '/skills/agent-casino-holdem/SKILL.md.bak',
     '/skill.md/extra',
     '/skill.md.bak',
     '/casino.sh/extra',

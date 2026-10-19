@@ -1363,7 +1363,10 @@ function ownerResult(
     ? players
         .map(s => {
           const r = ratings[s];
-          return `${r.name}: ${r.rating} (${r.change >= 0 ? '+' : ''}${r.change})`;
+          // Ratings go by name: show it after the display name (T51).
+          const shown = names[s] ?? r.name;
+          const who = shown === r.name ? r.name : `${shown} (${r.name})`;
+          return `${who}: ${r.rating} (${r.change >= 0 ? '+' : ''}${r.change})`;
         })
         .join(', ')
     : 'unrated (no change)';

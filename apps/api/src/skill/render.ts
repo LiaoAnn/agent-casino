@@ -1,7 +1,8 @@
 // Builds skill.md (casino-api skill: skill.md, A12): the hand-written
 // template.md, which teaches casino.sh (A23), with the HTTP appendix's
 // endpoint table, request and response examples and error codes filled from
-// the contract, so they can't drift from the API.
+// the contract, so they can't drift from the API. template.md is split into
+// parts, so the kit's files (A24) can share them.
 import { Exit, Schema } from 'effect';
 import { HttpApi } from 'effect/http-api';
 import { AdminAuth, CasinoApi, RoomAuth, WatchAuth } from '../contract/api';
@@ -63,6 +64,10 @@ const ENDPOINTS = reflectEndpoints();
 const PURPOSE: Readonly<Record<string, string>> = {
   'skill.skill': 'This manual',
   'skill.casinoSh': 'The official script, casino.sh',
+  'skill.llms': 'The entry point: how to install the kit',
+  'skill.kitCore': 'The kit: the agent-casino skill',
+  'skill.kitScript': 'The kit: casino.sh, the same as `GET /casino.sh`',
+  'skill.kitHoldem': "The kit: the agent-casino-holdem skill (Texas Hold'em)",
   'lobby.queue': 'Queue for a game; long-polls up to 30 s',
   'lobby.createRoom': 'Open a room and get an invite code',
   'lobby.joinRoom': 'Join a room with its invite code',
@@ -180,19 +185,117 @@ const responses = (key: string, webUrl: string) => {
     .join('\n\n');
 };
 
-// `webUrl`: where this deployment's web runs (WEB_URL).
-export function renderSkill(baseUrl: string, webUrl = baseUrl): string {
+// template.md's parts, by the name in each `<!-- part <name> -->` line.
+const PARTS = new Map(
+  template
+    .split(/^<!-- part ([\w-]+) -->\n/m)
+    .slice(1)
+    .flatMap((name, i, all) =>
+      i % 2 === 0 ? [[name, all[i + 1] ?? ''] as const] : [],
+    ),
+);
+
+// Which parts make each document, in order, and how its examples run the
+// script.
+const DOCS = {
+  'skill.md': {
+    sh: 'sh .casino/casino.sh',
+    parts: [
+      'skill-head',
+      'relay',
+      'about',
+      'download',
+      'exit-codes',
+      'profile',
+      'play-wait',
+      'holdem-turn',
+      'play-loop',
+      'report',
+      'trouble',
+      'holdem-rules',
+      'save',
+      'appendix',
+    ],
+  },
+  // The kit (A24): its examples write `casino.sh` for the installed path.
+  'agent-casino': {
+    sh: 'casino.sh',
+    parts: [
+      'core-head',
+      'relay',
+      'about',
+      'kit-script',
+      'exit-codes',
+      'profile',
+      'play-wait',
+      'kit-turn',
+      'play-loop',
+      'report',
+      'trouble',
+    ],
+  },
+  'agent-casino-holdem': {
+    sh: 'casino.sh',
+    parts: ['holdem-head', 'holdem-turn', 'holdem-read', 'holdem-rules'],
+  },
+  'llms.txt': { sh: 'casino.sh', parts: ['llms'] },
+} as const;
+
+// The kit's files, at the path each is served on under /skills/ and
+// installed to under a skill folder.
+const KIT_FILES = [
+  'agent-casino/SKILL.md',
+  'agent-casino/scripts/casino.sh',
+  'agent-casino-holdem/SKILL.md',
+];
+
+// Downloads every kit file into `dir`: one curl per file, stopping at the
+// first that fails (sh continues a line ending in `&&`).
+const install = (baseUrl: string, dir: string) =>
+  KIT_FILES.map(
+    file =>
+      `curl -fsSL --create-dirs -o ${dir}/${file} ${baseUrl}/skills/${file}`,
+  ).join(' &&\n');
+
+const render = (
+  doc: keyof typeof DOCS,
+  baseUrl: string,
+  webUrl = baseUrl,
+): string => {
+  const { sh, parts } = DOCS[doc];
   const fill: Record<string, (arg: string) => string> = {
     base_url: () => baseUrl,
     host: () => new URL(baseUrl).host,
+    sh: () => sh,
+    install: dir => install(baseUrl, dir),
     endpoints: endpointTable,
     errors: errorTable,
     request,
     responses: key => responses(key, webUrl),
   };
-  return template.replace(/\{\{(\w+)(?: ([\w.]+))?\}\}/g, (_, name, arg) => {
-    const render = fill[name];
-    if (!render) throw new Error(`skill.md: unknown placeholder {{${name}}}`);
-    return render(arg ?? '');
-  });
-}
+  return parts
+    .map(name => {
+      const text = PARTS.get(name);
+      if (text === undefined)
+        throw new Error(`${doc}: no part ${name} in template.md`);
+      return text;
+    })
+    .join('')
+    .replace(/\{\{(\w+)(?: ([\w./-]+))?\}\}/g, (_, name, arg) => {
+      const fillIn = fill[name];
+      if (!fillIn) throw new Error(`${doc}: unknown placeholder {{${name}}}`);
+      return fillIn(arg ?? '');
+    });
+};
+
+// `webUrl`: where this deployment's web runs (WEB_URL).
+export const renderSkill = (baseUrl: string, webUrl = baseUrl): string =>
+  render('skill.md', baseUrl, webUrl);
+
+export const renderLlmsTxt = (baseUrl: string): string =>
+  render('llms.txt', baseUrl);
+
+export const renderKitSkill = (
+  skill: 'agent-casino' | 'agent-casino-holdem',
+  baseUrl: string,
+): string => render(skill, baseUrl);

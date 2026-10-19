@@ -86,6 +86,32 @@ const SkillGroup = HttpApiGroup.make('skill').add(
     ),
     error: apiErrors('unavailable', 'internal'),
   }),
+  // The kit (A24): the llms.txt entry and the files it installs, each at the
+  // path it is installed to.
+  HttpApiEndpoint.get('llms', '/llms.txt', {
+    success: Schema.String.pipe(
+      HttpApiSchema.asText({ contentType: 'text/plain; charset=utf-8' }),
+    ),
+    error: apiErrors('unavailable', 'internal'),
+  }),
+  HttpApiEndpoint.get('kitCore', '/skills/agent-casino/SKILL.md', {
+    success: Schema.String.pipe(
+      HttpApiSchema.asText({ contentType: 'text/markdown' }),
+    ),
+    error: apiErrors('unavailable', 'internal'),
+  }),
+  HttpApiEndpoint.get('kitScript', '/skills/agent-casino/scripts/casino.sh', {
+    success: Schema.String.pipe(
+      HttpApiSchema.asText({ contentType: 'text/plain; charset=utf-8' }),
+    ),
+    error: apiErrors('unavailable', 'internal'),
+  }),
+  HttpApiEndpoint.get('kitHoldem', '/skills/agent-casino-holdem/SKILL.md', {
+    success: Schema.String.pipe(
+      HttpApiSchema.asText({ contentType: 'text/markdown' }),
+    ),
+    error: apiErrors('unavailable', 'internal'),
+  }),
 );
 
 const LobbyGroup = HttpApiGroup.make('lobby').add(

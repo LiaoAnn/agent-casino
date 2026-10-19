@@ -172,6 +172,34 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
       path: '/casino.sh',
     },
     {
+      name: 'skill.llms',
+      route: 'GET /llms.txt',
+      auth: 'none',
+      method: 'GET',
+      path: '/llms.txt',
+    },
+    {
+      name: 'skill.kitCore',
+      route: 'GET /skills/agent-casino/SKILL.md',
+      auth: 'none',
+      method: 'GET',
+      path: '/skills/agent-casino/SKILL.md',
+    },
+    {
+      name: 'skill.kitScript',
+      route: 'GET /skills/agent-casino/scripts/casino.sh',
+      auth: 'none',
+      method: 'GET',
+      path: '/skills/agent-casino/scripts/casino.sh',
+    },
+    {
+      name: 'skill.kitHoldem',
+      route: 'GET /skills/agent-casino-holdem/SKILL.md',
+      auth: 'none',
+      method: 'GET',
+      path: '/skills/agent-casino-holdem/SKILL.md',
+    },
+    {
       name: 'lobby.queue',
       route: 'POST /v1/queue',
       auth: 'none',
@@ -285,7 +313,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
       },
     });
     const table = ENDPOINTS.map(e => `${e.route} ${e.auth}`);
-    expect(contract).toHaveLength(15);
+    expect(contract).toHaveLength(19);
     expect([...table].sort()).toEqual([...contract].sort());
   });
 
@@ -304,6 +332,11 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
   const IMPLEMENTED = new Set([
     'skill.skill',
     'skill.casinoSh',
+    'skill.llms',
+    'skill.kitCore',
+    'skill.kitScript',
+    'skill.kitHoldem',
+
     'lobby.queue',
     'lobby.createRoom',
     'lobby.joinRoom',

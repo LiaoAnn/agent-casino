@@ -133,6 +133,7 @@ async function serve(
     waitedSeconds?: number;
     deadlineMs?: number;
     tellOwner?: string;
+    answer?: (path: string, answer: Record<string, unknown>) => void;
   } = {},
 ) {
   const env = makeEnv(chaos);
@@ -189,6 +190,7 @@ async function serve(
         );
       } else response = await handle(request, env);
       const answer = JSON.parse(await response.text());
+      faults.answer?.(path, answer);
       if (
         path === '/v1/queue' &&
         answer.status === 'waiting' &&
@@ -267,10 +269,11 @@ async function runShell(
   cwd: string,
   args: string[],
   overrideUrl?: string,
+  scriptPath = '.casino/casino.sh',
 ): Promise<Result> {
   const argv =
     overrideUrl === undefined
-      ? ['.casino/casino.sh', ...args]
+      ? [scriptPath, ...args]
       : [
           '-c',
           'CASINO_URL="$1"; export CASINO_URL; shift; exec /usr/bin/dash .casino/casino.sh "$@"',
@@ -303,8 +306,11 @@ async function runShell(
       !args.includes('--help')
     ) {
       expect(out.trimEnd().split('\n').at(-1), `${out}\n${err}`).toMatch(
-        /^Next: sh \.casino\/casino\.sh .+/,
+        /^Next: sh .+ .+/,
       );
+      expect
+        .soft(out.trimEnd().split('\n').at(-1), `${out}\n${err}`)
+        .toContain(`Next: sh ${scriptPath} `);
     }
     return { code: Number(code), out, err };
   } finally {
@@ -453,6 +459,265 @@ async function report(
 }
 
 describe('casino.sh in fresh POSIX shells (A23)', () => {
+  it.each([
+    '.casino/casino.sh',
+    '.claude/skills/agent-casino/scripts/casino.sh',
+  ])(
+    'T51: profile Next and help use the invoked path %s with state in .casino',
+    async scriptPath => {
+      const cwd = player('http://127.0.0.1:1');
+      if (scriptPath !== '.casino/casino.sh') {
+        mkdirSync(join(cwd, '.claude/skills/agent-casino/scripts'), {
+          recursive: true,
+        });
+        writeFileSync(
+          join(cwd, scriptPath),
+          readFileSync(join(cwd, '.casino/casino.sh')),
+        );
+        rmSync(join(cwd, '.casino'), { recursive: true });
+      }
+      const result = await runShell(
+        cwd,
+        ['profile', 'X', 'sonnet'],
+        undefined,
+        scriptPath,
+      );
+      expect(result.code, result.err).toBe(0);
+      expect.soft(result.out).toContain(`Next: sh ${scriptPath} `);
+      expect(profile(cwd)).toMatchObject({
+        name: expect.stringMatching(/^sonnet-[0-9a-f]{4}$/),
+        display_name: 'X',
+      });
+      for (const args of [['help'], ['help', 'profile']]) {
+        const help = await runShell(cwd, args, undefined, scriptPath);
+        expect(help.code, help.err).toBe(0);
+        expect.soft(help.out).toContain(`sh ${scriptPath} `);
+        if (scriptPath !== '.casino/casino.sh')
+          expect.soft(help.out).not.toContain('sh .casino/casino.sh ');
+      }
+      if (scriptPath !== '.casino/casino.sh')
+        expect(
+          readdirSync(join(cwd, '.claude/skills/agent-casino/scripts')),
+        ).toEqual(['casino.sh']);
+    },
+  );
+
+  it('T51: report rank line includes the display name and parenthesised identity', async () => {
+    const api = await serve();
+    const cwd = player(api.url);
+    await run(cwd, 'profile', 'Alice the Shark', 'sonnet');
+    writeFileSync(
+      join(cwd, '.casino/profile.json'),
+      JSON.stringify({ name: 'sonnet-3f9a', display_name: 'Alice the Shark' }),
+    );
+    expect(await run(cwd, 'room', 'create')).toMatchObject({ code: 0 });
+    const created = api.exchanges.at(-1)?.response;
+    const opponent = player(api.url);
+    await run(opponent, 'profile', 'Opponent');
+    expect(
+      await run(
+        opponent,
+        'room',
+        'join',
+        String(created?.room_id),
+        String(created?.invite_code),
+      ),
+    ).toMatchObject({ code: 0 });
+    expect(await run(opponent, 'leave')).toMatchObject({ code: 3 });
+    expect(await run(cwd, 'wait')).toMatchObject({ code: 3 });
+    const result = await run(cwd, 'report');
+    expect(result.code, result.err).toBe(0);
+    const rank = result.out
+      .split('\n')
+      .find(line => /leaderboard.*rank/i.test(line));
+    expect(rank, result.out).toBeDefined();
+    expect.soft(rank).toContain('Alice the Shark');
+    expect.soft(rank).toContain('(sonnet-3f9a)');
+    checkRequests(api);
+  });
+
+  for (const seat of [0, 1] as const) {
+    for (const handNumber of [5, 6]) {
+      for (const status of ['your_turn', 'match_over'] as const) {
+        it.each([-1, 0, 1])(
+          `T51: blind-only explanation for seat ${seat}, hand ${handNumber}, ${status}, starting stack = own blind + %i`,
+          async offset => {
+            const ownBlind = seat === (handNumber - 1) % 2 ? 4 : 8;
+            const startingStack = ownBlind + offset;
+            const finalStack = startingStack * 2;
+            const stacks =
+              seat === 0
+                ? [finalStack, 80 - finalStack]
+                : [80 - finalStack, finalStack];
+            const changes =
+              seat === 0
+                ? [startingStack, -startingStack]
+                : [-startingStack, startingStack];
+            const hand = {
+              hand_number: handNumber,
+              blinds: [4, 8],
+              winner_seat: seat,
+              pot: startingStack * 2,
+              ended_by: 'showdown',
+              board: ['2s', '3h', '4c', '8d', '9s'],
+              hole_cards:
+                seat === 0
+                  ? [
+                      ['Ah', 'Ad'],
+                      ['Kh', 'Kd'],
+                    ]
+                  : [
+                      ['Kh', 'Kd'],
+                      ['Ah', 'Ad'],
+                    ],
+              stacks,
+              stack_changes: changes,
+            };
+            const api = await serve(false, {
+              answer: (path, answer) => {
+                if (!path.endsWith('/wait')) return;
+                Object.assign(answer, {
+                  status,
+                  seat,
+                  hand_number: handNumber + (status === 'your_turn' ? 1 : 0),
+                  last_hand: hand,
+                  hands_since_your_turn: [hand],
+                  ...(status === 'match_over'
+                    ? {
+                        result: 'win',
+                        final_stacks: stacks,
+                        ratings: null,
+                        tell_owner:
+                          'Match over. Unrated. Record: https://web.test/matches/test',
+                      }
+                    : {}),
+                });
+                Object.assign(answer.settings as object, {
+                  blind_every: 2,
+                  max_hands: 50,
+                });
+                if (answer.view) Object.assign(answer.view, { my_seat: seat });
+              },
+            });
+            const cwd = player(api.url);
+            await run(cwd, 'profile', 'Blind Player');
+            expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
+            const result = await run(cwd, 'wait');
+            expect(result.code, `${result.out}\n${result.err}`).toBe(
+              status === 'match_over' ? 3 : 0,
+            );
+            const since = result.out.slice(
+              result.out.indexOf('Since your last move:'),
+            );
+            const line = since
+              .split('\n')
+              .find(value =>
+                new RegExp(
+                  `\\b${handNumber}\\b.*showdown|showdown.*\\b${handNumber}\\b`,
+                ).test(value),
+              );
+            expect(line, result.out).toBeDefined();
+            const explanation =
+              'you were all-in from posting the blind, so this hand needed no move from you';
+            if (offset <= 0) expect(line, result.out).toContain(explanation);
+            else expect(line, result.out).not.toContain(explanation);
+            checkRequests(api);
+          },
+        );
+      }
+    }
+  }
+
+  for (const seat of [0, 1] as const) {
+    it.each(['busted by blind', 'decision then loss', 'split pot'] as const)(
+      `T51 hardening: seat ${seat}, %s`,
+      async scenario => {
+        const ownBlind = seat === 0 ? 4 : 8; // Hand 5: seat 0 is the button.
+        const start = scenario === 'decision then loss' ? 20 : ownBlind;
+        const change =
+          scenario === 'busted by blind'
+            ? -start
+            : scenario === 'decision then loss'
+              ? -5
+              : 0;
+        const final = start + change;
+        const stacks = seat === 0 ? [final, 80 - final] : [80 - final, final];
+        const hand = {
+          hand_number: 5,
+          blinds: [4, 8],
+          winner_seat: scenario === 'split pot' ? null : 1 - seat,
+          pot:
+            scenario === 'split pot'
+              ? start * 2
+              : scenario === 'busted by blind'
+                ? start * 2
+                : 10,
+          ended_by: 'showdown',
+          board: ['Ts', 'Js', 'Qs', 'Ks', 'As'],
+          hole_cards: [
+            ['2h', '3h'],
+            ['4d', '5d'],
+          ],
+          stacks,
+          stack_changes: seat === 0 ? [change, -change] : [-change, change],
+        };
+        // Losing cases use an opponent-winning board; split uses the royal board.
+        if (scenario !== 'split pot') {
+          Object.assign(hand, {
+            board: ['2s', '3h', '4c', '8d', '9s'],
+            hole_cards:
+              seat === 0
+                ? [
+                    ['Kh', 'Kd'],
+                    ['Ah', 'Ad'],
+                  ]
+                : [
+                    ['Ah', 'Ad'],
+                    ['Kh', 'Kd'],
+                  ],
+          });
+        }
+        const api = await serve(false, {
+          answer: (path, answer) => {
+            if (!path.endsWith('/wait')) return;
+            Object.assign(answer, {
+              status: 'match_over',
+              seat,
+              hand_number: 5,
+              last_hand: hand,
+              hands_since_your_turn: [hand],
+              result: 'loss',
+              final_stacks: stacks,
+              ratings: null,
+              tell_owner:
+                'Match over. Unrated. Record: https://web.test/matches/test',
+            });
+            Object.assign(answer.settings as object, {
+              blind_every: 2,
+              max_hands: 5,
+            });
+            if (answer.view) Object.assign(answer.view, { my_seat: seat });
+          },
+        });
+        const cwd = player(api.url);
+        await run(cwd, 'profile', 'Blind Hardening');
+        expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
+        const result = await run(cwd, 'wait');
+        expect(result.code, `${result.out}\n${result.err}`).toBe(3);
+        const line = result.out
+          .split('\n')
+          .find(value => /\b5\b.*showdown|showdown.*\b5\b/.test(value));
+        expect(line, result.out).toBeDefined();
+        const note =
+          'you were all-in from posting the blind, so this hand needed no move from you';
+        if (scenario === 'decision then loss')
+          expect(line, result.out).not.toContain(note);
+        else expect(line, result.out).toContain(note);
+        checkRequests(api);
+      },
+    );
+  }
+
   it('recovers the table and the seat watch link after an accepted action without tell_owner', async () => {
     const api = await serve();
     const cwd = player(api.url);
