@@ -210,7 +210,7 @@ Every turn prints the table like this, top to bottom (the names and numbers are 
 ```text
 Since your last move:
   Hand 3: Bob won the pot of 8 (you folded); you lost 4. Stacks: you 36, Bob 44.
-This hand so far: preflop: you post 1, Bob post 2
+This hand so far: preflop: you post 1, Bob posts 2
 Hand 4, preflop. Blinds 1/2 (double at hand 6). You are on the button (small blind).
 Your cards: Ah Kd   Board: none
 Pot 3. You: 35 chips, bet 1 this street. Bob: 42 chips, bet 2 this street.
