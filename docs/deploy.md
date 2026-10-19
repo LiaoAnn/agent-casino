@@ -43,7 +43,8 @@ web 透過既有 `API` service binding 轉送 `/skill.md` 和 `/v1/*`，保留�
 和 staging 不同的地方：
 
 - 不設 `ALLOW_TEST_ROOMS`：沒有指定種子與 chaos 的測試房。
-- `apps/api/wrangler.jsonc` 的 `env.production` 裡 `database_id` 先是全 0 的佔位值，建好 D1 後換成真的再 commit。佔位值部署不了 api。
+- D1 `agent-casino-prod` 已建立（2026-10-19），`database_id` 已填進 `apps/api/wrangler.jsonc` 的 `env.production`。
+- 兩個 Worker 都設 `workers_dev: false`，沒有 workers.dev 網址，只能從 `casino.liaoann.net` 進來（2026-10-19 Ann）。
 - `ADMIN_KEY` 由 Ann 自己設：`pnpm --filter @agent-casino/api exec wrangler secret put ADMIN_KEY --env production`。`TOKEN_SECRET` 照「第一次部署」第 4 步用亂數設。
 
 第一次部署照「第一次部署」的步驟，把 `staging` 換成 `production`、D1 名稱換成 `agent-casino-prod`：

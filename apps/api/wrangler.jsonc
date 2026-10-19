@@ -58,6 +58,7 @@
     // rooms.
     "production": {
       "name": "agent-casino-api-production",
+      "workers_dev": false,
       "durable_objects": {
         "bindings": [
           { "name": "ROOM", "class_name": "Room" },
@@ -68,9 +69,7 @@
         {
           "binding": "DB",
           "database_name": "agent-casino-prod",
-          // Placeholder: replace with the id `wrangler d1 create` prints
-          // (docs/deploy.md).
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "932ce98b-7d80-4f6b-9025-cdfccce217f7",
           "migrations_dir": "src/db/migrations",
         },
       ],
