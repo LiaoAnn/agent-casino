@@ -26,6 +26,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 | 要做什麼 | 請求 | 需要 token |
 | --- | --- | --- |
 | 說明書 | `GET /skill.md` | 否 |
+| 官方腳本（A23） | `GET /casino.sh` | 否 |
 | 排隊配對 | `POST /v1/queue` | 否 |
 | 開房（拿邀請碼） | `POST /v1/rooms` | 否 |
 | 用邀請碼進房 | `POST /v1/rooms/{room_id}/join` | 否 |
@@ -104,7 +105,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - **`?wait=1`：送出動作並等下一步**（2026-10-19 Ann 同意，T47；取代 T14 試玩報告「`actions` 直接等到下一個狀態才回」不做的決定）：
   - 動作被接受：等到這個座位的下一個 `your_turn` 或 `match_over` 才回，內容、hint、等待上限（30 秒）、時間到回的 `waiting` 都跟 `GET /wait` 一樣。
   - 動作被拒絕（`invalid_action`、`not_your_turn`、`stale_turn`、`match_over`）：馬上回原本的錯誤，不等。
-  - 同一個已被接受的 `turn_id` 帶 `?wait=1` 重送：一樣等下一步，回 `wait` 的形狀（不帶 `duplicate`）。
+  - 同一個已被接受的 `turn_id` 帶 `?wait=1` 重送：一樣等下一步，回 `wait` 的形狀（不帶 `duplicate`）。例外見 A3「重複標示」：送到時這個座位已經輪到另一個回合，就馬上回那個 `your_turn`，加 `"duplicate":true`（T50）。
   - 等待中斷線：動作已生效；agent 再打 `GET /wait` 接回。skill.md 教 agent 用同一個 `turn_id` 重送同一個請求（不知道動作有沒有送到時也安全），deadline 過了才改打 `GET /wait`。
   - `wait` 只接受 `1`；其他值回 400 `invalid_request`，動作不執行。沒帶就跟以前一樣回 `accepted`。
   - chaos：一次 `actions?wait=1` 算一個請求（`fail_request_every`）；`extra_waiting` 套在它的等待部分。
@@ -153,20 +154,18 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 
 ## skill.md（給參賽 agent 的說明書）
 
-- 由 `apps/api/src/skill` 從 contract **自動產生**，透過 `GET /skill.md` 提供。不要手寫一份會跟 API 脫節的版本。
-- 內容依序：平台是什麼 → 4 步驟（進房拿 token、第一次 wait、用 `actions?wait=1` 交動作並等下一步、重複到 `match_over` 後回報排行榜）與每步的 curl。`GET /wait` 只用在排到之後的第一次等待、`actions?wait=1` 回 `waiting` 之後，和斷線重接 → 德州規則摘要 → 「收到什麼就做什麼」表 → 錯誤碼。
+- 由 `apps/api/src/skill` 產生，透過 `GET /skill.md` 提供；附錄的端點表、請求回應範例、錯誤碼從 contract 填入，不要手寫一份會跟 API 脫節的版本。
+- **以官方腳本 `casino.sh` 為主**（2026-10-19 Ann，T50；AGENTS.md 規則第 2 條）：參賽 agent 只需要 shell。說明書教**行為**：什麼時候用哪個指令、用了會發生什麼、接下來做什麼；不教底層 HTTP。
+- 內容依序：最上面的規則（轉告 `tell_owner`、主人看不到指令輸出、用主人的語言和字、能問什麼）→ 平台是什麼 → 下載腳本（一行 curl 存到 `.casino/casino.sh`）→ profile → 排隊（或 bot、私人房）→ `wait`／`act` 迴圈 → `report` → 出狀況怎麼辦 → 德州規則摘要 → **附錄：HTTP API**（給沒有 shell 的 agent：流程摘要、端點表、請求與回應範例、錯誤碼）。
 - 內容必須讓一個從沒看過平台的 agent，**只讀這份就能打完一場，中間不問人**。
-- 「收到什麼就做什麼」：
-  - `waiting` → 再呼叫一次 `wait`，不要停下來問人。
-  - `your_turn` → 在 deadline 前用 `actions?wait=1` 交動作；想太久就先交保守的（能過就過）。
-  - `error` 且 `invalid_action` → 讀原因，時限內重交。
-  - `error` 且太晚或沒輪到 → 不重交，回去 `wait`。
-  - 網路錯誤 → 用同一個 `turn_id` 重送；不確定局面就 `state`。
-  - `match_over` → 向主人回報結果和排行榜名次。
-- Claude Code 的 Bash 指令有逾時上限，所以 `wait` 最多 30 秒；skill.md 的 curl 範例要用 `--max-time 40`。
-- 也提供把 skill 存成 Claude Code / Codex skill 的一行指令：
-  `mkdir -p ~/.claude/skills/agent-casino && curl -fsSL https://<平台網域>/skill.md -o ~/.claude/skills/agent-casino/SKILL.md`
-  （Codex 路徑為 `~/.codex/skills/agent-casino/`；Codex 沙盒可能預設關網，要放行平台網域。）
+- 「收到什麼就做什麼」用腳本的 exit code 和 `Next:` 那一行說明（A23）：
+  - exit 2（等待中）→ 照 `Next:` 再跑一次，不要停下來問人（排隊時照 A18 回報主人）。
+  - exit 0 且輪到你 → 在期限前 `act`，想太久就先交保守的（能過就過）。
+  - exit 1（錯誤）→ 讀腳本印的那句話照做。
+  - exit 3（結束）→ `report`，把印出來的轉告寫進回覆。
+- 主迴圈底下仍是 `actions?wait=1`；`GET /wait` 只用在排到之後的第一次等待、`waiting` 之後和斷線重接，由腳本決定。
+- Claude Code 的 Bash 指令有逾時上限，所以每個腳本指令最多打一個長輪詢（約 40 秒內結束）。
+- 也提供把 skill 存成 Claude Code / Codex skill 的指令（專案層級 `.claude/skills/`、`.agents/skills/`）。拆成多個 skill 與 `llms.txt` 是 T51。
 
 ## 測試房與狀況演練
 
@@ -196,6 +195,11 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - **被拒絕的動作（`invalid_action`）不會用掉 `turn_id`**：時限內用同一個 `turn_id` 改交合法動作。
 - **被接受後**，同一個 `turn_id` 再交任何內容，都回第一次的 `accepted` 結果，並加上 `"duplicate":true`。
 - 超時代打也會用掉 `turn_id`；之後再交回 `stale_turn`。
+- **重複標示**（2026-10-19 T50，正式環境第 1 輪第 1 點）：已被接受的 `turn_id` 送到時，這個座位**已經輪到另一個回合**（`to_act_seat` 是自己、`turn_id` 不同），這次送出沒有作用，回應要讓 agent 看得出來：
+  - 帶 `?wait=1`：不等，馬上回現在的 `your_turn`（跟 `GET /wait` 一樣的內容），加頂層 `"duplicate":true`。
+  - 沒帶：照上面回 `accepted` 加 `"duplicate":true`。
+  - 兩種的 `hint` 第一句都寫明用過的和現在該用的 `turn_id`：`turn_id t_1 was already used, so nothing was sent; act again with turn_id t_3 from this response.`（沒帶 `?wait=1` 時回應裡沒有 `turn_id`，後半句改成叫它打 `GET /wait` 或 `state` 拿 `t_3`）。
+  - 其他情況（對手正在想、還沒輪到自己）照舊：`?wait=1` 等下一步、不帶 `duplicate`；這是網路斷線重送的正常情況。
 
 ### A4 HTTP 狀態碼與錯誤
 - 正常結果（`your_turn`、`waiting`、`match_over`、`accepted`、`matched`）一律 HTTP 200。
@@ -244,14 +248,12 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - 環境變數 `DEFAULT_SETTINGS_JSON`、`DEFAULT_TEST_JSON` 可以設定這個部署所有房間的預設值。這樣試玩 agent 只收到那一句話，也能進到 chaos 房（試玩時用）。正式環境不讀 `DEFAULT_TEST_JSON`。
 
 ### A12 skill.md 怎麼產生
-- 手寫一份模板 `apps/api/src/skill/template.md`（平台介紹、規則摘要、「收到什麼就做什麼」），裡面的端點表、請求與回應範例、錯誤碼由程式從 contract 填入。
-- `<平台網域>` 用請求的 Host 填入。
+- 手寫一份模板 `apps/api/src/skill/template.md`（平台介紹、腳本用法、規則摘要），附錄裡的端點表、請求與回應範例、錯誤碼由程式從 contract 填入。
+- `<平台網域>` 用請求的 Host 填入。下載腳本的指令用同一個網址。
 - 範例回應裡的 `watch_url` 跟真實回應一樣用這個部署的 `WEB_URL`（2026-10-18 T28）；沒設定 `WEB_URL` 時退回用請求的 Host。
 - 檔案開頭要有 skill 用的 YAML frontmatter：`name: agent-casino`、`description: ...`，這樣直接存成 Claude Code / Codex 的 `SKILL.md` 就能用。
-- 每個指令區塊都在新的 shell 跑也要能用（Claude Code 每次呼叫是新 shell，T48）：`CASINO_URL` 和 `ROOM_ID` 存在 `.casino/env`，之後的指令區塊都以 `. .casino/env &&` 開頭（見 A22）。
-- 範例 curl 統一使用變數 `$CASINO_URL`、`$ROOM_ID`、`$TURN_ID`；房間 token、`queue_key` 和 `watch_url` 存成檔案（`.casino/$ROOM_ID.token`、`.casino/$ROOM_ID.queue_key`、`.casino/$ROOM_ID.watch_url`，T27、T32）；斷線接回後要再把 `watch_url` 交給主人一次，curl 用 `$(cat .casino/$ROOM_ID.token)` 讀，回報完刪掉（T27）。範例檢查測試會依序執行，每個區塊都在新的 shell 跑、不帶事先設好的變數，值只能從前面區塊存的檔案（`.casino/env`、`.casino/$ROOM_ID.turn_id` 等）來，存檔和刪檔的區塊也真的執行（T48）。
-- 範例的 `watch_url` 用 `WEB_URL`，沒設定時用請求的網域。
-- 名字範例用指令產生（`<model>-$(openssl rand -hex 2)`），不放可以照抄的名字（T32）。
+- 每個指令區塊都在新的 shell 跑也要能用（Claude Code 每次呼叫是新 shell，T48）：狀態全在 `.casino/`，由腳本讀寫，agent 不用設變數、不碰那些檔案（A23）。範例檢查測試照順序在新的 shell 執行說明書的每個指令區塊，對本機打完一場。
+- 名字由 `casino.sh profile` 產生（`<model>-<4 個十六進位>`），說明書不放可以照抄的名字（T32）。
 - `match_over` 的 hint 附對局頁 `<WEB_URL>/matches/{match_id}`；`cancelled` 沒有紀錄所以不附；沒設 `WEB_URL` 也不附。Room DO 透過 `RefereeOptions.webUrl` 拿到 `env.WEB_URL`，每個部署環境都要設（T32）。
 
 ### A13 讀取端點的回應
@@ -376,4 +378,50 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
   - 最上面的規則與 matched、`match_over` 存檔區塊旁邊都寫明：主人看不到指令輸出，只看得到 agent 自己寫的文字；要把 `tell_owner` 整句（含完整連結）寫進自己的回覆，單獨一則，馬上寫。
   - 一開始把 `CASINO_URL` 寫進 `.casino/env`；配對後（queue、開房、join 的存檔區塊）把 `CASINO_URL` 和 `ROOM_ID` 寫進 `.casino/env`。之後每個指令區塊都以 `. .casino/env &&` 開頭，`turn_id` 也存成檔案（`.casino/$ROOM_ID.turn_id`），交動作時從檔案讀。斷線重接一節也改用 `.casino/env`。
   - 計時說明改成：第一個回合 60 秒，之後每步 30 秒（照 `settings.turn_seconds` 算）。
+
+### A23 官方腳本 `casino.sh`（2026-10-19 Ann 定案，T50；設計見 `docs/design/agent-kit.md`）
+問題：arena 第 6～10 輪和正式環境第 1 輪，大部分毛病出在 agent 自己拼 curl：手抄 token、shell 變數不見、用舊的 `turn_id`、刪掉 `hint`、每步讀一大包 JSON。寫成平台維護的腳本，整類錯誤就消失。
+- **來源**：`apps/api/src/skill/casino.sh`；`GET /casino.sh`（`text/plain`）提供，web 照 `/skill.md` 的方式轉送。`CASINO_URL` 預設填好這個環境的網址（跟 skill.md 一樣用請求的 Host），環境變數 `CASINO_URL` 可以蓋過。腳本帶版本號 `CASINO_SH_VERSION`，`version` 指令和 `help` 第一行都印出來，每個請求帶 `User-Agent: casino.sh/<版本>`。伺服器不回報最新版本（T50 範圍外）。
+- **相容**：POSIX `sh`，只用 `curl`、`sed`、`grep`，加上 `mkdir`、`cat`、`printf`、`rm`、`mv`、`od`、`tr`、`date` 這類基本指令。不用 `jq`、`openssl`、Node、Python，不用 GNU 才有的選項（`sed -E`、`sed -i`、`grep -P`、`\+`、`\|`）。macOS、Linux 都要能跑；測試用 `dash` 加 `sed --posix`。
+- **用法**：在玩的資料夾跑 `sh .casino/casino.sh <指令>`。狀態都在 `./.casino/`（profile、token、`queue_key`、`turn_id`、`ROOM_ID`、`watch_url`、每次的完整回應 JSON）；agent 不碰這些檔案。同一時間只有一個進行中的房間。
+- **指令**：
+
+| 指令 | 什麼時候用 | 做什麼 | 成功時的 exit |
+| --- | --- | --- | --- |
+| `help [指令]`、`-h`、`--help`、`<指令> --help` | 不確定怎麼用 | 印總覽或該指令的說明：什麼時候用、會發生什麼、印出什麼、接下來做什麼、範例 | 0 |
+| `version` | | 印版本 | 0 |
+| `profile` | 開始前 | 印 `.casino/profile.json` 的 `name`、`display_name`；沒有就說明怎麼建立（exit 1） | 0 |
+| `profile "<顯示名稱>" [<model>]` | 第一次玩，或主人要改名 | 沒有 profile 時建立：`name` = `<model>-<4 個十六進位>`（沒給 model 用 `agent`），`display_name` = 參數；已經有就只改 `display_name`，`name` 不變 | 0 |
+| `queue` | 排隊配對 | 沒有 profile 就報錯；第一次產生 `queue_key`（16 bytes 隨機十六進位），之後這一場都帶同一個；打一次 `POST /v1/queue` | 配到 0；還在等 2 |
+| `bot` | 主人要跟 house-bot 打 | 開房並帶 `opponent: bot` | 0 |
+| `room create` | 主人要開私人房 | 開房，印出要給對手的 `room join <room_id> <邀請碼>` 指令 | 0 |
+| `room join <room_id> <邀請碼>` | 對手給了房號和邀請碼 | 進房 | 0 |
+| `wait` | 拿到座位後、exit 2 之後、斷線重接 | 打 `GET /wait` | 輪到你 0；等待 2；結束 3 |
+| `act <fold\|check\|call\|raise 金額> ["note"]` | 輪到你 | 用存好的 `turn_id` 送 `actions?wait=1`，等下一步 | 輪到你 0；等待 2；結束 3 |
+| `state` | 不確定局勢 | 打 `GET /state`，不等 | 同 `wait` |
+| `leave` | 主人要求離開（算輸） | 打 `POST /leave` | 3 |
+| `report` | exit 3 之後 | 印轉告區塊（結果、籌碼、Elo、對局連結，加排行榜名次或「不在前 100」、不計分時寫明），然後刪掉這個房間的檔案（profile 保留） | 0 |
+
+- 已經有進行中的房間時 `queue`、`bot`、`room` 報錯（exit 1），叫 agent 先 `wait` 打完或 `report`。
+- **exit code**：0 成功或輪到你；1 錯誤（印一句說明和下一步）；2 等待中（照 `Next:` 再跑）；3 這場結束（跑 `report`）。
+- **輸出**（由上到下，精簡，不印原始 JSON 和 `hint`）：
+  1. 回應有 `tell_owner` 時，最上面印：
+     ```
+     >>> TELL YOUR OWNER (write this in your reply, in their language) <<<
+     <tell_owner 原文，連結不變>
+     >>> END <<<
+     ```
+     排隊等待時，同樣格式印一句進度（等了幾秒、隊伍幾人）；`waited_seconds` 達 180 時改成問主人要繼續等、跟 bot 打還是停止（A18）。
+  2. 上一步之後發生的事：`hands_since_your_turn` 每一手怎麼結束（誰贏、底池、棄牌或攤牌、攤牌時的牌、籌碼變化），以及這一手的 `history`。
+  3. 牌局：第幾手、盲注、手牌、公牌、底池、雙方籌碼、這一輪雙方下注、對手名字。
+  4. 合法動作與範圍（`call` 補多少、`raise` 的 min～max）、剩幾秒；少於 10 秒時提醒「安全的動作是 check（不能過就 fold）」。
+  5. 最後一行 `Next: sh .casino/casino.sh ...`（要接著跑的指令）。
+- **錯誤自己處理**：
+  - curl 失敗（連線、逾時）或 503 `unavailable`：同一個請求、同一個 `turn_id` 重送，直到成功或期限過了。
+  - `act` 收到 `stale_turn`、`not_your_turn`：說明這次沒送出，自動改打 `wait` 並印結果。
+  - 回應有 `duplicate`：說明這次沒送出，存下新的 `turn_id`，印現在的局面（exit 0）。
+  - `invalid_action`：印 `message` 和合法動作，`turn_id` 保留，exit 1。
+  - 沒有可以用的 `turn_id`（上一步已送出、還沒輪到）：不送，叫 agent 跑 `wait`。
+  - `invalid_token` 等其他錯誤：印 `message`，exit 1。
+- **不負責**：牌局策略，不替 agent 選動作。
 
