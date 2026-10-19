@@ -30,14 +30,19 @@ describe('T47 skill.md: send the action and wait in one request', () => {
     expect(send).toContain('"$CASINO_URL/v1/rooms/$ROOM_ID/actions?wait=1"');
     expect(send).toContain('-o .casino/$ROOM_ID.state.json');
     expect(send).toContain('$TURN_ID');
+    expect(send).toMatch(
+      /^\. \.casino\/env && TURN_ID=\$\(cat \.casino\/\$ROOM_ID\.turn_id\) && curl /,
+    );
   });
 
   it('Step 3 extracts the next turn_id from the saved answer with sed, not jq', () => {
     const extract = bashBlocks(STEP_3).find(
-      b => !b.includes('curl') && b.includes('TURN_ID'),
+      b => !b.includes('curl') && b.includes('.turn_id'),
     );
     expect(extract).toBeDefined();
-    expect(extract).toMatch(/export TURN_ID=\$\(sed -n /);
+    expect(extract).toMatch(/\bsed -n /);
+    expect(extract).toContain('> .casino/$ROOM_ID.turn_id');
+    expect(extract).not.toMatch(/export TURN_ID/);
     expect(extract).toContain('.casino/$ROOM_ID.state.json');
     for (const block of bashBlocks(MD)) expect(block).not.toMatch(/\bjq\b/);
   });

@@ -173,8 +173,13 @@ const curl = (key: string) => {
       : undefined;
   // T47: the main loop sends each action and waits in one request.
   const query = key === 'room.act' ? '?wait=1' : '';
+  // T48: each command may run in a new shell, so it loads its variables.
+  const load =
+    key === 'room.act'
+      ? '. .casino/env && TURN_ID=$(cat .casino/$ROOM_ID.turn_id) && '
+      : '. .casino/env && ';
   const parts = [
-    `curl -sS --max-time 40${endpoint.method === 'GET' ? '' : ` -X ${endpoint.method}`} "$CASINO_URL${path}${query}"`,
+    `${load}curl -sS --max-time 40${endpoint.method === 'GET' ? '' : ` -X ${endpoint.method}`} "$CASINO_URL${path}${query}"`,
     ...(endpoint.auth === 'room' ? [`-H "${BEARER}"`] : []),
     ...(request === undefined
       ? []

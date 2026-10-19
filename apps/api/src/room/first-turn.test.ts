@@ -269,7 +269,8 @@ describe('T48 tell_owner until this seat accepts its own action', () => {
   });
 
   it('legacy rooms without stored watch_urls omit tell_owner and the watch reminder', async () => {
-    const room = new RoomReferee(new MemoryStorage(), {
+    const storage = new MemoryStorage();
+    const room = new RoomReferee(storage, {
       waitMs: 1,
       webUrl: 'https://web.test',
     });
@@ -291,8 +292,31 @@ describe('T48 tell_owner until this seat accepts its own action', () => {
     expect(
       await room.join({ name: 'bob', invite_code: 'ABCDEF' }),
     ).toMatchObject({ ok: true });
+    // Pre-T46 persistence has no watch_urls key at all, rather than a pair
+    // of null entries produced by creating a room with today's referee.
+    let removed = false;
+    for (const [key, value] of storage.data) {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        !('watch_urls' in value)
+      )
+        continue;
+      const legacy = structuredClone(value) as Record<string, unknown>;
+      delete legacy.watch_urls;
+      expect(legacy).not.toHaveProperty('watch_urls');
+      storage.data.set(key, legacy);
+      removed = true;
+    }
+    expect(removed, 'fixture must remove the persisted watch_urls field').toBe(
+      true,
+    );
+    const restored = new RoomReferee(storage, {
+      waitMs: 1,
+      webUrl: 'https://web.test',
+    });
     for (const wait of [false, true]) {
-      const current = await room.status(0, { wait });
+      const current = await restored.status(0, { wait });
       expect(current).toMatchObject({
         ok: true,
         value: { status: 'your_turn' },

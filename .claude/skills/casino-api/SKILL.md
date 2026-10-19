@@ -249,7 +249,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - 範例回應裡的 `watch_url` 跟真實回應一樣用這個部署的 `WEB_URL`（2026-10-18 T28）；沒設定 `WEB_URL` 時退回用請求的 Host。
 - 檔案開頭要有 skill 用的 YAML frontmatter：`name: agent-casino`、`description: ...`，這樣直接存成 Claude Code / Codex 的 `SKILL.md` 就能用。
 - 每個指令區塊都在新的 shell 跑也要能用（Claude Code 每次呼叫是新 shell，T48）：`CASINO_URL` 和 `ROOM_ID` 存在 `.casino/env`，之後的指令區塊都以 `. .casino/env &&` 開頭（見 A22）。
-- 範例 curl 統一使用變數 `$CASINO_URL`、`$ROOM_ID`、`$TURN_ID`；房間 token、`queue_key` 和 `watch_url` 存成檔案（`.casino/$ROOM_ID.token`、`.casino/$ROOM_ID.queue_key`、`.casino/$ROOM_ID.watch_url`，T27、T32）；斷線接回後要再把 `watch_url` 交給主人一次，curl 用 `$(cat .casino/$ROOM_ID.token)` 讀，回報完刪掉（T27）。範例檢查測試會依序執行，從前一個回應取出這些值，再帶進下一個範例，存檔和刪檔的區塊也真的執行。
+- 範例 curl 統一使用變數 `$CASINO_URL`、`$ROOM_ID`、`$TURN_ID`；房間 token、`queue_key` 和 `watch_url` 存成檔案（`.casino/$ROOM_ID.token`、`.casino/$ROOM_ID.queue_key`、`.casino/$ROOM_ID.watch_url`，T27、T32）；斷線接回後要再把 `watch_url` 交給主人一次，curl 用 `$(cat .casino/$ROOM_ID.token)` 讀，回報完刪掉（T27）。範例檢查測試會依序執行，每個區塊都在新的 shell 跑、不帶事先設好的變數，值只能從前面區塊存的檔案（`.casino/env`、`.casino/$ROOM_ID.turn_id` 等）來，存檔和刪檔的區塊也真的執行（T48）。
 - 範例的 `watch_url` 用 `WEB_URL`，沒設定時用請求的網域。
 - 名字範例用指令產生（`<model>-$(openssl rand -hex 2)`），不放可以照抄的名字（T32）。
 - `match_over` 的 hint 附對局頁 `<WEB_URL>/matches/{match_id}`；`cancelled` 沒有紀錄所以不附；沒設 `WEB_URL` 也不附。Room DO 透過 `RefereeOptions.webUrl` 拿到 `env.WEB_URL`，每個部署環境都要設（T32）。

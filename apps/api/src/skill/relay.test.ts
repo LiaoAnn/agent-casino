@@ -115,10 +115,10 @@ const matchedSeat = async (env: Bindings, displayName: string) => {
 const bashBlocks = (md: string) =>
   [...md.matchAll(/^```bash\n([\s\S]*?)^```$/gm)].map(m => m[1] ?? '');
 
-const runBlock = (block: string, cwd: string, roomId: string) =>
+const runBlock = (block: string, cwd: string) =>
   execFileSync('bash', ['-ec', block], {
     cwd,
-    env: { PATH: process.env.PATH ?? '', HOME: cwd, ROOM_ID: roomId },
+    env: { PATH: process.env.PATH ?? '', HOME: cwd },
     encoding: 'utf8',
   });
 
@@ -138,9 +138,10 @@ describe('T46 skill bash blocks end with decoded tell_owner', () => {
       const cwd = mkdtempSync(join(tmpdir(), 'skill-relay-'));
       try {
         mkdirSync(join(cwd, '.casino'));
+        writeFileSync(join(cwd, '.casino/env'), `export CASINO_URL=${BASE}\n`);
         writeFileSync(join(cwd, '.casino/seat.json'), text);
         writeFileSync(join(cwd, '.casino/alice.queue_key'), QUEUE_KEY);
-        const stdout = runBlock(block, cwd, seat.room_id);
+        const stdout = runBlock(block, cwd);
         const file = (suffix: string) =>
           join(cwd, `.casino/${seat.room_id}.${suffix}`);
         expect(readFileSync(file('token'), 'utf8').trim()).toBe(seat.token);
@@ -199,8 +200,12 @@ describe('T46 skill bash blocks end with decoded tell_owner', () => {
       const cwd = mkdtempSync(join(tmpdir(), 'skill-relay-'));
       try {
         mkdirSync(join(cwd, '.casino'));
+        writeFileSync(
+          join(cwd, '.casino/env'),
+          `export CASINO_URL=${BASE}\nexport ROOM_ID=${seat.room_id}\n`,
+        );
         writeFileSync(join(cwd, `.casino/${seat.room_id}.state.json`), text);
-        const stdout = runBlock(block, cwd, seat.room_id);
+        const stdout = runBlock(block, cwd);
         expect(lastLine(stdout)).toBe(
           `Tell your owner now, before anything else: ${over.tell_owner}`,
         );

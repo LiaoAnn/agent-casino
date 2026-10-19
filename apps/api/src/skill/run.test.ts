@@ -3,8 +3,9 @@
 // they would for an agent; `curl` is a shell function that hands its argv
 // back here, where it becomes a Request to the Worker's handle() with real
 // referees, the real queue and a real local D1. Each response must decode
-// with its endpoint's schemas, and $ROOM_ID and $TURN_ID come from the
-// responses before, as A12 says. Blocks without curl run for real in a fresh
+// with its endpoint's schemas. Every block starts a fresh shell with only
+// PATH and HOME: game state must come from .casino/ (T48 / A12).
+// Blocks without curl run for real in a fresh
 // folder: they make the queue_key file (A17) and save and delete the room's
 // token file (T27), so the curls read the token the way an agent's would.
 import { execFileSync } from 'node:child_process';
@@ -128,13 +129,13 @@ const bashBlocks = (md: string) =>
   [...md.matchAll(/^```bash\n([\s\S]*?)^```$/gm)].map(m => m[1] ?? '');
 
 // The argv of every curl the block ran, through a real bash.
-const curlsOf = (block: string, vars: Record<string, string>): string[][] => {
+const curlsOf = (block: string): string[][] => {
   const out = execFileSync(
     'bash',
-    ['-c', `curl() { printf '%s\\0' "$@"; printf '\\n\\0'; }\n${block}`],
+    ['-ec', `curl() { printf '%s\\0' "$@"; printf '\\n\\0'; }\n${block}`],
     {
       cwd,
-      env: { PATH: process.env.PATH ?? '', HOME: cwd, ...vars },
+      env: { PATH: process.env.PATH ?? '', HOME: cwd },
     },
   ).toString();
   return out
@@ -144,10 +145,10 @@ const curlsOf = (block: string, vars: Record<string, string>): string[][] => {
 };
 
 // A block without curl, run with `set -e` so a failing line fails the test.
-const runBlock = (block: string, vars: Record<string, string>) =>
+const runBlock = (block: string) =>
   execFileSync('bash', ['-ec', block], {
     cwd,
-    env: { PATH: process.env.PATH ?? '', HOME: cwd, ...vars },
+    env: { PATH: process.env.PATH ?? '', HOME: cwd },
   });
 
 const casinoFiles = () => readdirSync(join(cwd, '.casino')).sort();
@@ -169,6 +170,10 @@ const requestOf = (argv: string[]) => {
     else if (!arg.startsWith('-')) url = arg;
   }
   if (body !== undefined && method === 'GET') method = 'POST';
+  expect(
+    url,
+    'curl must restore CASINO_URL from .casino/env in its own shell',
+  ).toMatch(/^https?:\/\//);
   return new Request(url, { method, headers, body });
 };
 
@@ -182,7 +187,6 @@ describe('skill.md examples, run against the API', () => {
   it('every curl runs as written and answers what the contract says', async () => {
     const env = makeEnv();
     const md = renderSkill(BASE, WEB_URL);
-    const vars: Record<string, string> = { CASINO_URL: BASE };
     const ran: Ran[] = [];
     const tokens: string[] = [];
     let invite = '';
@@ -215,13 +219,29 @@ describe('skill.md examples, run against the API', () => {
     );
     expect(await bobQueues.json()).toMatchObject({ status: 'waiting' });
 
-    for (const block of bashBlocks(md)) {
+    for (const example of bashBlocks(md)) {
+      // The inviter supplies these two example values; no shell state is
+      // supplied by the harness, including for the pre-join env save block.
+      const block = example
+        .replaceAll(EXAMPLE_INVITE, invite || EXAMPLE_INVITE)
+        .replaceAll('r_8f2k1x9q0a', creator?.room ?? 'r_8f2k1x9q0a');
       if (!block.includes('curl')) {
         const script =
           seat && /ROOM_ID=[^\n]*sed/.test(block)
             ? `${block}\ntest "$ROOM_ID" = '${seat.room}'`
             : block;
-        runBlock(script, vars);
+        runBlock(script);
+        if (block.includes('> .casino/$ROOM_ID.turn_id') && seat) {
+          const state = JSON.parse(
+            readFileSync(join(cwd, `.casino/${seat.room}.state.json`), 'utf8'),
+          ) as { turn_id?: string };
+          expect(
+            readFileSync(
+              join(cwd, `.casino/${seat.room}.turn_id`),
+              'utf8',
+            ).trim(),
+          ).toBe(state.turn_id ?? '');
+        }
         if (block.includes('openssl rand -hex 16')) {
           queueKey = readFileSync(
             join(cwd, '.casino/alice.queue_key'),
@@ -230,6 +250,18 @@ describe('skill.md examples, run against the API', () => {
           expect(queueKey).toMatch(QUEUE_KEY_PATTERN);
         }
         if (block.includes('> .casino/$ROOM_ID.token') && seat) {
+          expect(
+            runBlock(
+              '. .casino/env && printf "%s\\n%s\\n" "$CASINO_URL" "$ROOM_ID"',
+            ).toString(),
+          ).toBe(`${BASE}\n${seat.room}\n`);
+          expect(
+            readFileSync(join(cwd, '.casino/env'), 'utf8')
+              .trim()
+              .split('\n')
+              .map(line => line.match(/^export (CASINO_URL|ROOM_ID)=/)?.[1])
+              .sort(),
+          ).toEqual(['CASINO_URL', 'ROOM_ID']);
           const files = casinoFiles();
           expect(
             JSON.parse(
@@ -287,8 +319,7 @@ describe('skill.md examples, run against the API', () => {
         }
         continue;
       }
-      const script = block.replaceAll(EXAMPLE_INVITE, invite || EXAMPLE_INVITE);
-      for (const argv of curlsOf(script, vars)) {
+      for (const argv of curlsOf(block)) {
         const request = requestOf(argv);
         const url = new URL(request.url);
         expect(url.origin).toBe(BASE);
@@ -329,7 +360,10 @@ describe('skill.md examples, run against the API', () => {
             amount: number;
           };
           expect(action).toMatchObject({
-            turn_id: vars.TURN_ID,
+            turn_id: readFileSync(
+              join(cwd, `.casino/${url.pathname.split('/')[3]}.turn_id`),
+              'utf8',
+            ).trim(),
             type: 'raise',
             amount: expect.any(Number),
           });
@@ -379,7 +413,7 @@ describe('skill.md examples, run against the API', () => {
           // The story ends via leave; Step 4 reads the final response saved
           // by the wait loop, just as it would after a normally played match.
           const finalResponse = await handle(
-            new Request(`${BASE}/v1/rooms/${vars.ROOM_ID}/wait`, {
+            new Request(`${BASE}${url.pathname.replace(/\/leave$/, '/wait')}`, {
               headers: {
                 Authorization: request.headers.get('Authorization') ?? '',
               },
@@ -390,7 +424,7 @@ describe('skill.md examples, run against the API', () => {
           const finalText = await finalResponse.text();
           expect(JSON.parse(finalText)).toMatchObject({ status: 'match_over' });
           writeFileSync(
-            join(cwd, `.casino/${vars.ROOM_ID}.state.json`),
+            join(cwd, `.casino/${url.pathname.split('/')[3]}.state.json`),
             finalText,
           );
         }
@@ -405,7 +439,6 @@ describe('skill.md examples, run against the API', () => {
             token: String(value.token),
             watchUrl: String(value.watch_url),
           };
-          vars.ROOM_ID = seat.room;
         }
         if (endpoint.key === 'lobby.createRoom') {
           expect(value.seat).toBe(0);
@@ -418,7 +451,6 @@ describe('skill.md examples, run against the API', () => {
           joined = true;
         }
         if (typeof value.token === 'string') tokens.push(value.token);
-        if (typeof value.turn_id === 'string') vars.TURN_ID = value.turn_id;
       }
     }
 
@@ -445,6 +477,7 @@ describe('skill.md examples, run against the API', () => {
     // queue match she never played still has its own.
     // The profile outlives every room's files (A20).
     expect(casinoFiles()).toEqual([
+      'env',
       'profile.json',
       `${matchedRoom}.queue_key`,
       `${matchedRoom}.seat.json`,
