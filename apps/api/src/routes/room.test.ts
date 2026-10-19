@@ -200,7 +200,7 @@ const expectError = async (
 const decodeCreate = Schema.decodeUnknownSync(CreateRoomResponse);
 
 describe('T43 copy-ready start messages over HTTP', () => {
-  it('omits tell_owner until a waiting room has an opponent, then gives the joining seat the exact watch URL', async () => {
+  it('omits tell_owner while waiting, then gives the joining seat and the creator before their first action their own watch URLs', async () => {
     const { env } = makeEnv({ waitMs: 1 });
     const response = await post(env, '/v1/rooms', {
       game: 'holdem',
@@ -241,7 +241,10 @@ describe('T43 copy-ready start messages over HTTP', () => {
         room.token,
       );
       const turnBody = await turn.json();
-      expect(turnBody).not.toHaveProperty('tell_owner');
+      expect(turnBody).toHaveProperty(
+        'tell_owner',
+        `Playing against Bob the Owl. Watch: ${room.watch_url}`,
+      );
       expect.soft(turnBody).toHaveProperty('hands_since_your_turn', []);
     }
   });
@@ -642,7 +645,7 @@ describe('room settings', () => {
     const { status } = await state(t.env, room.room_id, room.token);
     expect(status.status).toBe('your_turn');
     if (status.status === 'your_turn') {
-      expect(Date.parse(status.deadline)).toBe(joinedAt + 30_000);
+      expect(Date.parse(status.deadline)).toBe(joinedAt + 60_000);
     }
   });
 
@@ -662,7 +665,7 @@ describe('room settings', () => {
     expect(status.view).toMatchObject({ my_stack: 99, opponent_stack: 98 });
     expect(status.status).toBe('your_turn');
     if (status.status === 'your_turn') {
-      expect(Date.parse(status.deadline)).toBe(joinedAt + 30_000);
+      expect(Date.parse(status.deadline)).toBe(joinedAt + 60_000);
     }
   });
 
@@ -886,7 +889,7 @@ describe('hand 1 after the join', () => {
     );
   });
 
-  it('the deadline is the turn start + turn_seconds, not moved by later calls', async () => {
+  it('the first deadline is the turn start + 2 × turn_seconds, not moved by later calls', async () => {
     const t = makeEnv();
     const room = await createRoom(t.env, { settings: { turn_seconds: 45 } });
     const joinedAt = t.clock.ms;
@@ -898,7 +901,7 @@ describe('hand 1 after the join', () => {
     expect(status.deadline).toMatch(
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/,
     );
-    expect(Date.parse(status.deadline)).toBe(joinedAt + 45_000);
+    expect(Date.parse(status.deadline)).toBe(joinedAt + 90_000);
   });
 
   it('your_turn hint names POST /v1/rooms/<room_id>/actions and turn_id', async () => {
@@ -1184,7 +1187,7 @@ describe('POST /v1/rooms/{room_id}/actions: accepted', () => {
     });
   });
 
-  it("the opponent's deadline is the time of the action + turn_seconds", async () => {
+  it("the opponent's first deadline is the time of the action + 2 × turn_seconds", async () => {
     const t = makeEnv({ allowTestRooms: true });
     const { roomId, tokens } = await seededRoom(t, { turn_seconds: 20 });
     const first = await yourTurn(t.env, roomId, tokens[0]);
@@ -1196,7 +1199,7 @@ describe('POST /v1/rooms/{room_id}/actions: accepted', () => {
     });
     t.clock.ms += 3_000;
     const bob = await yourTurn(t.env, roomId, tokens[1]);
-    expect(Date.parse(bob.deadline)).toBe(actedAt + 20_000);
+    expect(Date.parse(bob.deadline)).toBe(actedAt + 40_000);
   });
 
   it('a raise uses amount as the street total and shows in history', async () => {
@@ -3095,7 +3098,7 @@ describe('T46 first assigned turn watch link reminder over HTTP', () => {
         });
       }
       // Requests advance the injected clock's due timeout, as in timeouts.test.ts.
-      t.clock.ms += 10_000;
+      t.clock.ms += 20_000;
       if (seat === 0) {
         const nextHand = await yourTurn(t.env, room.room_id, joined.token);
         expect(nextHand.hand_number).toBe(2);

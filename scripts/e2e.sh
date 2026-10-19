@@ -59,14 +59,17 @@ post() {
 # ?wait=1, whose answer is the next state (T47); with two-step, the old way:
 # actions answers accepted, then wait.
 play() {
-  local room=$1 token=$2 out=$3 mode=${4-} r="" status turn type
+  local room=$1 token=$2 out=$3 mode=${4-} r="" status turn type acted=false
   for _ in $(seq 1 2000); do
     [[ -n $r ]] || r=$(get "/v1/rooms/$room/wait" -H "Authorization: Bearer $token")
     status=$(jq -r .status <<<"$r")
     case $status in
       your_turn)
-        check "your_turn includes completed hands, no owner message, and points to actions?wait=1" \
-          '(.hands_since_your_turn | type) == "array" and (has("tell_owner") | not)
+        # T48: tell_owner (the watch link) until the seat's first action.
+        check "your_turn includes completed hands, the owner message only before the first action, and points to actions?wait=1" \
+          '(.hands_since_your_turn | type) == "array"
+           and (if '"$acted"' then (has("tell_owner") | not)
+             else (.tell_owner | type == "string" and contains("Watch: ")) end)
            and (.hint | contains("/actions?wait=1"))
            and ([.hands_since_your_turn[].hand_number] | . == sort)' "$r"
         turn=$(jq -r .turn_id <<<"$r")
@@ -81,6 +84,7 @@ play() {
             return 1
           }
           r=""
+          acted=true
         else
           r=$(post "/v1/rooms/$room/actions?wait=1" \
             "{\"turn_id\":\"$turn\",\"type\":\"$type\"}" \
@@ -89,6 +93,7 @@ play() {
             echo "$r" >&2
             return 1
           }
+          acted=true
         fi
         ;;
       waiting)

@@ -817,7 +817,7 @@ describe('GET /v1/rooms/{room_id}/watch during play', () => {
       hands: [],
     });
     expect(Date.parse(first.watch.deadline as string)).toBe(
-      started + SETTINGS_DEFAULTS.turn_seconds * 1000,
+      started + 2 * SETTINGS_DEFAULTS.turn_seconds * 1000,
     );
     const second = await watchOf(rig.t.env, rig.roomId, rig.watchTokens[1]);
     expect(second.watch).toMatchObject({
@@ -1177,7 +1177,7 @@ describe('note on POST /actions (A16)', () => {
 
   it('is missing from a step played by the timeout', async () => {
     const rig = await openRig({ turn_seconds: 20 });
-    rig.t.clock.ms += 21_000;
+    rig.t.clock.ms += 41_000;
     // Any request plays the timeout that is due.
     await state(rig.t.env, rig.roomId, rig.tokens[1]);
     const { watch, json } = await watchOf(

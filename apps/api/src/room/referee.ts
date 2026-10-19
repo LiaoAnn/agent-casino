@@ -839,7 +839,7 @@ export class RoomReferee {
       const bot = turn.seat === 1 && next.names[1] === HOUSE_BOT;
       const atOnce = bot || next.absent[turn.seat];
       const at = atOnce
-        ? turn.deadline - next.settings.turn_seconds * 1000
+        ? turn.deadline - turnMs(next, turn.seat)
         : turn.deadline;
       if (!atOnce && this.#now() < turn.deadline) break;
       const legal = legalActions(match);
@@ -1042,11 +1042,20 @@ export class RoomReferee {
       turn: {
         id: `t_${count}`,
         seat,
-        deadline: at + data.settings.turn_seconds * 1000,
+        deadline: at + turnMs(data, seat),
       },
     };
   }
 }
+
+// How long `seat`'s turn lasts: twice turn_seconds for its first turn of
+// the match, whoever ended it (A22), else turn_seconds.
+const turnMs = (data: RoomData, seat: Seat): number => {
+  const hadTurn = Object.values(data.used_turns).some(
+    used => used.seat === seat,
+  );
+  return data.settings.turn_seconds * 1000 * (hadTurn ? 1 : 2);
+};
 
 // A played match that ended but is not stored yet. Rooms nobody joined are
 // never stored (A9).
@@ -1231,17 +1240,18 @@ function statusFor(
   };
   const [first, ...rest] = legalActions(match);
   if (turn && turn.seat === seat && first) {
-    // T46: until the seat's own first action is accepted, remind it to give
-    // its owner the watch link; the server can't tell whether it already has.
-    // Turns the server played for it don't count.
+    // T46, T48: until the seat's own first action is accepted, remind it to
+    // give its owner the watch link, in the hint and as tell_owner (A22); the
+    // server can't tell whether it already has. Turns the server played for
+    // it don't count.
     const watchUrl = data.watch_urls?.[seat];
     const hasActed = Object.values(data.used_turns).some(
       used => used.seat === seat && !used.timeout,
     );
-    const giveLink =
-      watchUrl && !hasActed
-        ? `. If you have not given your owner the watch link yet, give it now: ${watchUrl}`
-        : '';
+    const remind = watchUrl && !hasActed ? watchUrl : null;
+    const giveLink = remind
+      ? `. If you have not given your owner the watch link yet, give it now: ${remind}`
+      : '';
     return {
       status: 'your_turn',
       ...common,
@@ -1255,6 +1265,9 @@ function statusFor(
       last_hand: lastHandOut(seen.last_hand, answering),
       hands_since_your_turn: answering.hands[seat],
       hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to POST /v1/rooms/${data.room_id}/actions?wait=1. Write your note in your owner's language and script (Traditional and Simplified Chinese are different scripts)${giveLink}`,
+      ...(remind && {
+        tell_owner: `Playing against ${displayNames(data)[otherSeat(seat)]}. Watch: ${remind}`,
+      }),
     };
   }
   return {
@@ -1358,5 +1371,5 @@ function matchOverHint(
       : result === 'loss'
         ? 'you lost because you left'
         : 'you won because your opponent left';
-  return `The match is over and ${how}. Report the result to your owner, and see the rankings with GET /v1/leaderboard${see}`;
+  return `The match is over and ${how}. Report the result to your owner in their language and script (Traditional and Simplified Chinese are different scripts), and see the rankings with GET /v1/leaderboard${see}`;
 }

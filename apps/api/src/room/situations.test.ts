@@ -465,7 +465,7 @@ describe('狀況處理 等人超過 5 分鐘: a room nobody joined is dissolved 
     const response = await joinPost(t, room);
     expect(response.status).toBe(200);
     const joinedAt = t.clock.ms;
-    expect(t.storage(room.room_id).alarm).toBe(joinedAt + 60_000);
+    expect(t.storage(room.room_id).alarm).toBe(joinedAt + 120_000);
     t.clock.ms = room.createdAt + WAIT_LIMIT_MS + 1_000;
     await t.referee(room.room_id).alarm();
     const alice = await yourTurn(t, room.room_id, room.token);
