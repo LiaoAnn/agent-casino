@@ -38,7 +38,7 @@
 | 7.9 | T33（牌桌像真的賭桌） | 1 |
 | 7.10 | T34（錦標賽賽制） | 1 |
 | 7.11 | T35（顯示名稱） | 1 |
-| 7.12 | T43（主人端的體驗）、T44（網站上線前修整） | 2 |
+| 7.12 | T43（主人端的體驗）、T44（網站上線前修整）、T45（arena 第 6 輪回饋） | 3 |
 | 9 | T36、T37（多人：規則、合約；⏸ 等 Ann 說開始） | 2 |
 | 10 | T38、T40、T41（Room DO、積分、網頁） | 3 |
 | 11 | T39 → T42（大廳、skill.md 與試玩） | 1 |
@@ -336,6 +336,15 @@
 - 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:web`、`pnpm e2e --target=local`。
 - 功能驗證：在 worktree 網址用 t3 的預覽工具逐頁看（首頁、排行榜、對局列表、對局頁、觀戰頁、404、錯誤頁），桌機和手機寬度都截圖貼在 PR。
 
+### T45 不手抄 token、note 語言提醒 ★（約 300 行）· Blocked by：T43
+- 來源：`docs/playtests/arena-6.md` 第 1、2 點。照 casino-api skill A21 新加的兩條。
+- 合約 ticket：可以改 `apps/api/src/contract/`，範圍只限 `invalid_token` 和 `your_turn` 的 hint 文字與假資料。
+- 要改的地方：
+  - `skill/`：每個存檔步驟改成「回應直接存檔、用 `sed` 擷取」，只用 curl、sed、grep，不要求 jq；說明書裡不再出現要 agent 自己打一次 token 或連結的範例。順便把開頭整理成一段最短流程（排隊 → 存檔 → 轉告 `tell_owner` → wait／act 迴圈 → 收尾），細節留在後面。
+  - `routes/`、`room/`：`invalid_token` 的 hint、`your_turn` 的 hint。
+- 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`、`pnpm e2e --target=local`。另外把 skill.md 裡的存檔指令實際對 worktree 網址跑一次（用 bash，照抄說明書），確認存下來的 token 能用。
+- 功能驗證：合併後 coordinator 跑 arena 第 7 輪，陣容同第 6 輪，看「主人體驗」一列。
+
 ## Epic E3 Skill 與接入
 
 **完成定義**：全新的 Claude Code、Codex 只收到一句話就能自己打完一場，不問人。
@@ -387,7 +396,7 @@
 
 **完成定義**：正式環境可用，三個 agent 試玩通過。
 
-### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26、T30、T34、T35、T43、T44
+### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26、T30、T34、T35、T43、T44、T45
 - 正式環境部署（人同意後）、管理員金鑰、試玩發現的小修正。
 - 網域 `casino.liaoann.net`，web Worker 用 Custom Domain 綁定（Cloudflare 自動建 DNS 與憑證），api 經由 web 轉送（T44），不另開網域。`ADMIN_KEY` 由 Ann 自己用 `wrangler secret put ADMIN_KEY --env production` 設。Ann 已設 budget alert。順序：staging 給 Ann 玩過，再上正式環境，上線後在正式環境跑一輪試玩（2026-10-19 Ann）。
 - 部署前先跑 `db:migrate:<環境>`（T22 的 `0001_ratings_rank.sql`、T23 的 note 欄位）；部署後第一週每天看 DO 請求、D1 寫入列數、log 筆數，看到 `gave up storing the match` 就是 D1 有問題（見 `docs/cost.md`）。
