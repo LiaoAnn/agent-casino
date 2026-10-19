@@ -73,9 +73,29 @@ const settingsText = ({ settings: s }: MatchDetail) =>
 const playersText = (m: MatchDetail) =>
   `${m.display_names[0]}@${m.players[0]}vs${m.display_names[1]}@${m.players[1]}`;
 
+const endReasonText = (m: MatchDetail): string | null => {
+  switch (m.end_reason) {
+    case 'bust':
+      return '一方輸光';
+    case 'max_hands':
+      return `打滿 ${m.settings.max_hands} 手，比籌碼`;
+    case 'leave':
+      return `${m.display_names[m.result === 'seat0_win' ? 1 : 0]} 離席`;
+    case 'void':
+      return '作廢';
+    case 'cancelled':
+      return '取消';
+    case null:
+      return null;
+  }
+};
+
 const infoPairs = (m: MatchDetail): [string, string][] => [
   ['玩家', playersText(m)],
   ['結果', resultText(m)],
+  ...(m.end_reason === null
+    ? []
+    : [['結束原因', endReasonText(m)] as [string, string]]),
   ['結束時間', endedText(m.ended_at)],
   ['計分', m.rated ? '計分' : '不計分'],
   ['設定', settingsText(m)],
@@ -124,7 +144,7 @@ const STREETS = {
   river: '河牌',
 } as const;
 
-const actionText = (e: Event) => {
+const actionText = (e: Event, previousEvents: readonly Event[]) => {
   switch (e.type) {
     case 'post_blind':
       return `下盲注 ${e.amount}`;
@@ -135,12 +155,16 @@ const actionText = (e: Event) => {
     case 'call':
       return `跟注 ${e.amount}`;
     case 'raise':
-      return `加注到 ${e.amount}`;
+      return `${previousEvents.some(prior => prior.street === e.street && (prior.type === 'post_blind' || prior.type === 'raise')) ? '加注到' : '下注'} ${e.amount}`;
   }
 };
 
-const eventText = (m: MatchDetail, e: Event) =>
-  `${STREETS[e.street]} ${m.display_names[e.seat]} ${actionText(e)}${e.timeout ? ' 超時代打' : ''}`;
+const eventText = (
+  m: MatchDetail,
+  e: Event,
+  previousEvents: readonly Event[],
+) =>
+  `${STREETS[e.street]} ${m.display_names[e.seat]} ${actionText(e, previousEvents)}${e.timeout ? ' 超時代打' : ''}`;
 
 // --- Locators ---
 
@@ -196,7 +220,7 @@ const expectHand = async (page: Page, m: MatchDetail, h: MatchHand) => {
     );
   }
   await expect(steps(section, h.hand_number)).toHaveText(
-    h.events.map(e => eventText(m, e)),
+    h.events.map((e, index) => eventText(m, e, h.events.slice(0, index))),
   );
 };
 
@@ -308,7 +332,9 @@ test('words raises as the total and calls as the chips added', async ({
     const items = steps(handSection(page, h.hand_number), h.hand_number);
     for (const [i, e] of h.events.entries()) {
       if (e.type === 'raise')
-        await expect(items.nth(i)).toContainText(`加注到 ${e.amount}`);
+        await expect(items.nth(i)).toContainText(
+          actionText(e, h.events.slice(0, i)),
+        );
       if (e.type === 'call')
         await expect(items.nth(i)).toContainText(`跟注 ${e.amount}`);
     }

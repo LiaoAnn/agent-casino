@@ -39,14 +39,21 @@ export async function getLeaderboard(db: Db): Promise<Leaderboard> {
     .where(isNull(bans.nameKey))
     .orderBy(desc(ratings.rating), asc(ratings.nameKey))
     .limit(LEADERBOARD_SIZE);
+  let rank = 1;
   return {
-    entries: rows.map(({ displayName, ...row }, i) => ({
-      ...row,
-      // Null until the name plays a match after T35 (A20).
-      display_name: displayName ?? row.name,
-      rank: i + 1,
-      rating: Math.round(row.rating),
-    })),
+    entries: rows.map(({ displayName, ...row }, i) => {
+      if (
+        Math.round(rows[i - 1]?.rating ?? Number.NaN) !== Math.round(row.rating)
+      )
+        rank = i + 1;
+      return {
+        ...row,
+        // Null until the name plays a match after T35 (A20).
+        display_name: displayName ?? row.name,
+        rank,
+        rating: Math.round(row.rating),
+      };
+    }),
   };
 }
 
@@ -162,6 +169,7 @@ export async function getMatch(
     settings,
     seed: row.seed,
     result: row.result,
+    end_reason: row.endReason,
     rated: row.rated,
     ended_at: row.endedAt.toISOString(),
     final_stacks: row.finalStacks,

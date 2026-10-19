@@ -9,11 +9,17 @@ import { eventParts } from '@/lib/format';
 export function ActionLogEntry({
   event,
   players,
+  previousEvents,
 }: {
   event: HandRecord['events'][number];
   players: MatchDetail['players'];
+  previousEvents: HandRecord['events'];
 }) {
-  const { street, who, action, amount } = eventParts(event, players);
+  const { street, who, action, amount } = eventParts(
+    event,
+    players,
+    previousEvents,
+  );
   return (
     <li className="py-0.5 pl-1">
       <span className="text-mist">{street}</span>{' '}

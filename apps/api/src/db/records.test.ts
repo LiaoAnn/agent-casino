@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { eq } from 'drizzle-orm';
+import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { getPlatformProxy } from 'wrangler';
+import { handle } from '../app';
 import { randomAction } from '../holdem/bot';
 import {
   applyAction,
@@ -11,6 +15,8 @@ import {
   startMatch,
 } from '../holdem/match';
 import { dealHand, mulberry32 } from '../holdem/shuffle';
+import type { Bindings } from '../routes/env';
+import { openDb } from './client';
 import { getMatch } from './queries';
 import { type MatchRecordInput, recordMatch } from './records';
 import { matchEvents } from './schema';
@@ -536,4 +542,141 @@ describe('T35 display name storage', () => {
       { name: 'Bob', display_name: '小包 B 🎲', games: 2 },
     ]);
   });
+});
+
+describe('T44 persisted match end reasons', () => {
+  it('migration 0004 keeps a pre-existing busted match null without backfilling a guessed reason', async () => {
+    const migrations = readMigrationFiles({
+      migrationsFolder: fileURLToPath(
+        new URL('./migrations', import.meta.url).href,
+      ),
+    });
+    const addition = migrations[4];
+    expect(addition, 'the generated 0004 migration must exist').toBeDefined();
+    if (addition === undefined) throw new Error('Missing migration 0004');
+
+    // Obtain an old-format row through the existing recorder API, then put it
+    // in a separate database migrated only through 0003 before applying 0004.
+    const match = input({ hands: [], final_stacks: [400, 0] });
+    await recordMatch(testD1.db, match);
+    const source = await testD1.d1
+      .prepare('SELECT * FROM matches WHERE match_id = ?')
+      .bind(match.match_id)
+      .first();
+    if (source === null) throw new Error('Missing fixture row');
+    const columns = Object.keys(source).filter(key => key !== 'end_reason');
+    const proxy = await getPlatformProxy<{ DB: D1Database }>({
+      configPath: fileURLToPath(
+        new URL('../../wrangler.jsonc', import.meta.url).href,
+      ),
+      persist: false,
+    });
+    try {
+      const d1 = proxy.env.DB;
+      for (const migration of migrations.slice(0, 4)) {
+        for (const statement of migration.sql)
+          await d1.prepare(statement).run();
+      }
+      await d1
+        .prepare(
+          `INSERT INTO matches (${columns.map(key => `"${key}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+        )
+        .bind(...columns.map(key => source[key]))
+        .run();
+      for (const statement of addition.sql) await d1.prepare(statement).run();
+      expect(
+        await d1
+          .prepare('SELECT end_reason FROM matches WHERE match_id = ?')
+          .bind(match.match_id)
+          .first(),
+      ).toEqual({ end_reason: null });
+      expect(await getMatch(openDb(d1), match.match_id)).toHaveProperty(
+        'end_reason',
+        null,
+      );
+      const response = await handle(
+        new Request(`http://api.test/v1/matches/${match.match_id}`),
+        { DB: d1 } as unknown as Bindings,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toHaveProperty('end_reason', null);
+    } finally {
+      await proxy.dispose();
+    }
+  }, 30_000);
+
+  const detailResponse = async (matchId: string) => {
+    const response = await handle(
+      new Request(`http://api.test/v1/matches/${matchId}`),
+      { DB: testD1.d1 } as unknown as Bindings,
+    );
+    expect(response.status).toBe(200);
+    return response.json();
+  };
+
+  it.each([
+    { end_reason: 'bust', result: 'seat0_win', final_stacks: [400, 0] },
+    { end_reason: 'max_hands', result: 'draw', final_stacks: [200, 200] },
+    { end_reason: 'leave', result: 'seat1_win', final_stacks: [300, 100] },
+    { end_reason: 'void', result: 'void', final_stacks: [200, 200] },
+    { end_reason: 'cancelled', result: 'cancelled', final_stacks: [200, 200] },
+  ] as const)(
+    'stores and publishes $end_reason without guessing from the result or stacks',
+    async scenario => {
+      const match = input({
+        ...scenario,
+        final_stacks: [...scenario.final_stacks],
+        hands: scenario.end_reason === 'cancelled' ? [] : [hand(1)],
+      });
+      await recordMatch(testD1.db, match);
+      expect(
+        await testD1.d1
+          .prepare('SELECT end_reason FROM matches WHERE match_id = ?')
+          .bind(match.match_id)
+          .first(),
+      ).toEqual({ end_reason: scenario.end_reason });
+      expect(await getMatch(testD1.db, match.match_id)).toHaveProperty(
+        'end_reason',
+        scenario.end_reason,
+      );
+      expect(await detailResponse(match.match_id)).toHaveProperty(
+        'end_reason',
+        scenario.end_reason,
+      );
+      await recordMatch(testD1.db, match);
+      expect(await detailResponse(match.match_id)).toHaveProperty(
+        'end_reason',
+        scenario.end_reason,
+      );
+    },
+  );
+
+  it.each([
+    { result: 'seat0_win', final_stacks: [400, 0] },
+    { result: 'draw', final_stacks: [200, 200] },
+    { result: 'void', final_stacks: [200, 200] },
+  ] as const)(
+    'keeps an old caller without end_reason compatible and returns null for $result',
+    async scenario => {
+      const match = input({
+        ...scenario,
+        final_stacks: [...scenario.final_stacks],
+      });
+      await recordMatch(testD1.db, match);
+      expect(
+        await testD1.d1
+          .prepare('SELECT end_reason FROM matches WHERE match_id = ?')
+          .bind(match.match_id)
+          .first(),
+      ).toEqual({ end_reason: null });
+      expect(await getMatch(testD1.db, match.match_id)).toHaveProperty(
+        'end_reason',
+        null,
+      );
+      expect(await detailResponse(match.match_id)).toHaveProperty(
+        'end_reason',
+        null,
+      );
+    },
+  );
 });

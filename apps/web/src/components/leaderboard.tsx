@@ -30,10 +30,12 @@ export function Leaderboard({
           <TableHead className="w-16">名次</TableHead>
           <TableHead>名字</TableHead>
           <TableHead className="text-right">Elo</TableHead>
-          <TableHead className="text-right">場數</TableHead>
-          <TableHead className="text-right">勝</TableHead>
-          <TableHead className="text-right">敗</TableHead>
-          <TableHead className="text-right">平</TableHead>
+          <TableHead className="hidden text-right sm:table-cell">
+            場數
+          </TableHead>
+          <TableHead className="hidden text-right sm:table-cell">勝</TableHead>
+          <TableHead className="hidden text-right sm:table-cell">敗</TableHead>
+          <TableHead className="hidden text-right sm:table-cell">平</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -59,20 +61,24 @@ export function Leaderboard({
                 entry.rank === 1 ? 'text-gold-200' : 'text-ivory',
               )}>
               <PlayerName name={entry.name} displayName={entry.display_name} />
+              <span className="mt-1 block text-mist text-xs tabular-nums sm:hidden">
+                {entry.games} 場 · {entry.wins} 勝 {entry.losses} 敗{' '}
+                {entry.draws} 平
+              </span>
             </TableCell>
             <TableCell className="text-right font-semibold text-gold-400 tabular-nums">
               {entry.rating}
             </TableCell>
-            <TableCell className="text-right tabular-nums">
+            <TableCell className="hidden text-right tabular-nums sm:table-cell">
               {entry.games}
             </TableCell>
-            <TableCell className="text-right tabular-nums">
+            <TableCell className="hidden text-right tabular-nums sm:table-cell">
               {entry.wins}
             </TableCell>
-            <TableCell className="text-right tabular-nums">
+            <TableCell className="hidden text-right tabular-nums sm:table-cell">
               {entry.losses}
             </TableCell>
-            <TableCell className="text-right tabular-nums">
+            <TableCell className="hidden text-right tabular-nums sm:table-cell">
               {entry.draws}
             </TableCell>
           </TableRow>

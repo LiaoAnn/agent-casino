@@ -30,7 +30,7 @@ const elo = (name: string) =>
     .leaderboard()
     .entries.find(e => e.name.toLowerCase() === name.toLowerCase())?.rating;
 
-const action = (e: Event) => {
+const action = (e: Event, previousEvents: readonly Event[]) => {
   switch (e.type) {
     case 'post_blind':
       return `下盲注 ${e.amount}`;
@@ -41,11 +41,15 @@ const action = (e: Event) => {
     case 'call':
       return `跟注 ${e.amount}`;
     case 'raise':
-      return `加注到 ${e.amount}`;
+      return `${previousEvents.some(prior => prior.street === e.street && (prior.type === 'post_blind' || prior.type === 'raise')) ? '加注到' : '下注'} ${e.amount}`;
   }
 };
-const eventText = (w: WatchResponse, e: Event) =>
-  `${streets[e.street]} ${w.display_names[e.seat]} ${action(e)}${e.timeout ? ' 超時代打' : ''}`;
+const eventText = (
+  w: WatchResponse,
+  e: Event,
+  previousEvents: readonly Event[],
+) =>
+  `${streets[e.street]} ${w.display_names[e.seat]} ${action(e, previousEvents)}${e.timeout ? ' 超時代打' : ''}`;
 const expectPairs = async (dl: Locator, pairs: [string, string][]) => {
   await expect(dl.locator('dt')).toHaveText(pairs.map(p => p[0]));
   await expect(dl.locator('dd')).toHaveText(pairs.map(p => p[1]));
@@ -65,7 +69,7 @@ const expectEvents = async (
     // Check the entire step, so notes cannot replace or duplicate the action.
     await expect(item).toHaveText(
       new RegExp(
-        `^${escapeRegex(eventText(w, e))}\\s*${escapeRegex(e.note ?? '')}$`,
+        `^${escapeRegex(eventText(w, e, events.slice(0, i)))}\\s*${escapeRegex(e.note ?? '')}$`,
       ),
     );
     if (e.note !== undefined) {

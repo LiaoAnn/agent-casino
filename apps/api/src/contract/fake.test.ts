@@ -208,7 +208,10 @@ describe('makeFakeData', () => {
     const { entries } = data.leaderboard();
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.map(e => e.rank)).toEqual(
-      entries.map((_, index) => index + 1),
+      entries.map(
+        entry =>
+          1 + entries.filter(other => other.rating > entry.rating).length,
+      ),
     );
     const ratings = entries.map(e => e.rating);
     expect(ratings).toEqual([...ratings].sort((a, b) => b - a));

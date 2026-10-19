@@ -82,8 +82,13 @@ export function Steps({
       className="list-decimal space-y-1 border-gold-600/25 border-t pt-3 pl-6 text-sm marker:text-slate">
       {events.map((event, i) => (
         // Events have no id; their order is fixed.
-        // biome-ignore lint/suspicious/noArrayIndexKey: see above
-        <ActionLogEntry key={i} event={event} players={players} />
+        <ActionLogEntry
+          // biome-ignore lint/suspicious/noArrayIndexKey: events have fixed order
+          key={i}
+          event={event}
+          players={players}
+          previousEvents={events.slice(0, i)}
+        />
       ))}
     </ol>
   );

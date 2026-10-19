@@ -71,7 +71,7 @@ test('shows every leaderboard entry in rank order', async ({ page }) => {
     await expect(cells(rows.nth(i))).toHaveText(
       [
         e.rank,
-        `${e.display_name}@${e.name}`,
+        `${e.display_name}@${e.name}${e.games} 場 · ${e.wins} 勝 ${e.losses} 敗 ${e.draws} 平`,
         e.rating,
         e.games,
         e.wins,

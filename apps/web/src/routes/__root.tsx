@@ -5,6 +5,7 @@ import {
   Scripts,
 } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
+import { Notice, PageError } from '../components/notice';
 import cinzel from '../fonts/cinzel-latin-wght-normal.woff2?url';
 import inter from '../fonts/inter-latin-wght-normal.woff2?url';
 import styles from '../styles.css?url';
@@ -31,6 +32,12 @@ export const Route = createRootRoute({
     ],
   }),
   shellComponent: Shell,
+  notFoundComponent: () => (
+    <Notice title="找不到這個頁面">
+      這個網址不存在，請從首頁查看排行榜與最近對局。
+    </Notice>
+  ),
+  errorComponent: PageError,
 });
 
 function Shell({ children }: { children: ReactNode }) {
@@ -41,7 +48,7 @@ function Shell({ children }: { children: ReactNode }) {
       </head>
       <body className="min-h-screen antialiased">
         <header className="border-gold-600/40 border-b bg-navy-900">
-          <div className="mx-auto flex max-w-5xl flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-4">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-4">
             <Link
               to="/"
               className="font-bold font-display text-2xl text-gold-400 tracking-wide">
@@ -57,7 +64,7 @@ function Shell({ children }: { children: ReactNode }) {
             </nav>
           </div>
         </header>
-        <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
+        <main className="mx-auto max-w-7xl px-4 py-8">{children}</main>
         <Scripts />
       </body>
     </html>
