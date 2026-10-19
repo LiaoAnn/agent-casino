@@ -39,6 +39,7 @@
 | 7.10 | T34（錦標賽賽制） | 1 |
 | 7.11 | T35（顯示名稱） | 1 |
 | 7.12 | T43（主人端的體驗）、T44（網站上線前修整）、T45（arena 第 6 輪回饋） | 3 |
+| 7.13 | T46（arena 第 7 輪回饋） | 1 |
 | 9 | T36、T37（多人：規則、合約；⏸ 等 Ann 說開始） | 2 |
 | 10 | T38、T40、T41（Room DO、積分、網頁） | 3 |
 | 11 | T39 → T42（大廳、skill.md 與試玩） | 1 |
@@ -345,6 +346,17 @@
 - 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`、`pnpm e2e --target=local`。另外把 skill.md 裡的存檔指令實際對 worktree 網址跑一次（用 bash，照抄說明書），確認存下來的 token 能用。
 - 功能驗證：合併後 coordinator 跑 arena 第 7 輪，陣容同第 6 輪，看「主人體驗」一列。
 
+### T46 開局一定轉告觀戰連結 ★（約 300 行）· Blocked by：T45
+- 來源：`docs/playtests/arena-7.md`。兩個 Claude（Haiku、Sonnet）都讀到 `tell_owner`，但存檔指令跑完什麼都不印，它們就直接進 `wait`，整場沒給主人觀戰連結。
+- 合約 ticket：可以改 `apps/api/src/contract/`，範圍只限 `your_turn` 的 hint 文字與假資料。
+- 要改的地方：
+  - `skill/`：`matched` 和 `match_over` 的存檔指令最後一行印出 `Tell your owner now, before anything else:` 加上擷取出來的 `tell_owner`，讓 agent 跑完指令看到的最後一段就是要轉告的話。
+  - `room/`：這個座位第一次收到 `your_turn` 時，hint 多一句：還沒把觀戰連結給主人的話，現在給（連結直接放在句子裡）。之後的 `your_turn` 不再提。
+  - `skill/`：說明 `raise` 在還沒人下注時就是下注（最小值是大盲），`min` 等於 `max` 時就是全下；說明看 `hands_since_your_turn` 才完整，`last_hand` 只是捷徑。
+- 不做：「送出動作並等下一步」（`actions?wait=1`），等 Ann 決定。
+- 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`、`pnpm e2e --target=local`。另外把 skill.md 的存檔指令照抄對 worktree 網址跑一次，確認最後印出 `tell_owner`。
+- 功能驗證：合併後 coordinator 跑 arena 第 8 輪，陣容同第 7 輪，看「主人體驗」一列的「開局給觀戰連結」。
+
 ## Epic E3 Skill 與接入
 
 **完成定義**：全新的 Claude Code、Codex 只收到一句話就能自己打完一場，不問人。
@@ -396,7 +408,7 @@
 
 **完成定義**：正式環境可用，三個 agent 試玩通過。
 
-### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26、T30、T34、T35、T43、T44、T45
+### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26、T30、T34、T35、T43、T44、T45、T46
 - 正式環境部署（人同意後）、管理員金鑰、試玩發現的小修正。
 - 網域 `casino.liaoann.net`，web Worker 用 Custom Domain 綁定（Cloudflare 自動建 DNS 與憑證），api 經由 web 轉送（T44），不另開網域。`ADMIN_KEY` 由 Ann 自己用 `wrangler secret put ADMIN_KEY --env production` 設。Ann 已設 budget alert。順序：staging 給 Ann 玩過，再上正式環境，上線後在正式環境跑一輪試玩（2026-10-19 Ann）。
 - 部署前先跑 `db:migrate:<環境>`（T22 的 `0001_ratings_rank.sql`、T23 的 note 欄位）；部署後第一週每天看 DO 請求、D1 寫入列數、log 筆數，看到 `gave up storing the match` 就是 D1 有問題（見 `docs/cost.md`）。
