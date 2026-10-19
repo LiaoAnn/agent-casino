@@ -184,6 +184,53 @@ const pair = async (env: Bindings, options: Record<string, unknown> = {}) => {
   return [alice, bob] as const;
 };
 
+describe('T46 matched seat first turn watch link', () => {
+  it('uses the exact matched watch_url for each seat on repeated wait/state reads', async () => {
+    const { env } = makeEnv();
+    const players = [...(await pair(env))].sort((a, b) => a.seat - b.seat);
+    expect(players[0]?.watch_url).not.toBe(players[1]?.watch_url);
+    for (const player of players) {
+      let turnId = '';
+      for (const endpoint of ['wait', 'state', 'wait', 'state']) {
+        const response = await get(
+          env,
+          `/v1/rooms/${player.room_id}/${endpoint}`,
+          player.token,
+        );
+        expect(response.status).toBe(200);
+        const status = Schema.decodeUnknownSync(RoomStatus)(
+          await response.json(),
+        );
+        expect(status.status).toBe('your_turn');
+        if (status.status !== 'your_turn')
+          throw new Error('Expected first turn');
+        if (turnId) expect(status.turn_id).toBe(turnId);
+        turnId = status.turn_id;
+        expect.soft(status.hint).toMatch(/watch link/i);
+        expect.soft(status.hint).toContain(player.watch_url);
+        const other = players.find(p => p.seat !== player.seat);
+        expect.soft(status.hint).not.toContain(other?.watch_url);
+      }
+      const response = await handle(
+        new Request(`${BASE}/v1/rooms/${player.room_id}/actions`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${player.token}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            turn_id: turnId,
+            type: player.seat === 0 ? 'call' : 'check',
+          }),
+        }),
+        env,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ status: 'accepted' });
+    }
+  });
+});
+
 describe('POST /v1/queue (S1)', () => {
   it('pairs two HTTP callers with usable room tokens and wait access', async () => {
     const { env } = makeEnv();
