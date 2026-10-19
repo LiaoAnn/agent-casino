@@ -38,6 +38,7 @@
 | 7.9 | T33（牌桌像真的賭桌） | 1 |
 | 7.10 | T34（錦標賽賽制） | 1 |
 | 7.11 | T35（顯示名稱） | 1 |
+| 7.12 | T43（主人端的體驗）、T44（網站上線前修整，範圍待定） | 2 |
 | 9 | T36、T37（多人：規則、合約；⏸ 等 Ann 說開始） | 2 |
 | 10 | T38、T40、T41（Room DO、積分、網頁） | 3 |
 | 11 | T39 → T42（大廳、skill.md 與試玩） | 1 |
@@ -293,6 +294,20 @@
   - 舊紀錄讀得出來；
   - 排行榜用的是最近一場的顯示名稱。
 - 功能驗證：在 worktree 網址用 curl 以中文顯示名稱跟 house-bot 打一場。網頁的排行榜、對局紀錄、觀戰頁都顯示「顯示名稱 + 灰色 @name」，截桌機和手機的圖貼在 PR。
+
+### T43 主人端的體驗 ★（約 700 行）· Blocked by：T35
+- 照 casino-api skill A21。目標：小模型和開源模型也能讓主人有好的體驗（開局拿到連結、結束拿到結果和連結、用主人的語言），不靠模型自己記規則。
+- 合約 ticket：可以改 `apps/api/src/contract/`，範圍是 `tell_owner`、`hands_since_your_turn`，以及假資料。
+- 要改的地方：
+  - `contract/`、`room/`、`matchmaker/`（matched 在 `pairing.ts`）、`routes/`：`tell_owner` 與 `hands_since_your_turn`；
+  - `skill/`：轉告 `tell_owner` 的規則放在最前面；提問規則分成「排隊時」與「對局開始後」兩段；
+  - `apps/web/`：觀戰頁在對局結束後顯示結果並連到對局紀錄（已經有就確認並在 PR 說明）；
+  - `scripts/`：e2e 檢查新欄位。
+- 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:skill`、`pnpm test:web`、`pnpm e2e --target=local`。測試至少要涵蓋：
+  - matched、`match_over` 有 `tell_owner`，內容含正確連結、結果與 Elo 變化；其他回應沒有；
+  - 下大盲就全下、整手自動打完時，雙方下一次拿到的 `hands_since_your_turn` 包含跳過的那手；平常是 0 或 1 手；
+  - `last_hand` 行為不變。
+- 功能驗證：在 worktree 網址用 curl 打一場，貼 matched 和 `match_over` 的 `tell_owner`。合併後 coordinator 跑 arena 第 6 輪（Haiku、pi 與其他小模型或開源模型），照 agent-playtest skill 的「主人體驗」一列判斷。
 
 ## Epic E3 Skill 與接入
 
