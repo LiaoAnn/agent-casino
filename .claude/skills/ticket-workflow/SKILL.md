@@ -125,7 +125,7 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 沒有 `needs-human` 的 PR，下面全部滿足就自己合併（`gh pr merge <號碼> --squash`）：
 1. CI 全綠。
 2. 整體 `/review-change` 沒有 Blocker，verifier 全過。
-3. branch 跟最新的 `main` 沒有衝突。`main` 動過就 rebase 到 `origin/main`，重跑 verifier，再 push。
+3. branch 跟最新的 `main` 沒有衝突。`main` 動過就 rebase 到 `origin/main`，重跑 verifier，再 push。例外：`main` 新增的 commit 只動 `docs/` 或 `.claude/`，而且 `git diff <rebase 前> <rebase 後> -- . ':!docs' ':!.claude'` 是空的，就不用重跑，在 PR 寫明。
 
 有 `needs-human` 的 PR：開好後停下來，用一頁摘要通知 coordinator（改了什麼、證據、可以點的網址），等人說可以再合併。
 
