@@ -147,7 +147,7 @@ describe('T43 completed hands since this seat last accepted an action', () => {
   it('keeps every timeout-completed hand before a seat has ever acted, oldest first', async () => {
     const t = await fixture(3);
     for (let hand = 0; hand < 3; hand++) {
-      t.clock.ms += 5_001;
+      t.clock.ms += hand < 2 ? 10_001 : 5_001;
       await t.room.alarm();
     }
     for (const seat of [0, 1] as const) {

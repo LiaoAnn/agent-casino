@@ -694,7 +694,7 @@ describe('T28 S3 seconds_remaining', () => {
         state: {
           status: 'your_turn',
           deadline: first.deadline,
-          seconds_remaining: 29,
+          seconds_remaining: 59,
         },
       },
     });

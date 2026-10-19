@@ -430,7 +430,7 @@ describe('A11 chaos extra_waiting: the first N waits of the seat to act answer w
       extra_waiting: 2,
     });
     const fromState = await yourTurn(t, roomId, tokens[0]);
-    expect(fromState.seconds_remaining).toBe(10);
+    expect(fromState.seconds_remaining).toBe(20);
     for (let i = 0; i < 2; i++) {
       t.clock.ms += 1_000;
       const { status, elapsedMs } = await wait(t, roomId, tokens[0]);
@@ -441,14 +441,14 @@ describe('A11 chaos extra_waiting: the first N waits of the seat to act answer w
       });
       expect(elapsedMs).toBeLessThan(1_000);
       const current = await yourTurn(t, roomId, tokens[0]);
-      expect(current.seconds_remaining).toBe(9 - i);
-      expect(current).toEqual({ ...fromState, seconds_remaining: 9 - i });
+      expect(current.seconds_remaining).toBe(19 - i);
+      expect(current).toEqual({ ...fromState, seconds_remaining: 19 - i });
     }
     const { status } = await wait(t, roomId, tokens[0]);
-    expect(status.status === 'your_turn' && status.seconds_remaining).toBe(8);
-    expect(status).toEqual({ ...fromState, seconds_remaining: 8 });
+    expect(status.status === 'your_turn' && status.seconds_remaining).toBe(18);
+    expect(status).toEqual({ ...fromState, seconds_remaining: 18 });
     expect(status.status === 'your_turn' && status.deadline).toBe(
-      iso(joinedAt + 10_000),
+      iso(joinedAt + 20_000),
     );
   });
 
@@ -506,7 +506,7 @@ describe('A11 chaos extra_waiting: the first N waits of the seat to act answer w
     for (let i = 0; i < 3; i++) {
       expect((await wait(t, roomId, tokens[0])).status.status).toBe('waiting');
     }
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     await t.referee(roomId).alarm();
     const bob = await yourTurn(t, roomId, tokens[1]);
     expect(bob.hand_number).toBe(2);
@@ -612,7 +612,7 @@ describe('A11 chaos fail_request_every: every Nth token request of a seat answer
     const { roomId, tokens, joinedAt } = await chaosRoom(t, {
       fail_request_every: 2,
     });
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     await t.referee(roomId).alarm();
     const bob = await yourTurn(t, roomId, tokens[1]);
     expect(bob.hand_number).toBe(2);
@@ -671,7 +671,7 @@ describe('A11 DEFAULT_SETTINGS_JSON: the default settings of every room on the d
       });
       const { roomId, tokens, joinedAt } = await startRoom(t);
       let turn = await yourTurn(t, roomId, tokens[0]);
-      expect(turn.deadline).toBe(iso(joinedAt + 5_000));
+      expect(turn.deadline).toBe(iso(joinedAt + 10_000));
       expect(turn.view).toMatchObject({ my_stack: 99, opponent_stack: 98 });
       // 3 hands: the small blind folds each one; then the match is over.
       for (let hand = 1; hand <= 3; hand++) {
@@ -698,7 +698,7 @@ describe('A11 DEFAULT_SETTINGS_JSON: the default settings of every room on the d
       settings: { turn_seconds: 30 },
     });
     const turn = await yourTurn(t, roomId, tokens[0]);
-    expect(turn.deadline).toBe(iso(joinedAt + 30_000));
+    expect(turn.deadline).toBe(iso(joinedAt + 60_000));
     expect(turn.view).toMatchObject({ my_stack: 99, opponent_stack: 98 });
 
     const u = makeEnv({
@@ -706,7 +706,7 @@ describe('A11 DEFAULT_SETTINGS_JSON: the default settings of every room on the d
     });
     const other = await startRoom(u);
     const otherTurn = await yourTurn(u, other.roomId, other.tokens[0]);
-    expect(otherTurn.deadline).toBe(iso(other.joinedAt + 5_000));
+    expect(otherTurn.deadline).toBe(iso(other.joinedAt + 10_000));
     // Built-in starting_stack 40.
     expect(otherTurn.view).toMatchObject({ my_stack: 39, opponent_stack: 38 });
   });

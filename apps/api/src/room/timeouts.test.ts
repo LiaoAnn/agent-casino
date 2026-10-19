@@ -337,7 +337,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
     expect(match.toAct).toBe(1);
     expect(legalActions(match).map(a => a.type)).toContain('check');
     const bob = await yourTurn(t, roomId, tokens[1]);
-    const deadline = joinedAt + 1_000 + 10_000;
+    const deadline = joinedAt + 1_000 + 20_000;
     expect(bob.deadline).toBe(iso(deadline));
 
     t.clock.ms = deadline;
@@ -368,7 +368,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
     expect(match.toAct).toBe(0);
     expect(legalActions(match).map(a => a.type)).not.toContain('check');
 
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     await t.referee(roomId).alarm();
     match = timedOut(match);
 
@@ -400,11 +400,11 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
       max_hands: 2,
       turn_seconds: 10,
     });
-    expect(t.storage(roomId).alarm).toBe(joinedAt + 10_000);
+    expect(t.storage(roomId).alarm).toBe(joinedAt + 20_000);
     t.clock.ms = joinedAt + 3_000;
     const alice = await yourTurn(t, roomId, tokens[0]);
     await act(t, roomId, tokens[0], { turn_id: alice.turn_id, type: 'call' });
-    expect(t.storage(roomId).alarm).toBe(joinedAt + 3_000 + 10_000);
+    expect(t.storage(roomId).alarm).toBe(joinedAt + 3_000 + 20_000);
     const bob = await yourTurn(t, roomId, tokens[1]);
     expect(bob.deadline).toBe(iso(t.storage(roomId).alarm ?? 0));
   });
@@ -430,28 +430,28 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
       turn_seconds: 10,
     });
     const before = await yourTurn(t, roomId, tokens[0]);
-    expect(before.seconds_remaining).toBe(10);
-    t.clock.ms = joinedAt + 10_000 - 1;
+    expect(before.seconds_remaining).toBe(20);
+    t.clock.ms = joinedAt + 20_000 - 1;
     await t.referee(roomId).alarm();
     const after = await yourTurn(t, roomId, tokens[0]);
     // The remaining 1 ms rounds down to zero; every other field stays equal.
     expect(after.seconds_remaining).toBe(0);
     expect(after).toEqual({ ...before, seconds_remaining: 0 });
-    expect(t.storage(roomId).alarm).toBe(joinedAt + 10_000);
+    expect(t.storage(roomId).alarm).toBe(joinedAt + 20_000);
   });
 
-  it('超時 (alarm): after a timeout the alarm moves to the next deadline = previous deadline + turn_seconds, even when alarm() runs late', async () => {
+  it('超時 (alarm): after a timeout the alarm moves to the next seat’s first deadline = previous deadline + 2 × turn_seconds, even when alarm() runs late', async () => {
     const t = makeEnv();
     const { roomId, tokens, joinedAt } = await seededRoom(t, {
       max_hands: 2,
       turn_seconds: 10,
     });
     // The alarm fires 4 s late.
-    t.clock.ms = joinedAt + 10_000 + 4_000;
+    t.clock.ms = joinedAt + 20_000 + 4_000;
     await t.referee(roomId).alarm();
     const bob = await yourTurn(t, roomId, tokens[1]);
-    expect(bob.deadline).toBe(iso(joinedAt + 20_000));
-    expect(t.storage(roomId).alarm).toBe(joinedAt + 20_000);
+    expect(bob.deadline).toBe(iso(joinedAt + 40_000));
+    expect(t.storage(roomId).alarm).toBe(joinedAt + 40_000);
   });
 
   it("超時 + 斷線: the opponent's pending wait answers your_turn as soon as alarm() plays the timeout", async () => {
@@ -462,7 +462,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
     });
     const pending = wait(t, roomId, tokens[1]);
     await sleep(50);
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     await t.referee(roomId).alarm();
     const { status, elapsedMs } = await pending;
     expect(status.status).toBe('your_turn');
@@ -481,11 +481,11 @@ describe('狀況處理 超時 (catch-up): any request first plays what is alread
       max_hands: 2,
       turn_seconds: 10,
     });
-    t.clock.ms = joinedAt + 10_000 + 3_000;
+    t.clock.ms = joinedAt + 20_000 + 3_000;
     const match = timedOut(engineStart(2));
     const bob = await yourTurn(t, roomId, tokens[1]);
     expectPosition(bob, match, 1);
-    expect(bob.deadline).toBe(iso(joinedAt + 20_000));
+    expect(bob.deadline).toBe(iso(joinedAt + 40_000));
     const alice = await state(t, roomId, tokens[0]);
     expect(alice.status).toBe('waiting');
     expectPosition(alice, match, 0);
@@ -497,7 +497,7 @@ describe('狀況處理 超時 (catch-up): any request first plays what is alread
       max_hands: 2,
       turn_seconds: 10,
     });
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     const { status, elapsedMs } = await wait(t, roomId, tokens[1]);
     expect(status.status).toBe('your_turn');
     expect(elapsedMs).toBeLessThan(1_500);
@@ -509,7 +509,7 @@ describe('狀況處理 超時 (catch-up): any request first plays what is alread
       max_hands: 2,
       turn_seconds: 10,
     });
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     const error = await expectError(
       await actPost(t, roomId, tokens[1], { turn_id: 't_999', type: 'call' }),
       'stale_turn',
@@ -525,7 +525,7 @@ describe('狀況處理 超時 (catch-up): any request first plays what is alread
       max_hands: 2,
       turn_seconds: 10,
     });
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     const over = await readStatus(await leavePost(t, roomId, tokens[1]));
     const match = timedOut(engineStart(2));
     expect(over).toMatchObject({
@@ -543,10 +543,10 @@ describe('狀況處理 超時 (catch-up): any request first plays what is alread
     ]);
   });
 
-  it('several overdue turns are all played in one catch-up, each at its own deadline (3 turns at +30 s, 2 turns at +25 s)', async () => {
+  it('several overdue turns are all played in one catch-up, each at its own deadline (3 turns at +50 s, 2 turns at +45 s)', async () => {
     for (const [advance, turns] of [
-      [30_000, 3],
-      [25_000, 2],
+      [50_000, 3],
+      [45_000, 2],
     ] as const) {
       const t = makeEnv();
       const { roomId, tokens, joinedAt } = await seededRoom(t, {
@@ -560,7 +560,7 @@ describe('狀況處理 超時 (catch-up): any request first plays what is alread
       const status = await yourTurn(t, roomId, tokens[toAct]);
       expectPosition(status, match, toAct);
       expect(status.hand_number).toBe(turns + 1);
-      const nextDeadline = joinedAt + (turns + 1) * 10_000;
+      const nextDeadline = joinedAt + (turns + 3) * 10_000;
       expect(status.deadline).toBe(iso(nextDeadline));
       expect(t.storage(roomId).alarm).toBe(nextDeadline);
     }
@@ -577,7 +577,7 @@ describe('A3 + 狀況處理 太晚: a timeout uses up the turn_id', () => {
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     await t.referee(roomId).alarm();
     const error = await expectError(
       await actPost(t, roomId, tokens[0], {
@@ -600,7 +600,7 @@ describe('A3 + 狀況處理 太晚: a timeout uses up the turn_id', () => {
     const alice = await yourTurn(t, roomId, tokens[0]);
     await act(t, roomId, tokens[0], { turn_id: alice.turn_id, type: 'call' });
     const bob = await yourTurn(t, roomId, tokens[1]);
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     await t.referee(roomId).alarm();
     const match = timedOut(applyOk(engineStart(2), 0, { type: 'call' }));
     expect(match.toAct).toBe(1);
@@ -628,7 +628,7 @@ describe('A3 + 狀況處理 太晚: a timeout uses up the turn_id', () => {
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     const error = await expectError(
       await actPost(t, roomId, tokens[0], {
         turn_id: alice.turn_id,
@@ -649,7 +649,7 @@ describe('A3 + 狀況處理 太晚: a timeout uses up the turn_id', () => {
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
-    t.clock.ms = joinedAt + 10_000 - 1;
+    t.clock.ms = joinedAt + 20_000 - 1;
     await act(t, roomId, tokens[0], { turn_id: alice.turn_id, type: 'call' });
     const bob = await yourTurn(t, roomId, tokens[1]);
     expect(bob.view?.history.some(event => event.timeout)).toBe(false);
@@ -668,26 +668,26 @@ describe('狀況處理 連續 3 次超時 / A9: a seat with 3 consecutive timeou
     });
     let match = engineStart(HANDS);
 
-    // Timeout 1: seat 0 (small blind) is folded at +10 s.
-    t.clock.ms = joinedAt + 10_000;
+    // Timeout 1: seat 0 (small blind) is folded at +20 s.
+    t.clock.ms = joinedAt + 20_000;
     match = timedOut(match);
-    // Hand 2: seat 1 (button) calls at +11 s.
-    t.clock.ms = joinedAt + 11_000;
+    // Hand 2: seat 1 (button) calls at +21 s.
+    t.clock.ms = joinedAt + 21_000;
     const bob1 = await yourTurn(t, roomId, tokens[1]);
     expectPosition(bob1, match, 1);
     await act(t, roomId, tokens[1], { turn_id: bob1.turn_id, type: 'call' });
     match = applyOk(match, 1, { type: 'call' });
-    // Timeout 2: seat 0 (big blind) is checked for at +21 s.
-    t.clock.ms = joinedAt + 21_000;
+    // Timeout 2: seat 0 (big blind) is checked for at +31 s.
+    t.clock.ms = joinedAt + 31_000;
     match = timedOut(match);
     expect(match.toAct).toBe(0);
-    // Timeout 3: seat 0 acts first on the flop and is checked for at +31 s.
-    t.clock.ms = joinedAt + 31_000;
+    // Timeout 3: seat 0 acts first on the flop and is checked for at +41 s.
+    t.clock.ms = joinedAt + 41_000;
     match = timedOut(match);
     expect(match.toAct).toBe(1);
     const bob2 = await yourTurn(t, roomId, tokens[1]);
     expectPosition(bob2, match, 1);
-    expect(bob2.deadline).toBe(iso(joinedAt + 41_000));
+    expect(bob2.deadline).toBe(iso(joinedAt + 51_000));
 
     // From here the clock never moves: seat 0 is absent.
     let steps = 0;
@@ -714,7 +714,7 @@ describe('狀況處理 連續 3 次超時 / A9: a seat with 3 consecutive timeou
         match.stacks,
       );
     }
-    expect(t.clock.ms).toBe(joinedAt + 31_000);
+    expect(t.clock.ms).toBe(joinedAt + 41_000);
     expect(t.storage(roomId).alarm).toBeNull();
   });
 
@@ -725,10 +725,10 @@ describe('狀況處理 連續 3 次超時 / A9: a seat with 3 consecutive timeou
       turn_seconds: 10,
     });
     // Same opening as above: seat 0 times out 3 times in a row.
-    t.clock.ms = joinedAt + 11_000;
+    t.clock.ms = joinedAt + 21_000;
     const bob1 = await yourTurn(t, roomId, tokens[1]);
     await act(t, roomId, tokens[1], { turn_id: bob1.turn_id, type: 'call' });
-    t.clock.ms = joinedAt + 31_000;
+    t.clock.ms = joinedAt + 41_000;
     const bob2 = await yourTurn(t, roomId, tokens[1]);
     // Seat 0 comes back and asks for the state, then waits.
     const alice = await state(t, roomId, tokens[0]);
@@ -772,28 +772,28 @@ describe('狀況處理 連續 3 次超時 / A9: a seat with 3 consecutive timeou
       turn_seconds: 10,
     });
     let match = engineStart(10);
-    // Timeout 1 at +10 s (seat 0 folds hand 1).
-    t.clock.ms = joinedAt + 10_000;
+    // Timeout 1 at +20 s (seat 0 folds hand 1).
+    t.clock.ms = joinedAt + 20_000;
     match = timedOut(match);
-    t.clock.ms = joinedAt + 11_000;
+    t.clock.ms = joinedAt + 21_000;
     const bob1 = await yourTurn(t, roomId, tokens[1]);
     await act(t, roomId, tokens[1], { turn_id: bob1.turn_id, type: 'call' });
     match = applyOk(match, 1, { type: 'call' });
-    // Timeout 2 at +21 s (seat 0 checked for preflop).
-    t.clock.ms = joinedAt + 21_000;
+    // Timeout 2 at +31 s (seat 0 checked for preflop).
+    t.clock.ms = joinedAt + 31_000;
     match = timedOut(match);
-    // Seat 0 acts itself on the flop at +22 s: the count resets.
-    t.clock.ms = joinedAt + 22_000;
+    // Seat 0 acts itself on the flop at +32 s: the count resets.
+    t.clock.ms = joinedAt + 32_000;
     const alice1 = await yourTurn(t, roomId, tokens[0]);
     expectPosition(alice1, match, 0);
     await act(t, roomId, tokens[0], { turn_id: alice1.turn_id, type: 'check' });
     match = applyOk(match, 0, { type: 'check' });
-    t.clock.ms = joinedAt + 23_000;
+    t.clock.ms = joinedAt + 33_000;
     const bob2 = await yourTurn(t, roomId, tokens[1]);
     await act(t, roomId, tokens[1], { turn_id: bob2.turn_id, type: 'check' });
     match = applyOk(match, 1, { type: 'check' });
-    // Timeout 3 overall, but only 1 in a row: seat 0 on the turn at +33 s.
-    t.clock.ms = joinedAt + 33_000;
+    // Timeout 3 overall, but only 1 in a row: seat 0 on the turn at +43 s.
+    t.clock.ms = joinedAt + 43_000;
     match = timedOut(match);
     const bob3 = await yourTurn(t, roomId, tokens[1]);
     expectPosition(bob3, match, 1);
@@ -803,8 +803,8 @@ describe('狀況處理 連續 3 次超時 / A9: a seat with 3 consecutive timeou
     const alice2 = await yourTurn(t, roomId, tokens[0]);
     expectPosition(alice2, match, 0);
     expect(alice2.view?.street).toBe('river');
-    expect(alice2.deadline).toBe(iso(joinedAt + 43_000));
-    expect(t.storage(roomId).alarm).toBe(joinedAt + 43_000);
+    expect(alice2.deadline).toBe(iso(joinedAt + 53_000));
+    expect(t.storage(roomId).alarm).toBe(joinedAt + 53_000);
     expect((await state(t, roomId, tokens[1])).status).toBe('waiting');
   });
 
@@ -817,7 +817,10 @@ describe('狀況處理 連續 3 次超時 / A9: a seat with 3 consecutive timeou
     const deadlines: number[] = [];
     while (!match.over) {
       const seat = match.toAct as Seat;
-      at = (counts[seat] ?? 0) >= 3 ? at : at + 10_000;
+      at =
+        (counts[seat] ?? 0) >= 3
+          ? at
+          : at + ((counts[seat] ?? 0) === 0 ? 20_000 : 10_000);
       deadlines.push(at);
       match = timedOut(match);
       counts[seat] = (counts[seat] ?? 0) + 1;
@@ -864,8 +867,8 @@ describe('超時 (alarm): nothing is due after the match ends, so the alarm is d
       max_hands: 1,
       turn_seconds: 10,
     });
-    expect(t.storage(roomId).alarm).toBe(joinedAt + 10_000);
-    t.clock.ms = joinedAt + 10_000;
+    expect(t.storage(roomId).alarm).toBe(joinedAt + 20_000);
+    t.clock.ms = joinedAt + 20_000;
     await t.referee(roomId).alarm();
     expect(t.storage(roomId).alarm).toBeNull();
     const over = await state(t, roomId, tokens[0]);
@@ -878,7 +881,7 @@ describe('超時 (alarm): nothing is due after the match ends, so the alarm is d
       max_hands: 1,
       turn_seconds: 10,
     });
-    expect(t.storage(roomId).alarm).toBe(joinedAt + 10_000);
+    expect(t.storage(roomId).alarm).toBe(joinedAt + 20_000);
     const alice = await yourTurn(t, roomId, tokens[0]);
     await act(t, roomId, tokens[0], { turn_id: alice.turn_id, type: 'fold' });
     expect(t.storage(roomId).alarm).toBeNull();
@@ -890,7 +893,7 @@ describe('超時 (alarm): nothing is due after the match ends, so the alarm is d
       max_hands: 2,
       turn_seconds: 10,
     });
-    expect(t.storage(roomId).alarm).toBe(joinedAt + 10_000);
+    expect(t.storage(roomId).alarm).toBe(joinedAt + 20_000);
     const left = await readStatus(await leavePost(t, roomId, tokens[0]));
     expect(t.storage(roomId).alarm).toBeNull();
     t.clock.ms = joinedAt + 60_000;
@@ -914,12 +917,12 @@ describe('狀況處理 斷線: the match goes on; state or wait picks it up', ()
     await act(t, roomId, tokens[0], { turn_id: alice.turn_id, type: 'call' });
     match = applyOk(match, 0, { type: 'call' });
     // Bob is gone past his deadline; his preflop check is played for him.
-    t.clock.ms = joinedAt + 12_000;
+    t.clock.ms = joinedAt + 22_000;
     match = timedOut(match);
     const back = await yourTurn(t, roomId, tokens[1]);
     expectPosition(back, match, 1);
     expect(back.view?.street).toBe('flop');
-    expect(back.deadline).toBe(iso(joinedAt + 20_000));
+    expect(back.deadline).toBe(iso(joinedAt + 30_000));
     const { status, elapsedMs } = await wait(t, roomId, tokens[1]);
     expect(elapsedMs).toBeLessThan(1_500);
     expect(status).toEqual(back);
@@ -963,7 +966,7 @@ describe('收到什麼就做什麼 (error 且太晚或沒輪到 → 不重交，
     const alice = await yourTurn(t, roomId, tokens[0]);
     await act(t, roomId, tokens[0], { turn_id: alice.turn_id, type: 'call' });
     const bob = await yourTurn(t, roomId, tokens[1]);
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     const body = await expectError(
       await actPost(t, roomId, tokens[1], {
         turn_id: bob.turn_id,
@@ -982,7 +985,7 @@ describe('收到什麼就做什麼 (error 且太晚或沒輪到 → 不重交，
       turn_seconds: 10,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
-    t.clock.ms = joinedAt + 10_000;
+    t.clock.ms = joinedAt + 20_000;
     const body = await expectError(
       await actPost(t, roomId, tokens[0], {
         turn_id: alice.turn_id,

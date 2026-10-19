@@ -164,10 +164,10 @@ describe('Room Durable Object wrapper', () => {
   it('create and join schedule the first deadline; alarm persists the timeout before any status or act call', async () => {
     const joinedAt = Date.now();
     const { room, storage } = await joinedRoom();
-    expect(storage.alarm).toBe(joinedAt + 5_000);
+    expect(storage.alarm).toBe(joinedAt + 10_000);
     const before = await storage.get('room');
 
-    vi.setSystemTime(joinedAt + 5_001);
+    vi.setSystemTime(joinedAt + 10_001);
     await room.alarm();
 
     // Inspect persistence first: status() can itself catch up expired turns.

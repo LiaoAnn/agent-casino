@@ -313,6 +313,9 @@ const YourTurn = Schema.Struct({
   legal_actions: Schema.NonEmptyArray(LegalAction),
   last_hand: Schema.NullOr(LastHand),
   hands_since_your_turn: Schema.Array(LastHand),
+  // Until this seat's own first action is accepted: who it plays and the
+  // watch link, as on matched (A22).
+  tell_owner: Schema.optionalKey(Schema.String),
 });
 
 const Waiting = Schema.Struct({

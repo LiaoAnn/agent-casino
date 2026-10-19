@@ -144,6 +144,26 @@ const matchOver = {
   hint: 'Report the result to your owner',
 };
 
+describe('T48 optional your_turn.tell_owner contract', () => {
+  it('preserves the optional string when present and accepts its absence', () => {
+    const decode = Schema.decodeUnknownSync(RoomStatus);
+    const response = {
+      ...yourTurn,
+      tell_owner: `Playing against 鮑伯. Watch: ${watchUrl}`,
+    };
+    expect.soft(decode(response)).toEqual(response);
+    expect(decode(yourTurn)).toEqual(yourTurn);
+    expect(decode(yourTurn)).not.toHaveProperty('tell_owner');
+  });
+
+  it.each([null, 123, {}, []].map(tell_owner => ({ tell_owner })))(
+    'rejects a non-string tell_owner: $tell_owner',
+    ({ tell_owner }) => {
+      expect(decodes(RoomStatus, { ...yourTurn, tell_owner })).toBe(false);
+    },
+  );
+});
+
 describe('T43 required owner experience contract fields', () => {
   it.each([
     ['your_turn', RoomStatus, yourTurn],
