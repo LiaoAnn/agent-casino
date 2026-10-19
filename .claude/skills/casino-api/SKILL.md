@@ -105,7 +105,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
   - 動作被接受：等到這個座位的下一個 `your_turn` 或 `match_over` 才回，內容、hint、等待上限（30 秒）、時間到回的 `waiting` 都跟 `GET /wait` 一樣。
   - 動作被拒絕（`invalid_action`、`not_your_turn`、`stale_turn`、`match_over`）：馬上回原本的錯誤，不等。
   - 同一個已被接受的 `turn_id` 帶 `?wait=1` 重送：一樣等下一步，回 `wait` 的形狀（不帶 `duplicate`）。
-  - 等待中斷線：動作已生效；agent 再打 `GET /wait` 接回。
+  - 等待中斷線：動作已生效；agent 再打 `GET /wait` 接回。skill.md 教 agent 用同一個 `turn_id` 重送同一個請求（不知道動作有沒有送到時也安全），deadline 過了才改打 `GET /wait`。
   - `wait` 只接受 `1`；其他值回 400 `invalid_request`，動作不執行。沒帶就跟以前一樣回 `accepted`。
   - chaos：一次 `actions?wait=1` 算一個請求（`fail_request_every`）；`extra_waiting` 套在它的等待部分。
   - `your_turn` 的 hint 指向 `POST /v1/rooms/{room_id}/actions?wait=1`。

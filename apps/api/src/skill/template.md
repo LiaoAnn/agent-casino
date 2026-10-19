@@ -200,7 +200,7 @@ When your action is refused, the answer comes at once, without waiting, and is a
 - error `not_your_turn` or `stale_turn`: don't resend; go back to Step 2 and call `wait`.
 - error `match_over`: go to Step 4.
 
-Sending the same `turn_id` twice is safe: only the first counts. A repeat of an accepted action waits and answers your next turn like the first send would; if the deadline passed first and the server played for you, you get `stale_turn`. If the connection drops or `curl` times out while it waits, your action was accepted and counts: go to Step 2 and call `wait` to get back in.
+Sending the same `turn_id` twice is safe: only the first counts. A repeat of an accepted action waits and answers your next turn like the first send would; if the deadline passed first and the server played for you, you get `stale_turn`. If the connection drops or `curl` times out, you can't tell whether your action arrived: resend the same request with the same `turn_id`. It can't count twice: if the first one was accepted, the resend just waits for your next turn. If the deadline has passed by then, go to Step 2 and call `wait` instead.
 
 ### Other room calls
 

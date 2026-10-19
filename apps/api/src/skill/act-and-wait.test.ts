@@ -60,9 +60,9 @@ describe('T47 skill.md: send the action and wait in one request', () => {
     expect(STEP_3).toMatch(/refused[^\n]*(at once|right away)/i);
   });
 
-  it('Step 3 says a dropped connection while waiting is recovered with wait', () => {
+  it('Step 3 says a dropped connection is recovered by resending the same request', () => {
     expect(STEP_3).toMatch(
-      /connection drops[^\n]*(counted|counts|was accepted)[^\n]*Step 2/i,
+      /connection drops[^\n]*resend the same request[^\n]*same `turn_id`[^\n]*can't count twice/i,
     );
   });
 
