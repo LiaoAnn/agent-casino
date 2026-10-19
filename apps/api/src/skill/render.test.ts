@@ -93,9 +93,6 @@ const endpointOf = (curlPath: string): Reflected | undefined => {
 
 const lines = (text: string) => text.split('\n');
 
-const numberedItems = (text: string): string[] =>
-  text.match(/^\d+[.)] [^\n]*(?:\n(?!\d+[.)] |#{1,6} )[^\n]*)*/gm) ?? [];
-
 // The text from the `## <title>` line up to the next `## ` heading.
 const section = (md: string, title: string): string => {
   const all = lines(md);
@@ -471,9 +468,9 @@ describe('renderSkill: base URL', () => {
 describe('renderSkill: what an agent must know', () => {
   // T32: check the rendered manual, including URLs substituted by renderSkill.
   it('generates a random name instead of offering a name to copy', () => {
-    const quick = section(MD, 'Quick start');
-    expect(quick).not.toContain('sonnet-k7q2');
-    expect(quick).toContain('openssl rand -hex 2');
+    const profile = section(MD, 'Your profile');
+    expect(profile).not.toContain('sonnet-k7q2');
+    expect(profile).toContain('openssl rand -hex 2');
   });
 
   it.each([undefined, 'https://web.casino.test'])(
@@ -482,28 +479,43 @@ describe('renderSkill: what an agent must know', () => {
       const md = renderSkill(BASE_URL, webUrl);
       const play = section(md, 'How to play');
       const step1 = play.slice(0, play.indexOf('### Step 2'));
-      const responses = fenced(step1, 'json').map(
-        block => JSON.parse(block) as Record<string, unknown>,
-      );
-      const watchUrls = responses
-        .filter(body => typeof body.token === 'string')
-        .map(body => String(body.watch_url));
-      expect(watchUrls).toHaveLength(3);
-      const saves = fenced(step1, 'bash').filter(block =>
-        block.includes('> .casino/$ROOM_ID.token'),
-      );
-      // The create/join instructions may share one save block.
-      expect(saves.length).toBeGreaterThanOrEqual(2);
-      for (const block of saves) {
-        expect(block).toContain('> .casino/$ROOM_ID.watch_url');
-        const savedUrl = watchUrls.find(url => block.includes(url));
-        expect(savedUrl, block).toBeDefined();
-        expect(savedUrl).toContain(
-          `${webUrl ?? BASE_URL}/watch/r_8f2k1x9q0a?token=`,
+      const blocks = fenced(step1, 'bash');
+      for (const path of ['/v1/queue"', '/v1/rooms"', '/join"']) {
+        const at = blocks.findIndex(block => block.includes(path));
+        expect(at, path).toBeGreaterThanOrEqual(0);
+        expect(blocks[at], 'save the HTTP response directly').toMatch(
+          /(?:-o|--output)\s+\S+/,
+        );
+        const rest = blocks.slice(at + 1);
+        const nextCurl = rest.findIndex(block => /\bcurl\b/.test(block));
+        const saving = [
+          blocks[at],
+          ...rest.slice(0, nextCurl < 0 ? undefined : nextCurl),
+        ].join('\n');
+        for (const field of ['room_id', 'token', 'watch_url']) {
+          expect(saving, `extract ${field} from the saved response`).toMatch(
+            new RegExp(`\\bsed\\b[^\\n]*["']${field}["']`),
+          );
+        }
+        expect(saving).toContain('> .casino/$ROOM_ID.token');
+        expect(saving).toContain('> .casino/$ROOM_ID.watch_url');
+      }
+      for (const block of blocks) {
+        expect(block).not.toMatch(/\b(?:jq|python3?|node|awk)\b/);
+        expect(block).not.toMatch(
+          /(?:echo|printf)[^\n]*(?:eyJ[A-Za-z0-9_-]+\.|https?:\/\/[^\s]+\/watch\/)/,
         );
       }
     },
   );
+
+  it('requires no manual credential or spectator URL transcription in any save block', () => {
+    for (const block of fenced(MD, 'bash')) {
+      expect(block).not.toMatch(
+        /(?:echo|printf)[^\n]*(?:eyJ[A-Za-z0-9_-]+\.|https?:\/\/[^\s]+\/watch\/)/,
+      );
+    }
+  });
 
   it('puts the immediate owner relay and language rules before onboarding', () => {
     const top = MD.slice(0, MD.indexOf('## What this is'));
@@ -710,7 +722,7 @@ describe('renderSkill: what an agent must know', () => {
     expect(joined).toBeGreaterThan(matched);
     expect(cleanup).toBeGreaterThan(leaderboard);
     for (const b of [matched, joined])
-      expect(blocks[b]).toMatch(/^export ROOM_ID=r_\w+$/m);
+      expect(blocks[b]).toMatch(/ROOM_ID=[^\n]*sed/);
     expect(play).toMatch(/several matches/i);
     expect(play).toMatch(/same folder/i);
   });
@@ -756,14 +768,14 @@ describe('renderSkill: what an agent must know', () => {
     expect(quick).toMatch(/lost all their chips/);
     expect(quick).toMatch(/double every 5 hands/);
     expect(quick).toMatch(/10-25 hands/);
-    expect(quick).toContain('`settings.blind_every`');
-    expect(quick).toContain('`settings.max_hands`');
+    expect(MD).toContain('`settings.blind_every`');
+    expect(MD).toContain('`settings.max_hands`');
     expect(quick).not.toMatch(/settings\.hands|fixed number of hands/);
     // S5 adds an overview mentioning watch_url and waiting before the steps.
-    const flow = numberedItems(quick).slice(1).join('\n');
+    const flow = quick;
     const order = [
       flow.indexOf('POST /v1/queue'),
-      flow.indexOf('`watch_url`'),
+      flow.indexOf('tell_owner'),
       flow.indexOf('wait'),
       flow.indexOf('actions'),
       flow.indexOf('match_over'),
@@ -775,11 +787,13 @@ describe('renderSkill: what an agent must know', () => {
 
   // T27 (arena proposal 1): names are public and not accounts.
   it('says how to pick a name when none was given, and that names are shared', () => {
-    const quick = section(MD, 'Quick start');
-    expect(quick).toMatch(/no name/i);
-    expect(quick).toContain('openssl rand -hex 2');
-    expect(quick).toMatch(/public/i);
-    expect(quick).toMatch(/same name[^\n]*rating[^\n]*record/i);
+    const profile = section(MD, 'Your profile');
+    expect(profile).toMatch(
+      /no name|(?:owner|they)[^\n]*(?:not|hasn't|haven't)[^\n]*(?:name|chosen)|(?:ask|question)[^\n]*name/i,
+    );
+    expect(profile).toContain('openssl rand -hex 2');
+    expect(profile).toMatch(/public/i);
+    expect(MD).toMatch(/same name[^\n]*rating[^\n]*record/i);
   });
 
   // T27 (arena proposal 8, casino-api A17).
@@ -792,9 +806,8 @@ describe('renderSkill: what an agent must know', () => {
     expect(crash).toMatch(/`wait`[^\n]*`state`/);
     expect(crash).toMatch(/plays for you/);
     expect(crash).toMatch(/same name[^\n]*same `queue_key`[^\n]*`matched`/);
-    // After the save block moved the queue_key, the queue example can't
-    // find it any more: a saved token means wait, not queue.
-    expect(crash).toMatch(/token is saved[^\n]*do not queue again/i);
+    // A copied credential can recover the same queued seat.
+    expect(crash).toMatch(/invalid_token[\s\S]*same[^\n]*queue_key/i);
   });
 
   // T28 (casino-api A4, A15).
@@ -823,8 +836,14 @@ describe('renderSkill: what an agent must know', () => {
     'queue progress updates (web URL: %s)',
     webUrl => {
       const md = renderSkill(BASE_URL, webUrl);
-      const quickItems = numberedItems(section(md, 'Quick start'));
-      const first = quickItems[0] ?? '';
+      const first =
+        md
+          .split(/\n\s*\n/)
+          .find(
+            paragraph =>
+              /(?:two or three|2 or 3|2[–-]3)[ -]sentences/i.test(paragraph) &&
+              /owner/i.test(paragraph),
+          ) ?? '';
       const play = section(md, 'How to play');
       const step1 = play.slice(0, play.indexOf('### Step 2'));
       const items =
@@ -834,8 +853,8 @@ describe('renderSkill: what an agent must know', () => {
       const matched =
         items.find(item => /"status"\s*:\s*"matched"/.test(item)) ?? '';
 
-      it('makes the first Quick start item explain the whole match to the owner', () => {
-        expect(first, 'first numbered Quick start item').toMatch(/^1[.)] /);
+      it('explains the whole match to the owner before queueing', () => {
+        expect(first, 'owner introduction').not.toBe('');
         expect.soft(first).toMatch(/(?:before|start|begin)/i);
         expect.soft(first).toMatch(/(?:tell|say|explain|inform)[\s\S]*owner/i);
         expect
@@ -874,48 +893,45 @@ describe('renderSkill: what an agent must know', () => {
           );
       });
 
-      it('keeps naming and the playable steps after the new first item in order', () => {
-        const rest = quickItems.slice(1);
-        const name = rest.findIndex(item =>
-          item.includes('openssl rand -hex 2'),
-        );
-        const queue = rest.findIndex(item => item.includes('POST /v1/queue'));
-        const watch = rest.findIndex(item => item.includes('watch_url'));
-        const loop = rest.findIndex(
-          item => item.includes('wait') && item.includes('actions'),
-        );
-        const report = rest.findIndex(
-          item => item.includes('match_over') && /report/i.test(item),
-        );
-        const order = [name, queue, watch, loop, report];
+      it('keeps naming, queueing, saving, owner relay, play and reporting in order across their sections', () => {
+        const profileAt = md.indexOf('## Your profile');
+        const playAt = md.indexOf('## How to play');
+        expect(profileAt).toBeGreaterThan(0);
+        expect(profileAt).toBeLessThan(playAt);
+        const quick = section(md, 'Quick start');
+        const order = [
+          quick.indexOf('POST /v1/queue'),
+          quick.search(/sav(?:e|ing)|\.casino\//i),
+          quick.indexOf('tell_owner'),
+          quick.indexOf('wait'),
+          quick.indexOf('actions'),
+          quick.indexOf('match_over'),
+        ];
         expect(order.every(index => index >= 0)).toBe(true);
         for (let i = 1; i < order.length; i++) {
           expect(order[i]).toBeGreaterThan(order[i - 1] ?? -1);
         }
+        expect(quick).toMatch(/report/i);
+        const playBlocks = fenced(play, 'bash');
+        const leave = playBlocks.findIndex(block => block.includes('/leave"'));
+        const leaderboard = playBlocks.findIndex(block =>
+          block.includes('/v1/leaderboard"'),
+        );
+        expect(leave).toBeGreaterThanOrEqual(0);
+        expect(leaderboard).toBeGreaterThan(leave);
       });
 
-      it('refers to the Quick start explanation before the first queue call', () => {
-        const queueCall = fenced(step1, 'bash').find(block =>
-          block.includes('"$CASINO_URL/v1/queue"'),
+      it('places the owner explanation or a reference to it before the first queue call', () => {
+        const queueAt = md.indexOf('"$CASINO_URL/v1/queue"');
+        expect(queueAt).toBeGreaterThan(0);
+        expect(first).not.toBe('');
+        expect(md.indexOf(first)).toBeLessThan(queueAt);
+        const beforeQueue = step1.slice(
+          0,
+          step1.indexOf('"$CASINO_URL/v1/queue"'),
         );
-        expect(queueCall).toBeDefined();
-        const beforeQueue = step1.slice(0, step1.indexOf(queueCall ?? ''));
-        const announcement = beforeQueue
-          .split(/\n\s*\n/)
-          .find(
-            paragraph =>
-              /Quick start/i.test(paragraph) &&
-              /(?:explain|explanation|overview|intro|step\s*1|first step)/i.test(
-                paragraph,
-              ),
-          );
-        expect(
-          announcement,
-          'Quick start reference before the first queue call',
-        ).toBeDefined();
-        expect(announcement ?? '').toMatch(/Quick start/i);
-        expect(announcement ?? '').toMatch(
-          /(?:explain|explanation|overview|intro|step\s*1|first step)/i,
+        expect(beforeQueue).toMatch(
+          /(?:explain|explanation|overview|intro|tell[^\n]*owner)/i,
         );
       });
 
@@ -1078,10 +1094,13 @@ describe('renderSkill: what an agent must know', () => {
     );
   });
 
-  it('says to resend the saved token on invalid_token, not to get a new one', () => {
+  it('distinguishes same-seat queue recovery from joining for a new token', () => {
     const errors = section(MD, 'Error codes');
-    expect(errors).toMatch(/`invalid_token`[^\n]*token you saved/);
-    expect(errors).toMatch(/do not queue or join again/);
+    expect(errors).toMatch(/`invalid_token`[^\n]*(?:cop|saved)/i);
+    expect(errors).toMatch(/same[^\n]*name/i);
+    expect(errors).toMatch(/same[^\n]*queue_key/i);
+    expect(errors).toMatch(/same[^\n]*matched/i);
+    expect(errors).toMatch(/(?:do not|don't|never)[^\n]*join/i);
   });
 });
 

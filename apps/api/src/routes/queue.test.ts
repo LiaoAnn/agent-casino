@@ -500,6 +500,38 @@ describe('POST /v1/queue: opponent, settings and watch link (A16)', () => {
     }
   });
 
+  it('same-key retries stop recovering the cached seat after 45 seconds while the match is still playing', async () => {
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const { env } = makeEnv();
+      const [alice] = await pair(env);
+      expect(await decodeQueue(await queue(env, 'AlIce'))).toEqual(alice);
+
+      now += 60_000;
+      const readRoom = async () => {
+        const response = await get(
+          env,
+          `/v1/rooms/${alice.room_id}/state`,
+          alice.token,
+        );
+        expect(response.status).toBe(200);
+        const state = Schema.decodeUnknownSync(RoomStatus)(
+          await response.json(),
+        );
+        expect(state.room_status).toBe('playing');
+      };
+      await readRoom();
+      const retry = await decodeQueue(await queue(env, 'AlIce'));
+      expect(retry.status).toBe('waiting');
+      expect(retry).not.toHaveProperty('room_id');
+      expect(retry).not.toHaveProperty('token');
+      await readRoom();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('the waiter who is paired later gets the same watch_url on every call', async () => {
     const { env } = makeEnv(undefined, {}, WAIT_MS);
     expect((await decodeQueue(await queue(env, 'Alice'))).status).toBe(
