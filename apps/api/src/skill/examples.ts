@@ -181,7 +181,7 @@ const yourTurn: RoomStatus = {
   ],
   last_hand: hand2,
   hands_since_your_turn: [],
-  hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to ${ACT}. Write your note in your owner's language and script (Traditional and Simplified Chinese are different scripts)`,
+  hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to ${ACT}?wait=1. Write your note in your owner's language and script (Traditional and Simplified Chinese are different scripts)`,
 };
 
 const opponentActing: RoomStatus = {
@@ -398,7 +398,26 @@ export const EXAMPLES: Readonly<Record<string, EndpointExample>> = {
   'room.act': {
     request: actRequest,
     responses: [
-      { title: 'Accepted', status: 200, body: accepted },
+      {
+        title: 'Accepted, and your next turn came: send your next action',
+        status: 200,
+        body: yourTurn,
+      },
+      {
+        title: 'Accepted, but no turn for you within 30 seconds: call wait',
+        status: 200,
+        body: opponentActing,
+      },
+      {
+        title: 'Accepted, and the match is over: report it',
+        status: 200,
+        body: matchOver,
+      },
+      {
+        title: 'Accepted, when sent without `?wait=1`: call wait',
+        status: 200,
+        body: accepted,
+      },
       {
         title: 'Illegal action: fix it and resend with the same turn_id',
         status: 400,

@@ -460,7 +460,9 @@ describe('skill.md examples, run against the API', () => {
       display_name: 'Alice the Shark',
     });
     expect(ran[3]?.body).toMatchObject({ status: 'your_turn' });
-    expect(ran[4]?.body).toMatchObject({ status: 'accepted' });
+    // T47: bob's raise is sent with ?wait=1; alice never acts, so after the
+    // wait window it answers waiting, saved where Step 2 saves wait's answer.
+    expect(ran[4]?.body).toMatchObject({ status: 'waiting', to_act_seat: 0 });
     expect(ran[6]?.body).toMatchObject({
       status: 'match_over',
       result: 'loss',

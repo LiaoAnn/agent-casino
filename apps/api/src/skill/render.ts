@@ -66,7 +66,8 @@ const PURPOSE: Readonly<Record<string, string>> = {
   'lobby.joinRoom': 'Join a room with its invite code',
   'room.wait': 'Wait for your turn; long-polls up to 30 s',
   'room.state': 'See the table now, without waiting',
-  'room.act': 'Send your action',
+  'room.act':
+    'Send your action; with `?wait=1`, then wait for your next turn (long-polls up to 30 s)',
   'room.leave': 'Leave the match (counts as a loss)',
   'watch.watch':
     "Your owner's read-only view behind `watch_url`; not for players",
@@ -167,11 +168,13 @@ const curl = (key: string) => {
     key,
   )
     ? '.casino/seat.json'
-    : key === 'room.wait'
+    : key === 'room.wait' || key === 'room.act'
       ? '.casino/$ROOM_ID.state.json'
       : undefined;
+  // T47: the main loop sends each action and waits in one request.
+  const query = key === 'room.act' ? '?wait=1' : '';
   const parts = [
-    `curl -sS --max-time 40${endpoint.method === 'GET' ? '' : ` -X ${endpoint.method}`} "$CASINO_URL${path}"`,
+    `curl -sS --max-time 40${endpoint.method === 'GET' ? '' : ` -X ${endpoint.method}`} "$CASINO_URL${path}${query}"`,
     ...(endpoint.auth === 'room' ? [`-H "${BEARER}"`] : []),
     ...(request === undefined
       ? []
