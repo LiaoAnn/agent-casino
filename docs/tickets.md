@@ -38,7 +38,7 @@
 | 7.9 | T33（牌桌像真的賭桌） | 1 |
 | 7.10 | T34（錦標賽賽制） | 1 |
 | 7.11 | T35（顯示名稱） | 1 |
-| 7.12 | T43（主人端的體驗）、T44（網站上線前修整，範圍待定） | 2 |
+| 7.12 | T43（主人端的體驗）、T44（網站上線前修整） | 2 |
 | 9 | T36、T37（多人：規則、合約；⏸ 等 Ann 說開始） | 2 |
 | 10 | T38、T40、T41（Room DO、積分、網頁） | 3 |
 | 11 | T39 → T42（大廳、skill.md 與試玩） | 1 |
@@ -309,6 +309,33 @@
   - `last_hand` 行為不變。
 - 功能驗證：在 worktree 網址用 curl 打一場，貼 matched 和 `match_over` 的 `tell_owner`。合併後 coordinator 跑 arena 第 6 輪（Haiku、pi 與其他小模型或開源模型），照 agent-playtest skill 的「主人體驗」一列判斷。
 
+### T44 網站上線前修整（約 900 行）· Blocked by：T35
+- 來源：T35 合併後的網站巡檢（2026-10-19）。目標是讓第一次來的人覺得這是完成品，不是半成品。牌桌、配色照 web-design skill。
+- 合約 ticket：可以改 `apps/api/src/contract/`，範圍只限排行榜的 `rank`（同分同名次）和對局的結束原因。
+- 一定要修：
+  - 站內 404：中文頁面，附回首頁的連結（TanStack 的 `notFoundComponent`）；
+  - 錯誤頁：中文說明，不露出原始錯誤和框架預設的按鈕（`errorComponent`）；
+  - 輸光的座位顯示「出局」，不是 ALL-IN（`seat-panel.tsx` 用 `stack===0` 判斷）；
+  - 同一條街的第一個下注寫「下注」，有人下注之後才寫「加注到」（`lib/format.ts`）；
+  - 對局頁寫出這場怎麼結束的：一方輸光，或打滿 `max_hands` 比籌碼；
+  - 排行榜同分同名次（1、1、3）（2026-10-19 Ann）；
+  - `@name` 輸出成一段完整的文字，不要讓 SSR 在 `@` 和名字中間插 `<!-- -->`（staging 的 e2e「the web shows the queued match」因此沒過）；
+  - `pnpm e2e --target=prod` 跳過會計分的那段，正式環境的排行榜不能出現 e2e 帳號（staging 可以）（2026-10-19 Ann）。
+- 一個網域（2026-10-19 Ann）：web 收到 `/skill.md` 和 `/v1/*` 時，經由現有的 service binding 轉給 api，人和 agent 都用同一個網址。skill.md 裡的網址、`watch_url` 都要是這個網址。
+- 建議一起修：
+  - 首頁兩三行說明：這是什麼、賽制、沒有真錢、怎麼讓 agent 參加（附 skill.md 網址）；
+  - 動作紀錄標出全下；
+  - 觀戰頁和對局頁的 Elo 顯示方式一致；
+  - 重複的標籤（「計分：計分」、兩個「結果」標題）、種子的標籤；
+  - 時間統一用看的人的當地時間；SSR 時「最後更新」不要是空的；
+  - 對局列表可以往前翻（`/v1/matches` 已經有 `before`）；
+  - 每頁有自己的標題、favicon、og 標籤；觀戰頁加 `noindex`；
+  - 對局頁標出勝方、盲注升級的那一手；
+  - 桌機版面放寬；手機上的排行榜不要擠成七欄。
+- 先不做：選手頁 `/players/{name}`（2026-10-19 Ann：可以做，但優先序不高）。名字先不加連結。「Codex @Codex」照 A20 永遠顯示。
+- 驗證：`pnpm check`、`pnpm test:api`、`pnpm test:web`、`pnpm e2e --target=local`。
+- 功能驗證：在 worktree 網址用 t3 的預覽工具逐頁看（首頁、排行榜、對局列表、對局頁、觀戰頁、404、錯誤頁），桌機和手機寬度都截圖貼在 PR。
+
 ## Epic E3 Skill 與接入
 
 **完成定義**：全新的 Claude Code、Codex 只收到一句話就能自己打完一場，不問人。
@@ -360,8 +387,9 @@
 
 **完成定義**：正式環境可用，三個 agent 試玩通過。
 
-### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26、T30、T34、T35
+### T15 正式上線 ★🔒（約 500 行）· Blocked by：T14、T21、T22、T26、T30、T34、T35、T43、T44
 - 正式環境部署（人同意後）、管理員金鑰、試玩發現的小修正。
+- 網域 `casino.liaoann.net`，web Worker 用 Custom Domain 綁定（Cloudflare 自動建 DNS 與憑證），api 經由 web 轉送（T44），不另開網域。`ADMIN_KEY` 由 Ann 自己用 `wrangler secret put ADMIN_KEY --env production` 設。Ann 已設 budget alert。順序：staging 給 Ann 玩過，再上正式環境，上線後在正式環境跑一輪試玩（2026-10-19 Ann）。
 - 部署前先跑 `db:migrate:<環境>`（T22 的 `0001_ratings_rank.sql`、T23 的 note 欄位）；部署後第一週每天看 DO 請求、D1 寫入列數、log 筆數，看到 `gave up storing the match` 就是 D1 有問題（見 `docs/cost.md`）。
 - 驗證：`pnpm e2e --target=prod`。
 - 功能驗證：三個 agent 在正式環境各打一場 10 手局。
@@ -508,7 +536,7 @@
 
 | 問題 | 預設 |
 | --- | --- |
-| Cloudflare 帳號、測試與正式網域 | T13 前由人提供；之前全部在本機跑 |
+| Cloudflare 帳號、測試與正式網域 | staging 用 workers.dev；正式環境用 `casino.liaoann.net` 一個網域（2026-10-19 Ann） |
 | CI 要不要放 Claude Code / Codex 的登入憑證 | 先不放，`pnpm playtest` 由 agent 手動觸發 |
 | casino-api skill 的細節數字（名字規則、Elo 參數、token 有效期、排隊保留 45 秒） | 照 skill，之後可調 |
 | 給參賽 agent 看的文字（skill.md、`hint`、`message`）用什麼語言 | 英文，因為各家 harness 和模型最穩 |
@@ -516,4 +544,5 @@
 | `docs/cost.md` 的防護（限流、bot 房提早結束、緊急開關等）與 staging 是否公開 | 先都不做，staging 維持公開（2026-10-18 Ann）。Ann 用 Workers 付費方案，沒有花費上限，請 Ann 在 dashboard 設 budget alert 與用量通知；用量異常再開 ticket |
 | 賽制 | 單挑錦標賽：打到一方歸零，盲注每 5 手翻倍，50 手安全上限（2026-10-18 Ann）。取代原本固定 10 手比籌碼 |
 | 玩家名字 | `display_name` 給人看（可中文），`name` 是身分；agent 第一次問主人、存 `.casino/profile.json` 之後沿用（2026-10-19 Ann） |
+| 選手頁 `/players/{name}` | 可以做，但優先序不高，先不做；名字先不加連結（2026-10-19 Ann） |
 | 多人桌 | 第二版做 2–6 人、拿掉排隊改成大廳，詳見 `docs/design/multiplayer.md`（2026-10-19 Ann）；每步 30 秒、`max_hands` 1–100、牌桌座位不顯示 @name 已經先套用到第一版 |
