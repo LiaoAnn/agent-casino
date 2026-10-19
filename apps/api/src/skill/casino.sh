@@ -71,22 +71,25 @@ http() {
     # From a file, so the token never shows in the process list.
     set -- "$@" -H "@$(room_file auth)"
   fi
-  [ -n "$_b" ] && set -- "$@" -H 'Content-Type: application/json' --data-binary "$_b"
+  if [ -n "$_b" ]; then
+    # From a file too: the queue key is in the body.
+    printf '%s' "$_b" >"$D/body.json"
+    set -- "$@" -H 'Content-Type: application/json' --data-binary "@$D/body.json"
+  fi
   rm -f "$D/answer.json"
   CODE=$(curl "$@" "$CASINO_URL$_p" 2>"$D/curl.err") || CODE=000
   [ "$CODE" != 000 ] && [ -s "$D/answer.json" ]
 }
 
 # Like http, resending the same request while it fails for a passing reason
-# (503 unavailable, or no answer at all unless $ONCE: opening a room twice
-# would open two), at most 5 times.
+# (503 unavailable, or no answer at all unless $ONCE: opening or joining a
+# room twice can't be undone), for up to 20 s so a command stays short.
 call() {
-  _try=1
+  _start=$(date +%s)
   while :; do
     if http "$@" && [ "$CODE" != 503 ]; then return 0; fi
     [ "$CODE" = 000 ] && [ -n "${ONCE-}" ] && return 1
-    [ "$_try" -ge 5 ] && return 1
-    _try=$((_try + 1))
+    [ $(($(date +%s) - _start)) -ge 20 ] && return 1
     sleep 1
   done
 }
@@ -322,8 +325,10 @@ cmd_queue() {
       q=$(jnum queue_size <"$D/answer.json")
       if [ "$w" -ge 180 ]; then
         relay "No opponent after ${w} seconds of queueing ($q in the queue). Should I keep waiting (and for how long), play the house-bot instead (unrated), or stop?"
-        say 'Ask your owner and wait for their answer, unless they already told you what to do. Your place in the queue lapses 45 s after your last call; that is fine, queue again later.'
-        say "If they say stop: there is nothing to cancel. If they pick the bot: $ME bot"
+        say 'Ask your owner and wait for their answer before the next command, unless they already told you what to do. Your place in the queue lapses 45 s after your last call; that is fine, queue again later.'
+        say "If they say stop: there is nothing to cancel."
+        next 'queue  (keep waiting), or: bot  (play the house-bot); only after your owner answers'
+        exit 2
       else
         relay "Still queueing: waited ${w} s, $q in the queue."
         say 'Write that line in your reply (do not wait for an answer), then queue again right away: your place is kept for 45 seconds.'
@@ -369,7 +374,7 @@ cmd_room() {
       need_profile
       r=$(printf '%s' "$2" | tr -cd 'a-z0-9_')
       c=$(printf '%s' "$3" | tr -cd 'A-Za-z0-9')
-      call POST "/v1/rooms/$r/join" "{\"name\":\"$NAME\"$DN,\"invite_code\":\"$c\"}" \
+      ONCE=1 call POST "/v1/rooms/$r/join" "{\"name\":\"$NAME\"$DN,\"invite_code\":\"$c\"}" \
         || { no_answer; next "room join $r $c"; exit 1; }
       [ "$(status_of "$D/answer.json")" = error ] && seat_error "room join <room_id> <invite_code>"
       take_seat
@@ -387,7 +392,7 @@ room_get() { # wait | state
   need_room
   [ "$1" = state ] && SHOW_WATCH=1
   call GET "/v1/rooms/$ROOM/$1" || { no_answer; next "$1"; exit 1; }
-  room_answer && return
+  room_answer
   error_line
   [ -s "$(room_file last.json)" ] && grep -q '"state":{' "$D/answer.json" && show "$(room_file last.json)"
   next "$1"
@@ -416,17 +421,20 @@ cmd_act() {
   body="{\"turn_id\":\"$tid\",\"type\":\"$type\"${amount:+,\"amount\":$amount}${note:+,\"note\":\"$(jesc "$note")\"}}"
   deadline=$(cat "$(room_file deadline)" 2>/dev/null || echo 0)
   # A dropped connection may or may not have delivered the action: resend
-  # the same turn_id, which can't count twice, until the deadline.
+  # the same turn_id, which can't count twice, until the deadline (for up
+  # to 20 s, so the command stays short).
+  start=$(date +%s)
   while :; do
     if http POST "/v1/rooms/$ROOM/actions?wait=1" "$body" && [ "$CODE" != 503 ]; then break; fi
-    if [ "$(date +%s)" -ge "$deadline" ]; then
-      say 'No answer from the server before the deadline; checking the table.'
-      room_get wait
+    now=$(date +%s)
+    if [ "$now" -ge "$deadline" ] || [ $((now - start)) -ge 20 ]; then
+      say 'No answer from the server; checking the table.'
+      room_get state
     fi
     sleep 1
   done
   printf '%s\n' "$tid" >"$(room_file used)"
-  room_answer && return
+  room_answer
   case $(jstr code <"$D/answer.json") in
     invalid_action)
       rm -f "$(room_file used)"
@@ -452,7 +460,7 @@ cmd_act() {
 cmd_leave() {
   need_room
   call POST "/v1/rooms/$ROOM/leave" || { no_answer; next leave; exit 1; }
-  room_answer && return
+  room_answer
   error_line
   next report
   exit 1
@@ -488,7 +496,7 @@ cmd_report() {
   esac
   relay "$tell"
   relay "$rank"
-  rm -f "$D/$ROOM".* "$D/room" "$D/answer.json" "$D/curl.err"
+  rm -f "$D/$ROOM".* "$D/room" "$D/answer.json" "$D/body.json" "$D/curl.err"
   say 'Room files deleted; your profile stays in .casino/profile.json for next time.'
 }
 

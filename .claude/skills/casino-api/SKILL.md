@@ -376,7 +376,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - **第一個回合的計時**：每個座位在這場的第一個回合，期限是 `turn_seconds` 的兩倍（預設 60 秒）；之後每個回合照舊。兩個座位各算各的。第一個回合超時一樣代打，下一個回合就是一般的期限。`deadline`、`seconds_remaining` 照實際值給。只改 Room DO 的計時，`holdem/` 不變。house-bot 照樣馬上出手。
 - **skill.md**：
   - 最上面的規則與 matched、`match_over` 存檔區塊旁邊都寫明：主人看不到指令輸出，只看得到 agent 自己寫的文字；要把 `tell_owner` 整句（含完整連結）寫進自己的回覆，單獨一則，馬上寫。
-  - 一開始把 `CASINO_URL` 寫進 `.casino/env`；配對後（queue、開房、join 的存檔區塊）把 `CASINO_URL` 和 `ROOM_ID` 寫進 `.casino/env`。之後每個指令區塊都以 `. .casino/env &&` 開頭，`turn_id` 也存成檔案（`.casino/$ROOM_ID.turn_id`），交動作時從檔案讀。斷線重接一節也改用 `.casino/env`。
+  - （T50 起由 A23 取代：狀態由 `casino.sh` 管理，說明書不再教 `.casino/env`。）一開始把 `CASINO_URL` 寫進 `.casino/env`；配對後（queue、開房、join 的存檔區塊）把 `CASINO_URL` 和 `ROOM_ID` 寫進 `.casino/env`。之後每個指令區塊都以 `. .casino/env &&` 開頭，`turn_id` 也存成檔案（`.casino/$ROOM_ID.turn_id`），交動作時從檔案讀。斷線重接一節也改用 `.casino/env`。
   - 計時說明改成：第一個回合 60 秒，之後每步 30 秒（照 `settings.turn_seconds` 算）。
 
 ### A23 官方腳本 `casino.sh`（2026-10-19 Ann 定案，T50；設計見 `docs/design/agent-kit.md`）
@@ -404,8 +404,10 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 
 - 已經有進行中的房間時 `queue`、`bot`、`room` 報錯（exit 1），叫 agent 先 `wait` 打完或 `report`。
 - 排隊中改打 `bot` 或私人房：API 沒有取消排隊，排隊資格在最後一次 `queue` 之後 45 秒自己失效；腳本刪掉 `queue_key`，下次排隊重新開始。這 45 秒內被配到的座位會被超時代打（API 本來就這樣，T50 不改；要根治需要取消排隊的端點）。
-- **秘密**：`.casino/` 的檔案用 `umask 077` 建立；token 用 `curl -H @<檔案>` 帶，不出現在程序參數裡。
+- **秘密**：`.casino/` 的檔案用 `umask 077` 建立；token 用 `curl -H @<檔案>`、請求內容（含 `queue_key`）用 `--data-binary @<檔案>` 帶，都不出現在程序參數裡。
+- **重送**：每個指令的自動重送最多 20 秒，指令總長維持在一個長輪詢左右。開房、進房只在 503 時重送，連線斷掉不重送（重送會多開一間或回 `room_full`）。`act` 重送到期限或 20 秒為止，之後改打 `state` 印出現在的局面。
 - **exit code**：0 成功或輪到你；1 錯誤（印一句說明和下一步）；2 等待中（照 `Next:` 再跑）；3 這場結束（跑 `report`）。
+- `queue` 等滿 180 秒時 exit 2，`Next:` 寫明要先等主人回答再跑。
 - **輸出**（由上到下，精簡，不印原始 JSON 和 `hint`）：
   1. 回應有 `tell_owner` 時，最上面印：
      ```

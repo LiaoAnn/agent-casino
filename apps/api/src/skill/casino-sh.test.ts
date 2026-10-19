@@ -127,7 +127,10 @@ async function serve(
   chaos = false,
   faults: {
     drop?: (path: string, body: Record<string, unknown>) => boolean;
+    dropResponse?: (path: string, answer: Record<string, unknown>) => boolean;
     unavailableRooms?: number;
+    unavailableJoin?: number;
+    waitedSeconds?: number;
     deadlineMs?: number;
     tellOwner?: string;
   } = {},
@@ -168,8 +171,13 @@ async function serve(
         },
       );
       let response: Response;
-      if (path === '/v1/rooms' && (faults.unavailableRooms ?? 0) > 0) {
-        faults.unavailableRooms = (faults.unavailableRooms ?? 0) - 1;
+      if (
+        (path === '/v1/rooms' && (faults.unavailableRooms ?? 0) > 0) ||
+        (path.endsWith('/join') && (faults.unavailableJoin ?? 0) > 0)
+      ) {
+        if (path.endsWith('/join'))
+          faults.unavailableJoin = (faults.unavailableJoin ?? 0) - 1;
+        else faults.unavailableRooms = (faults.unavailableRooms ?? 0) - 1;
         response = Response.json(
           {
             status: 'error',
@@ -181,6 +189,12 @@ async function serve(
         );
       } else response = await handle(request, env);
       const answer = JSON.parse(await response.text());
+      if (
+        path === '/v1/queue' &&
+        answer.status === 'waiting' &&
+        faults.waitedSeconds !== undefined
+      )
+        answer.waited_seconds = faults.waitedSeconds;
       if (answer.status === 'your_turn' && faults.deadlineMs !== undefined) {
         answer.deadline = new Date(
           Date.now() + faults.deadlineMs,
@@ -201,6 +215,11 @@ async function serve(
         status: response.status,
         userAgent: incoming.headers['user-agent'],
       });
+      // The request took effect, but the client never receives its answer.
+      if (faults.dropResponse?.(path, answer)) {
+        incoming.socket.destroy();
+        return;
+      }
       const responseHeaders = new Headers(response.headers);
       responseHeaders.set('content-length', String(Buffer.byteLength(text)));
       outgoing.writeHead(response.status, Object.fromEntries(responseHeaders));
@@ -540,31 +559,40 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
     checkRequests(api);
   }, 120_000);
 
-  it('stops retrying dropped actions at the deadline and shows wait instead', async () => {
-    const api = await serve(false, {
-      drop: path => path.includes('/actions'),
-      deadlineMs: 2_000,
-    });
-    const cwd = player(api.url);
-    await run(cwd, 'profile', 'deadline');
-    expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
-    const turn = await run(cwd, 'wait');
-    const before = api.exchanges.length;
-    const result = await run(cwd, ...action(turn));
-    expect(result.code, `${result.out}\n${result.err}`).toBe(0);
-    const calls = api.exchanges.slice(before);
-    const actions = calls.filter(exchange =>
-      exchange.path.includes('/actions'),
-    );
-    expect(actions.length, result.out).toBeGreaterThan(0);
-    expect(actions.every(exchange => exchange.status === 0)).toBe(true);
-    for (const exchange of actions)
-      expect(exchange.body).toEqual(actions[0]?.body);
-    expect(calls.at(-1)?.path).toMatch(/\/wait$/);
-    expect(calls.at(-1)?.response.status).toBe('your_turn');
-    legal(result);
-    checkRequests(api);
-  }, 60_000);
+  it.each([2_000, 60_000])(
+    'stops retrying dropped actions at the deadline or 20 seconds and shows state (deadline %i ms)',
+    async deadlineMs => {
+      const api = await serve(false, {
+        drop: path => path.includes('/actions'),
+        deadlineMs,
+      });
+      const cwd = player(api.url);
+      await run(cwd, 'profile', 'deadline');
+      expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
+      const turn = await run(cwd, 'wait');
+      const before = api.exchanges.length;
+      const started = Date.now();
+      const result = await run(cwd, ...action(turn));
+      expect(Date.now() - started, `${result.out}\n${result.err}`).toBeLessThan(
+        Math.min(deadlineMs, 20_000) + 5_000,
+      );
+      expect(result.code, `${result.out}\n${result.err}`).toBe(0);
+      const calls = api.exchanges.slice(before);
+      const actions = calls.filter(exchange =>
+        exchange.path.includes('/actions'),
+      );
+      expect(actions.length, result.out).toBeGreaterThan(0);
+      expect(actions.every(exchange => exchange.status === 0)).toBe(true);
+      for (const exchange of actions)
+        expect(exchange.body).toEqual(actions[0]?.body);
+      expect(calls.at(-1)?.path).toMatch(/\/state$/);
+      expect(calls.at(-1)?.method).toBe('GET');
+      expect(calls.at(-1)?.response.status).toBe('your_turn');
+      legal(result);
+      checkRequests(api);
+    },
+    60_000,
+  );
 
   it.each([['bot'], ['room', 'create']])(
     'does not reopen %s after a dropped room-creation connection',
@@ -577,6 +605,9 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
       await run(cwd, 'profile', 'dropped-create');
       const result = await run(cwd, ...command);
       expect(result.code, `${result.out}\n${result.err}`).toBe(1);
+      expect(`${result.out}\n${result.err}`).toMatch(
+        /connection|network|curl|failed|lost|unable/i,
+      );
       expect(
         api.exchanges.filter(
           exchange =>
@@ -605,6 +636,199 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
     },
     60_000,
   );
+
+  it.each(['dropped connection', '503'])(
+    'room join handles %s without unsafe resends',
+    async fault => {
+      let drops = 1;
+      const api = await serve(false, {
+        drop: path =>
+          fault === 'dropped connection' &&
+          path.endsWith('/join') &&
+          drops-- > 0,
+        unavailableJoin: fault === '503' ? 1 : 0,
+      });
+      const host = player(api.url);
+      const guest = player(api.url);
+      await run(host, 'profile', 'host');
+      await run(guest, 'profile', 'guest');
+      expect(await run(host, 'room', 'create')).toMatchObject({ code: 0 });
+      const created = api.exchanges.at(-1)?.response;
+      const result = await run(
+        guest,
+        'room',
+        'join',
+        String(created?.room_id),
+        String(created?.invite_code),
+      );
+      expect(result.code, `${result.out}\n${result.err}`).toBe(
+        fault === '503' ? 0 : 1,
+      );
+      const calls = api.exchanges.filter(exchange =>
+        exchange.path.endsWith('/join'),
+      );
+      expect(calls.map(exchange => exchange.status)).toEqual(
+        fault === '503' ? [503, 200] : [0],
+      );
+      if (fault === '503') expect(calls[1]?.body).toEqual(calls[0]?.body);
+      else
+        expect(`${result.out}\n${result.err}`).toMatch(
+          /connection|network|curl|failed|lost|unable/i,
+        );
+      checkRequests(api);
+    },
+    60_000,
+  );
+
+  it.each(['your_turn', 'waiting', 'match_over'])(
+    'recovers a lost accepted-action response ending in %s',
+    async status => {
+      let lost = false;
+      const api = await serve(false, {
+        dropResponse: (path, answer) => {
+          if (
+            !lost &&
+            path.endsWith('/actions?wait=1') &&
+            answer.status === status
+          ) {
+            lost = true;
+            return true;
+          }
+          return false;
+        },
+      });
+      const cwd = player(api.url);
+      await run(cwd, 'profile', 'lost-response');
+      if (status === 'waiting') {
+        expect(await run(cwd, 'room', 'create')).toMatchObject({ code: 0 });
+        const created = api.exchanges.at(-1)?.response;
+        const guest = player(api.url);
+        await run(guest, 'profile', 'opponent');
+        expect(
+          await run(
+            guest,
+            'room',
+            'join',
+            String(created?.room_id),
+            String(created?.invite_code),
+          ),
+        ).toMatchObject({ code: 0 });
+      } else expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
+      let turn = await run(cwd, 'wait');
+      for (let step = 0; step < 100 && !lost; step++) {
+        const before = api.exchanges.length;
+        const result = await run(
+          cwd,
+          ...(turn.code === 2 ? ['wait'] : action(turn)),
+        );
+        if (lost) {
+          const calls = api.exchanges
+            .slice(before)
+            .filter(exchange => exchange.path.endsWith('/actions?wait=1'));
+          expect(calls, `${result.out}\n${result.err}`).toHaveLength(2);
+          expect(calls[1]?.body).toEqual(calls[0]?.body);
+          expect(calls[0]?.response.status).toBe(status);
+          expect(calls[1]?.response.status).toBe(status);
+          expect(result.code, `${result.out}\n${result.err}`).toBe(
+            { your_turn: 0, waiting: 2, match_over: 3 }[status],
+          );
+          expect(result.out).toMatch(/^Next: /m);
+          if (status === 'your_turn') {
+            const next = calls[1]?.response;
+            expect(next?.duplicate).toBe(true);
+            expect(result.out).toMatch(
+              /nothing was sent|no action was sent|did not send|not sent/i,
+            );
+            expect(next?.turn_id).not.toBe(calls[0]?.body.turn_id);
+            if (!next) throw new Error('Missing duplicate response');
+            tableSummary(result, next);
+            const following = await run(cwd, ...action(result));
+            expect([0, 2, 3], `${following.out}\n${following.err}`).toContain(
+              following.code,
+            );
+            expect(api.exchanges.at(-1)?.body.turn_id).toBe(next.turn_id);
+          } else expect(calls[1]?.response.duplicate).toBeUndefined();
+        }
+        turn = result;
+        if (result.code === 3) break;
+      }
+      expect(lost).toBe(true);
+      checkRequests(api);
+    },
+    180_000,
+  );
+
+  it.each([180, 181])(
+    'asks the owner to choose and pauses queue instructions after %i seconds',
+    async waitedSeconds => {
+      const api = await serve(false, { waitedSeconds });
+      const cwd = player(api.url);
+      await run(cwd, 'profile', 'patient-player');
+      const result = await run(cwd, 'queue');
+      expect(result.code, `${result.out}\n${result.err}`).toBe(2);
+      const block = result.out.slice(
+        result.out.indexOf(BEGIN) + BEGIN.length,
+        result.out.indexOf(END),
+      );
+      expect(result.out).toContain(BEGIN);
+      expect(result.out).toContain(END);
+      expect(block).toMatch(/keep waiting|continue waiting/i);
+      expect(block).toMatch(/bot/i);
+      expect(block).toMatch(/stop/i);
+      expect(block).toMatch(/ask|choose|would you|want|\?/i);
+      expect(result.out.trimEnd().split('\n').at(-1)).toMatch(
+        /^Next: .*wait.*owner.*(?:answer|reply|respond)/i,
+      );
+      checkRequests(api);
+    },
+    60_000,
+  );
+
+  it('keeps both queued players queue keys and tokens out of every curl argv, including act', async () => {
+    const api = await serve();
+    const players = [player(api.url), player(api.url)];
+    for (const [index, cwd] of players.entries()) {
+      writeFileSync(
+        join(cwd, 'bin/curl'),
+        '#!/bin/sh\nprintf "%s\\n" "$@" >> curl-argv\nexec /usr/bin/curl "$@"\n',
+        { mode: 0o755 },
+      );
+      await run(cwd, 'profile', `private-${index}`);
+    }
+    const [a, b] = players;
+    if (!a || !b) throw new Error('Missing players');
+    expect(await run(a, 'queue')).toMatchObject({ code: 2 });
+    expect(await run(b, 'queue')).toMatchObject({ code: 0 });
+    expect(await run(a, 'queue')).toMatchObject({ code: 0 });
+    const turn = await run(a, 'wait');
+    expect(turn.code, `${turn.out}\n${turn.err}`).toBe(0);
+    const acted = await run(a, ...action(turn));
+    expect([0, 2, 3], `${acted.out}\n${acted.err}`).toContain(acted.code);
+    expect(api.exchanges.at(-1)?.path).toMatch(/\/actions\?wait=1$/);
+    const queued = api.exchanges.filter(
+      exchange => exchange.path === '/v1/queue',
+    );
+    const secrets = queued
+      .flatMap(exchange => [exchange.body.queue_key, exchange.response.token])
+      .filter((value): value is string => typeof value === 'string');
+    expect(new Set(queued.map(exchange => exchange.body.queue_key)).size).toBe(
+      2,
+    );
+    expect(
+      new Set(queued.map(exchange => exchange.response.token).filter(Boolean))
+        .size,
+    ).toBe(2);
+    for (const cwd of players) {
+      const argv = readFileSync(join(cwd, 'curl-argv'), 'utf8');
+      for (const secret of secrets)
+        expect(
+          argv,
+          `curl argv leaked a secret for ${profile(cwd).name}`,
+        ).not.toContain(secret);
+      expect(argv).toMatch(/(?:^|\n)--data-binary\n@[^\n]+/);
+    }
+    checkRequests(api);
+  }, 60_000);
 
   it('switches from a waiting queue to a bot and clears the queue key when reporting', async () => {
     const api = await serve();
