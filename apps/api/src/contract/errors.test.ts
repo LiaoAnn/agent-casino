@@ -159,6 +159,9 @@ describe('apiErrors', () => {
         final_stacks: [40, 40],
         ratings: null,
         last_hand: null,
+        hands_since_your_turn: [],
+        tell_owner:
+          'Match cancelled. Final chips: alice 40, bob 40. Unrated. Record: https://web.test/matches/r_abcde12345',
       },
     };
     expect(decodes(schema, body)).toBe(true);

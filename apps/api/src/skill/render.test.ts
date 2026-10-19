@@ -505,6 +505,16 @@ describe('renderSkill: what an agent must know', () => {
     },
   );
 
+  it('puts the immediate owner relay and language rules before onboarding', () => {
+    const top = MD.slice(0, MD.indexOf('## What this is'));
+    expect(top).toContain('tell_owner');
+    expect(top).toMatch(/immediately/i);
+    expect(top).toMatch(/language/i);
+    expect(top).toMatch(/Traditional/);
+    expect(top).toMatch(/Simplified/);
+    expect(top).toMatch(/links?[^\n]*(?:unchanged|exactly|as is|original)/i);
+  });
+
   it('returns the saved watch_url to the owner after reconnecting', () => {
     const crash = section(
       MD,
@@ -514,13 +524,18 @@ describe('renderSkill: what an agent must know', () => {
     expect(crash).toMatch(/watch_url[\s\S]*owner[\s\S]*again/i);
   });
 
-  it('reads watch_url from the saved file at Step 4 before cleanup', () => {
+  it('keeps the saved watch_url readable and explains its finished result before cleanup', () => {
     const play = section(MD, 'How to play');
     const report = play.slice(play.indexOf('### Step 4'));
-    expect(report).toContain('cat .casino/$ROOM_ID.watch_url');
-    expect(report.indexOf('cat .casino/$ROOM_ID.watch_url')).toBeLessThan(
+    expect(MD).toContain('cat .casino/$ROOM_ID.watch_url');
+    expect(report).toMatch(
+      /saved `watch_url`[^\n]*finished result[^\n]*record/i,
+    );
+    expect(report).toContain('rm .casino/$ROOM_ID.*');
+    expect(report.indexOf('saved `watch_url`')).toBeLessThan(
       report.indexOf('rm .casino/$ROOM_ID.*'),
     );
+    expect(report).toMatch(/relay `tell_owner`[^\n]*rule at the top/i);
   });
 
   it('explains the five-minute cancellation in the private-room instructions', () => {
@@ -983,9 +998,14 @@ describe('renderSkill: what an agent must know', () => {
         expect(decision).toContain('keep waiting');
         expect(decision).toContain('house-bot');
         expect(decision).toContain('unrated');
-        expect(section(md, 'What this is')).toContain(
-          'Do not stop to ask your owner anything during the match',
+        const intro = section(md, 'What this is');
+        expect(intro).toMatch(
+          /While queueing[^\n]*owner[^\n]*progress updates/i,
         );
+        expect(intro).toMatch(
+          /During the match[^\n]*ask no questions except[^\n]*display name[^\n]*first visit/i,
+        );
+        expect(intro).toMatch(/Get that name before you start/i);
       });
     },
   );
@@ -1040,11 +1060,21 @@ describe('renderSkill: what an agent must know', () => {
     );
   });
 
-  it("explains last_hand's result fields and the skipped hand after a fold", () => {
+  it("explains last_hand's result fields and every hand skipped between turns", () => {
     const rules = section(MD, "Hold'em rules");
     expect(rules).toMatch(/`last_hand`[^\n]*`ended_by`[^\n]*`stack_changes`/);
     expect(rules).toMatch(
-      /opponent folds[^\n]*`wait` skips[^\n]*next hand[^\n]*`last_hand`/,
+      /`hands_since_your_turn`[^\n]*every hand completed[^\n]*last accepted action[^\n]*oldest first[^\n]*`last_hand`/,
+    );
+    expect(rules).toMatch(
+      /Read every entry[^\n]*`wait` can skip several hands/i,
+    );
+    expect(rules).toMatch(
+      /`last_hand` still shows only the latest completed hand/i,
+    );
+    expect(rules).not.toContain('you missed nothing');
+    expect(rules).toMatch(
+      /Reads and rejected or duplicate actions do not clear it/,
     );
   });
 
@@ -1165,7 +1195,16 @@ describe('display names and the profile', () => {
     expect(read).toBeGreaterThan(0);
     expect(ask).toBeGreaterThan(read);
     expect(profile).toMatch(/shown publicly/i);
-    expect(profile).toMatch(/only question/i);
+    expect(profile).toMatch(
+      /If your owner hasn't said what to call you, ask them once, before anything else/i,
+    );
+    expect(profile).toMatch(/Wait for the answer[^\n]*`display_name`/i);
+    expect(MD.indexOf('## Your profile')).toBeLessThan(
+      MD.indexOf('## How to play'),
+    );
+    expect(section(MD, 'What this is')).toMatch(
+      /During the match[^\n]*ask no questions except[^\n]*display name[^\n]*first visit/i,
+    );
     expect(profile).toMatch(/don't ask again/i);
   });
 

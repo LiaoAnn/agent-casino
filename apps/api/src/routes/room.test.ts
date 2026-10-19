@@ -198,6 +198,72 @@ const expectError = async (
 };
 
 const decodeCreate = Schema.decodeUnknownSync(CreateRoomResponse);
+
+describe('T43 copy-ready start messages over HTTP', () => {
+  it('omits tell_owner until a waiting room has an opponent, then gives the joining seat the exact watch URL', async () => {
+    const { env } = makeEnv({ waitMs: 1 });
+    const response = await post(env, '/v1/rooms', {
+      game: 'holdem',
+      name: 'alice',
+      display_name: 'Alice the Shark',
+    });
+    expect(response.status).toBe(200);
+    const raw = await response.json();
+    expect(raw).not.toHaveProperty('tell_owner');
+    expect(raw).not.toHaveProperty('hands_since_your_turn');
+    const room = decodeCreate(raw);
+    const waiting = await get(
+      env,
+      `/v1/rooms/${room.room_id}/state`,
+      room.token,
+    );
+    const waitingBody = await waiting.json();
+    expect(waitingBody).not.toHaveProperty('tell_owner');
+    expect(waitingBody).not.toHaveProperty('hands_since_your_turn');
+    const joined = await post(env, `/v1/rooms/${room.room_id}/join`, {
+      name: 'bob',
+      display_name: 'Bob the Owl',
+      invite_code: room.invite_code,
+    });
+    expect(joined.status).toBe(200);
+    const body = (await joined.json()) as {
+      tell_owner?: string;
+      watch_url: string;
+    };
+    expect.soft(body).toHaveProperty('tell_owner', expect.any(String));
+    expect.soft(body.tell_owner ?? '').toContain('Alice the Shark');
+    expect.soft(body.tell_owner ?? '').toContain(body.watch_url);
+    expect(body).not.toHaveProperty('hands_since_your_turn');
+    for (const endpoint of ['state', 'wait']) {
+      const turn = await get(
+        env,
+        `/v1/rooms/${room.room_id}/${endpoint}`,
+        room.token,
+      );
+      const turnBody = await turn.json();
+      expect(turnBody).not.toHaveProperty('tell_owner');
+      expect.soft(turnBody).toHaveProperty('hands_since_your_turn', []);
+    }
+  });
+
+  it('gives a bot-room creator the House Bot display name and exact watch URL', async () => {
+    const { env } = makeEnv({ waitMs: 1 });
+    const response = await post(env, '/v1/rooms', {
+      game: 'holdem',
+      name: 'alice',
+      opponent: 'bot',
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      tell_owner?: string;
+      watch_url: string;
+    };
+    expect.soft(body).toHaveProperty('tell_owner', expect.any(String));
+    expect.soft(body.tell_owner ?? '').toContain('House Bot');
+    expect.soft(body.tell_owner ?? '').toContain(body.watch_url);
+    expect(body).not.toHaveProperty('hands_since_your_turn');
+  });
+});
 const decodeJoin = Schema.decodeUnknownSync(JoinResponse);
 const decodeStatus = Schema.decodeUnknownSync(RoomStatus);
 

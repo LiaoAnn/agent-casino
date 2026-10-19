@@ -109,6 +109,9 @@ interface RoomData {
   // Turns already used up, by turn_id (A3): who acted, and whether the
   // server acted for them.
   used_turns: Record<string, { seat: Seat; timeout?: true }>;
+  // Completed hands before each seat's last accepted player action (A21).
+  // Old rooms and seats that have never acted start at zero.
+  acted_after_hand?: [number, number];
   ended: Ended | null;
   // Epoch ms.
   created_at: number;
@@ -500,7 +503,13 @@ export class RoomReferee {
         [match.history.length]: input.note,
       };
     }
-    await this.#save(done.data, done.finishedHands, notes);
+    const actedAfter: [number, number] = [...(data.acted_after_hand ?? [0, 0])];
+    actedAfter[seat] = match.lastHand?.hand_number ?? 0;
+    await this.#save(
+      { ...done.data, acted_after_hand: actedAfter },
+      done.finishedHands,
+      notes,
+    );
     return ok(accepted(data));
   }
 
@@ -612,10 +621,37 @@ export class RoomReferee {
         : await this.#storage.get<HandRecord>(`hand:${n - 1}`);
     if (n > 1 && !before) throw new Error(`Room has no hand ${n - 1} stored`);
     const start = data.settings.starting_stack;
+    const hands: [LastHandBody[], LastHandBody[]] = [[], []];
+    const cursors = data.acted_after_hand ?? [0, 0];
+    const last = data.match?.lastHand?.hand_number ?? 0;
+    let previous = [start, start] as [number, number];
+    const first = Math.min(...cursors) + 1;
+    if (first > 1) {
+      const hand = await this.#storage.get<HandRecord>(`hand:${first - 1}`);
+      if (!hand) throw new Error(`Room has no hand ${first - 1} stored`);
+      previous = hand.stacks;
+    }
+    for (let number = first; number <= last; number++) {
+      const hand = await this.#storage.get<HandRecord>(`hand:${number}`);
+      if (!hand) throw new Error(`Room has no hand ${number} stored`);
+      const { button_seat: _button, events: _events, ...summary } = hand;
+      const out = {
+        ...summary,
+        stack_changes: [
+          hand.stacks[0] - previous[0],
+          hand.stacks[1] - previous[1],
+        ] as [number, number],
+      };
+      for (const seat of [0, 1] as const) {
+        if (number > cursors[seat]) hands[seat].push(out);
+      }
+      previous = hand.stacks;
+    }
     return {
       now: this.#now(),
       stacksBefore: before?.stacks ?? [start, start],
       webUrl: this.#webUrl,
+      hands,
     };
   }
 
@@ -1109,6 +1145,7 @@ interface Answering {
   now: number;
   stacksBefore: [number, number];
   webUrl: string | undefined;
+  hands: [LastHandBody[], LastHandBody[]];
 }
 
 // The last finished hand with what each seat won or lost in it (A15).
@@ -1164,6 +1201,7 @@ function statusFor(
       ),
       legal_actions: [first, ...rest],
       last_hand: lastHandOut(seen.last_hand, answering),
+      hands_since_your_turn: answering.hands[seat],
       hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to POST /v1/rooms/${data.room_id}/actions`,
     };
   }
@@ -1211,8 +1249,38 @@ function matchOver(
     final_stacks: ended.final_stacks,
     ratings: data.recorded?.ratings ?? null,
     last_hand: lastHandOut(seen?.last_hand ?? null, answering),
+    hands_since_your_turn: answering.hands[seat],
+    tell_owner: ownerResult(data, result, seat, matchPage(data, answering)),
     hint: matchOverHint(ended, result, matchPage(data, answering)),
   };
+}
+
+// A21: a complete report that needs only translation, including both seats.
+function ownerResult(
+  data: RoomData,
+  result: MatchOverBody['result'],
+  seat: Seat,
+  page: string | null,
+): string {
+  const names = displayNames(data);
+  const stacks = data.ended?.final_stacks ?? [
+    data.settings.starting_stack,
+    data.settings.starting_stack,
+  ];
+  const players = [seat, otherSeat(seat)] as const;
+  const chips = players
+    .map(s => `${names[s] ?? data.names[s] ?? 'Opponent'}: ${stacks[s]}`)
+    .join(', ');
+  const ratings = data.recorded?.ratings;
+  const elo = ratings
+    ? players
+        .map(s => {
+          const r = ratings[s];
+          return `${r.name}: ${r.rating} (${r.change >= 0 ? '+' : ''}${r.change})`;
+        })
+        .join(', ')
+    : 'unrated (no change)';
+  return `Result: ${result}. Final chips: ${chips}. Elo: ${elo}.${page ? ` Record: ${page}` : ''}`;
 }
 
 // The web page of a played match, once it is stored (T32). Rooms nobody

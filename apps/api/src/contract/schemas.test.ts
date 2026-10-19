@@ -96,6 +96,7 @@ const yourTurn = {
   turn_id: 't_41',
   deadline: '2026-10-16T12:50:30Z',
   seconds_remaining: 30,
+  hands_since_your_turn: [],
   hand_number: 3,
   view,
   legal_actions: [
@@ -121,6 +122,8 @@ const yourTurn = {
 };
 
 const matchOver = {
+  tell_owner: `You won. Final stacks: alice 55, bob 25. Elo: alice 1516 (+16), bob 1484 (-16). https://web.test/matches/${ROOM}`,
+  hands_since_your_turn: [],
   status: 'match_over',
   room_status: 'finished',
   opponent_name: 'bob',
@@ -140,6 +143,60 @@ const matchOver = {
   last_hand: null,
   hint: 'Report the result to your owner',
 };
+
+describe('T43 required owner experience contract fields', () => {
+  it.each([
+    ['your_turn', RoomStatus, yourTurn],
+    ['match_over', MatchOver, matchOver],
+  ] as const)(
+    'requires a valid completed-hand array on %s',
+    (_label, schema, example) => {
+      expect(decodes(schema, example)).toBe(true);
+      const { hands_since_your_turn: _hands, ...missing } = example;
+      expect.soft(decodes(schema, missing)).toBe(false);
+      for (const invalid of [null, {}, [null], [{ hand_number: 1 }]]) {
+        expect
+          .soft(decodes(schema, { ...example, hands_since_your_turn: invalid }))
+          .toBe(false);
+      }
+      expect(
+        decodes(schema, {
+          ...example,
+          hands_since_your_turn: [yourTurn.last_hand],
+        }),
+      ).toBe(true);
+    },
+  );
+
+  it('requires a string tell_owner on match_over and join', () => {
+    const joined = {
+      room_id: ROOM,
+      seat: 1,
+      token: 'abc.def',
+      opponent_name: 'alice',
+      display_name: 'Bob',
+      opponent_display_name: 'Alice',
+      settings,
+      watch_url: watchUrl,
+      hint: 'Call wait',
+      tell_owner: `Playing against Alice. Watch: ${watchUrl}`,
+    };
+    const matched = { ...joined, status: 'matched' };
+    for (const [schema, example] of [
+      [MatchOver, matchOver],
+      [JoinResponse, joined],
+      [QueueResponse, matched],
+    ] as const) {
+      expect(decodes(schema, example)).toBe(true);
+      const { tell_owner: _message, ...missing } = example;
+      expect.soft(decodes(schema, missing)).toBe(false);
+      expect
+        .soft(decodes(schema, { ...example, tell_owner: null }))
+        .toBe(false);
+      expect.soft(decodes(schema, { ...example, tell_owner: 42 })).toBe(false);
+    }
+  });
+});
 
 describe('constants', () => {
   it('match the skill defaults and holdem-rules ranges', () => {
@@ -354,6 +411,7 @@ describe('responses', () => {
         settings,
         watch_url: watchUrl,
         hint: `Matched. Next, call GET /v1/rooms/${ROOM}/wait`,
+        tell_owner: `Playing against 鮑伯. Watch: ${watchUrl}`,
       }),
     ).toBe(true);
     expect(
@@ -444,6 +502,7 @@ describe('responses', () => {
       settings,
       watch_url: watchUrl,
       hint: `Joined. Next, call GET /v1/rooms/${ROOM}/wait`,
+      tell_owner: `Playing against 鮑伯. Watch: ${watchUrl}`,
     };
     expect(decodes(JoinResponse, joined)).toBe(true);
     for (const key of ['opponent_name', 'settings', 'watch_url'] as const) {
@@ -479,6 +538,7 @@ describe('responses', () => {
       settings,
       watch_url: watchUrl,
       hint: 'Matched',
+      tell_owner: `Playing against 鮑伯. Watch: ${watchUrl}`,
     };
     expect(decodes(QueueResponse, matched)).toBe(true);
     for (const key of ['opponent_name', 'settings', 'watch_url'] as const) {
@@ -1184,6 +1244,7 @@ describe('T35 required display names in responses', () => {
     watch_url: watchUrl,
     hint: 'Call wait',
     ...named,
+    tell_owner: `Playing against 鮑伯. Watch: ${watchUrl}`,
   };
   const envelopes = [
     ['matched', QueueResponse, { ...joined, status: 'matched' }, false],
