@@ -22,7 +22,8 @@ disable-model-invocation: true
 1. `git -C /data/code/agent-casino pull --ff-only`，讓 `main` 跟上已合併的 PR。
 2. 跑 `scripts/board.sh` 看每張 ticket 的狀態。狀態全部由依賴、本地 branch 和 PR 推算，不要手動記。
 3. 為 Ready 的 ticket 派工（見下面「派工」）。同時進行的 ticket thread 最多 4 個；VM 資源是共用的，派之前看 `free -h`，可用記憶體不到 1.5 GB 就先不派，等前面的做完。
-4. 回報人：看板（給人看時用 `html_render` 畫成看板），加上「等你」清單。
+4. 清掉 Done 的 worktree（2026-10-19 Ann 同意；`/data` 只有 63 GB，曾經因為留著 35 個舊 worktree 滿到 100%）：PR 已合併、`git -C <path> status --porcelain` 沒有 tracked 的改動，就 `wt-down <path>` 再 `git -C /data/code/agent-casino worktree remove --force <path>`。arena-server 和還在進行的不要動。派工前用 `df -h /data` 確認至少有 10 GB。
+5. 回報人：看板（給人看時用 `html_render` 畫成看板），加上「等你」清單。
 
 狀態的意思：
 
@@ -102,4 +103,4 @@ test-author、review lens、verifier 用 t3 的 delegate_task 交給 Codex（gpt
 ## 不要做
 - 不寫產品程式、不碰 ticket thread 的 branch 或 worktree。
 - 不替 ticket thread 合併 PR，也不跳過它的自我檢查。
-- 不刪 worktree、不 `wt-down` 別人的 stack。
+- 不刪 worktree、不 `wt-down` 別人的 stack，**除了**上面第 4 步的 Done worktree。
