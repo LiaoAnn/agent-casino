@@ -91,9 +91,11 @@ const SeatHandlers = HttpApiBuilder.group(CasinoApi, 'room', handlers =>
       inRoom(params.room_id, (stub, seat) =>
         Rooms.callRoom(() => stub.status(seat, { wait: false })),
       ),
-    act: ({ params, payload }) =>
+    act: ({ params, payload, query }) =>
       inRoom(params.room_id, (stub, seat) =>
-        Rooms.callRoom(() => stub.act(seat, payload)),
+        Rooms.callRoom(() =>
+          stub.act(seat, payload, { wait: query.wait === '1' }),
+        ),
       ),
     leave: ({ params }) =>
       inRoom(params.room_id, (stub, seat) =>

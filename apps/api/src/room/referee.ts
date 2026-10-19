@@ -377,6 +377,16 @@ export class RoomReferee {
   > {
     const dropped = await this.#dropRequest(seat);
     if (dropped) return fail(dropped);
+    return this.#status(seat, options);
+  }
+
+  // `status` without counting a request: `act` with `wait` calls it too.
+  async #status(
+    seat: Seat,
+    options: { wait: boolean },
+  ): Promise<
+    Result<RoomStatus, 'room_not_found' | 'invalid_token' | 'unavailable'>
+  > {
     let timedOut = !options.wait;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const windowEnd = new Promise<void>(resolve => {
@@ -410,13 +420,16 @@ export class RoomReferee {
   }
 
   // A3: a used turn_id answers its first result again; a rejected action
-  // leaves the turn_id usable.
+  // leaves the turn_id usable. T47: with `wait`, an accepted action (or the
+  // resend of one) answers what `wait` would right after it; a rejected one
+  // answers its error at once.
   async act(
     seat: Seat,
     input: ActionInput,
+    options: { wait?: boolean } = {},
   ): Promise<
     Result<
-      ActionAcceptedBody,
+      ActionAcceptedBody | RoomStatus,
       | 'room_not_found'
       | 'not_your_turn'
       | 'stale_turn'
@@ -434,6 +447,7 @@ export class RoomReferee {
     if (!opened.ok) return opened;
     const used = opened.value.used_turns[input.turn_id];
     if (used?.seat === seat && !used.timeout) {
+      if (options.wait) return this.#status(seat, { wait: true });
       return ok({ ...accepted(opened.value), duplicate: true });
     }
     const stored = await this.#stored(opened.value);
@@ -522,6 +536,7 @@ export class RoomReferee {
       done.finishedHands,
       notes,
     );
+    if (options.wait) return this.#status(seat, { wait: true });
     return ok(accepted(data));
   }
 
@@ -1239,7 +1254,7 @@ function statusFor(
       legal_actions: [first, ...rest],
       last_hand: lastHandOut(seen.last_hand, answering),
       hands_since_your_turn: answering.hands[seat],
-      hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to POST /v1/rooms/${data.room_id}/actions. Write your note in your owner's language and script (Traditional and Simplified Chinese are different scripts)${giveLink}`,
+      hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to POST /v1/rooms/${data.room_id}/actions?wait=1. Write your note in your owner's language and script (Traditional and Simplified Chinese are different scripts)${giveLink}`,
     };
   }
   return {

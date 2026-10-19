@@ -135,10 +135,12 @@ const RoomGroup = HttpApiGroup.make('room')
       success: RoomStatus,
       error: apiErrors('room_not_found', 'unavailable', 'internal'),
     }),
+    // T47: `?wait=1` answers what `wait` would after an accepted action.
     HttpApiEndpoint.post('act', '/v1/rooms/:room_id/actions', {
       params: roomParams,
+      query: { wait: Schema.optional(Schema.Literal('1')) },
       payload: ActionRequest,
-      success: ActionAccepted,
+      success: Schema.Union([ActionAccepted, RoomStatus]),
       error: apiErrors(
         'invalid_request',
         'room_not_found',
