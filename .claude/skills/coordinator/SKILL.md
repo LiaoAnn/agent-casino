@@ -39,6 +39,8 @@ disable-model-invocation: true
 ## 派工
 每張 Ready 的 ticket 用 `t3_thread_launch` 開一個 thread，**不要**自己 `git worktree add`。t3 建 worktree 時會跑 devvm 的 hook 把 compose stack 起好。
 
+ticket thread 一定用 Claude Opus 5.5：`modelSelection` 填 `{"instanceId":"claudeAgent","model":"claude-opus-5-5"}`。Codex 和 Grok 只當 ticket thread 裡的 subagent（2026-10-19 Ann）。
+
 - `title`：`T<編號> <中文標題>`
 - `workspaceStrategy`：`{"type":"worktree","baseRef":"main","branch":"t<編號>-<簡短英文>","startFromOrigin":true}`
 - `message`：照下面的模板寫。

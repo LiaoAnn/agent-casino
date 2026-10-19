@@ -80,7 +80,7 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 
 **Review（slice loop 第 6 步與最後）** 每個 slice 跑 `/review-change`，最後整個 branch 再跑一次（finished-feature 的 lenses）。照 `/review-change` 的規則選 lens（一般 slice 只要 Correctness + Test Quality；碰到合約、持久資料、共用模組才加 Design Fit、Simplicity；碰到驗證、外部輸入、秘密才加 Security），不要每個 slice 都開五個。每個 lens 的 reviewer 用 Grok（見下面「subagent 用誰」），合併重複、確認 Blocker、決定 Hardening 要不要修仍由你自己做。給 reviewer 的 plan 要附 ticket 原文，讓它也檢查：做多、做少、寫死的數字、碰了範圍外的檔案、改了合約、跟 skill 規格不符。有 Blocker 就修，重跑受影響的檢查和驗收。
 
-**subagent 用誰**（2026-10-19 Ann）：你負責計畫、實作和所有決定。繁瑣但必須做的事交給 subagent：**寫測試用 Codex，review 和 verifier 用 Grok**。ticket thread 本身通常是 Codex，review 和驗收換一家模型，比較容易看到作者自己看不到的問題，工作分給兩家也比較不會撞到額度上限。兩邊互相檢查：subagent 寫的測試你檢查，你寫的程式 subagent review，verifier 的結果你看過才開 PR。
+**subagent 用誰**（2026-10-19 Ann）：你負責計畫、實作和所有決定。繁瑣但必須做的事交給 subagent：**寫測試用 Codex，review 和 verifier 用 Grok**。主要的 agent（你）一定是 Claude Opus 5.5；subagent 用 OpenAI 和 Grok，不同家的模型比較容易看到作者自己看不到的問題，工作分給兩家也比較不會撞到額度上限。兩邊互相檢查：subagent 寫的測試你檢查，你寫的程式 subagent review，verifier 的結果你看過才開 PR。
 
 **任務說明要短**：subagent 自己會讀 Dev VM 的 AGENTS.md（VM 規則與環境）和 [subagents.md](subagents.md)（角色能改什麼、這個 repo 在 VM 的坑、「不要鑽牛角尖」的標準、規格在哪、回報格式），任務說明不要再重寫這些。任務說明只寫：
 - 第一行：「先讀 `<worktree>/.claude/skills/ticket-workflow/subagents.md`。你是 <角色>。」
