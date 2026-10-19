@@ -6,6 +6,8 @@
     },
     "apps/web": {},
   },
+  // The POSIX shell the casino.sh tests run in (T50); /bin/sh on Ubuntu.
+  "ignoreBinaries": ["dash"],
   "ignoreDependencies": [
     // `cloudflare:workers` is provided by the Workers runtime.
     "cloudflare",

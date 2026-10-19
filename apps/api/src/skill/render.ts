@@ -1,6 +1,7 @@
 // Builds skill.md (casino-api skill: skill.md, A12): the hand-written
-// template.md with its `{{...}}` placeholders filled from the contract, so
-// the endpoint table, curl commands and error codes can't drift from the API.
+// template.md, which teaches casino.sh (A23), with the HTTP appendix's
+// endpoint table, request and response examples and error codes filled from
+// the contract, so they can't drift from the API.
 import { Exit, Schema } from 'effect';
 import { HttpApi } from 'effect/http-api';
 import { AdminAuth, CasinoApi, RoomAuth, WatchAuth } from '../contract/api';
@@ -79,9 +80,7 @@ const PURPOSE: Readonly<Record<string, string>> = {
   'admin.banName': 'Admin only, not for players',
 };
 
-// The room token comes from the file skill.md saves it in, so an agent never
-// pastes it by hand (T27).
-const BEARER = 'Authorization: Bearer $(cat .casino/$ROOM_ID.token)';
+const BEARER = 'Authorization: Bearer <token>';
 
 const AUTH: Record<Endpoint['auth'], string> = {
   none: 'none',
@@ -96,8 +95,8 @@ const ADVICE: Record<ErrorCode, string> = {
   invalid_request:
     'Your JSON body, path or query is malformed. Fix it as `message` says and resend.',
   invalid_token:
-    'Most often this is a copying error. Read `message` and resend the token you saved for this room with `Authorization: Bearer $(cat .casino/$ROOM_ID.token)`. Extract it again from the saved seat response with `sed`; never retype it. If you queued, POST /v1/queue with the same name and the same `queue_key` returns the same `matched` only for 45 seconds after matching (Step 1). After that, do not queue to recover this seat: use the saved response. Do not change the queue key or join again to recover your seat. For a wrong room, use the room_id that came with the token. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
-  room_not_found: 'No such room. Check `$ROOM_ID`.',
+    'Most often this is a copying error. Read `message` and resend the token exactly as the seat answer gave it, as `Authorization: Bearer <token>`; never retype it. If you queued, POST /v1/queue with the same name and the same `queue_key` returns the same `matched` only for 45 seconds after matching. After that, do not queue to recover this seat: use the saved answer. Do not change the queue key or join again to recover your seat. For a wrong room, use the room_id that came with the token. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
+  room_not_found: 'No such room. Check the `room_id` in the path.',
   room_full: 'Both seats are taken. Queue or open your own room instead.',
   wrong_invite_code: 'Ask your opponent for the right invite code.',
   name_invalid:
@@ -151,43 +150,20 @@ const errorTable = () =>
     ),
   ].join('\n');
 
-// The JSON body as one shell word; double quotes only when it uses a variable.
-const shellBody = (request: unknown) => {
-  const json = JSON.stringify(request);
-  return json.includes('$') ? `"${json.replaceAll('"', '\\"')}"` : `'${json}'`;
-};
-
-const curl = (key: string) => {
+// An appendix request as plain HTTP: request line, headers, JSON body.
+const request = (key: string) => {
   const endpoint = endpointOf(key);
-  const path = endpoint.path.replace(/:(\w+)/g, (_, param: string) => {
-    if (param !== 'room_id')
-      throw new Error(`skill.md: no variable for :${param} in ${key}`);
-    return '$ROOM_ID';
-  });
-  const request = EXAMPLES[key]?.request;
-  const output = ['lobby.queue', 'lobby.createRoom', 'lobby.joinRoom'].includes(
-    key,
-  )
-    ? '.casino/seat.json'
-    : key === 'room.wait' || key === 'room.act'
-      ? '.casino/$ROOM_ID.state.json'
-      : undefined;
   // T47: the main loop sends each action and waits in one request.
   const query = key === 'room.act' ? '?wait=1' : '';
-  // T48: each command may run in a new shell, so it loads its variables.
-  const load =
-    key === 'room.act'
-      ? '. .casino/env && TURN_ID=$(cat .casino/$ROOM_ID.turn_id) && '
-      : '. .casino/env && ';
-  const parts = [
-    `${load}curl -sS --max-time 40${endpoint.method === 'GET' ? '' : ` -X ${endpoint.method}`} "$CASINO_URL${path}${query}"`,
-    ...(endpoint.auth === 'room' ? [`-H "${BEARER}"`] : []),
-    ...(request === undefined
+  const body = EXAMPLES[key]?.request;
+  const lines = [
+    `${endpoint.method} ${docPath(endpoint.path)}${query}`,
+    ...(endpoint.auth === 'room' ? [BEARER] : []),
+    ...(body === undefined
       ? []
-      : ["-H 'Content-Type: application/json'", `-d ${shellBody(request)}`]),
-    ...(output === undefined ? [] : [`-o ${output}`]),
+      : ['Content-Type: application/json', '', JSON.stringify(body)]),
   ];
-  return ['```bash', parts.join(' \\\n  '), '```'].join('\n');
+  return ['```http', ...lines, '```'].join('\n');
 };
 
 // `watch_url` and the match page in the examples are on the web's domain, as
@@ -211,7 +187,7 @@ export function renderSkill(baseUrl: string, webUrl = baseUrl): string {
     host: () => new URL(baseUrl).host,
     endpoints: endpointTable,
     errors: errorTable,
-    curl,
+    request,
     responses: key => responses(key, webUrl),
   };
   return template.replace(/\{\{(\w+)(?: ([\w.]+))?\}\}/g, (_, name, arg) => {

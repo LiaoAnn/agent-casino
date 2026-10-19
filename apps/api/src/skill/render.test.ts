@@ -1,9 +1,3 @@
-// T05: skill.md is the only manual a participating agent gets, so it is
-// generated from the contract (casino-api skill: skill.md, A12) and every curl
-// in it must run as is with $CASINO_URL, $ROOM_ID and $TURN_ID, reading the
-// room token and queue_key from the files the agent saved them in (T27).
-// Endpoints and error codes are found by reflecting the contract, so a new one
-// fails here until skill.md renders it.
 import { Exit, Schema } from 'effect';
 import { HttpApi } from 'effect/http-api';
 import { describe, expect, it } from 'vitest';
@@ -76,1047 +70,205 @@ const API = reflectApi();
 // `/v1/rooms/:room_id/wait` -> `/v1/rooms/{room_id}/wait`
 const docPath = (path: string) => path.replace(/:(\w+)/g, '{$1}');
 
-// The endpoint a curl path (`v1/rooms/$ROOM_ID/leave?x=1`) points at, if any.
-const endpointOf = (curlPath: string): Reflected | undefined => {
-  const path = curlPath.split('?')[0] ?? '';
-  return Object.values(API).find(endpoint =>
-    new RegExp(
-      `^${endpoint.path
-        .slice(1)
-        .replace(':room_id', '\\$ROOM_ID')
-        .replace(/:\w+/g, '[^/"]+')}$`,
-    ).test(path),
-  );
-};
-
-// --- reading the markdown ---------------------------------------------------
-
-const lines = (text: string) => text.split('\n');
-
-// The text from the `## <title>` line up to the next `## ` heading.
-const section = (md: string, title: string): string => {
-  const all = lines(md);
-  const start = all.indexOf(`## ${title}`);
-  if (start === -1) return '';
-  const end = all.findIndex((line, i) => i > start && line.startsWith('## '));
-  return all.slice(start, end === -1 ? undefined : end).join('\n');
-};
-
-const SECTIONS = [
-  'What this is',
-  'Quick start',
-  'If your program crashes or the connection drops',
-  'How to play',
-  "Hold'em rules",
-  'What to do with each response',
-  'Endpoints',
-  'Error codes',
-  'Save as a skill',
-] as const;
-
+// A23 moves HTTP details to the final appendix. The contract remains the oracle.
 const fenced = (text: string, lang: string): string[] =>
-  [...text.matchAll(new RegExp(`\`\`\`${lang}\\n([\\s\\S]*?)\`\`\``, 'g'))].map(
-    m => m[1] ?? '',
-  );
+  [
+    ...text.matchAll(
+      new RegExp(`\x60\x60\x60${lang}\\n([\\s\\S]*?)\x60\x60\x60`, 'g'),
+    ),
+  ].map(m => (m[1] ?? '').trim());
+const appendix = (md: string) => md.split('## Appendix: the HTTP API')[1] ?? '';
+const APPENDIX = appendix(MD);
 
-interface Curl {
-  command: string; // from `curl ` to the end of the command, continuations joined
-  path: string | undefined; // what follows "$CASINO_URL/ up to the closing quote
-}
-
-// Every curl inside ```bash blocks; a line ending in `\` continues the command.
-const curls = (text: string): Curl[] =>
-  fenced(text, 'bash').flatMap(block =>
-    block
-      .replace(/\\\n/g, ' ')
-      .split('\n')
-      .flatMap(line => {
-        const at = line.search(/(^|[\s;&|(])curl /);
-        if (at === -1) return [];
-        const command = line.slice(at).trim();
-        return [
-          { command, path: /"\$CASINO_URL\/([^"]*)"/.exec(command)?.[1] },
-        ];
-      }),
-  );
-
-const SAVE = section(MD, 'Save as a skill');
-const GAME_CURLS = SECTIONS.filter(s => s !== 'Save as a skill').flatMap(s =>
-  curls(section(MD, s)),
-);
-const ALL_CURLS = curls(MD);
-
-// -d '<json>' when the JSON has no `$`, else -d "<json with \" escaped>".
-const dArg = (request: unknown) => {
-  const json = JSON.stringify(request);
-  return json.includes('$')
-    ? `-d "${json.replaceAll('"', '\\"')}"`
-    : `-d '${json}'`;
-};
-
-describe('renderSkill: layout', () => {
-  it('starts with skill frontmatter: name and a one-line description', () => {
+describe('renderSkill: layout and URLs', () => {
+  it('starts with skill frontmatter and a one-line description', () => {
     expect(MD.startsWith('---\n')).toBe(true);
-    const all = lines(MD);
-    const end = all.indexOf('---', 1);
-    expect(end).toBeGreaterThan(1);
-    const yaml = all.slice(1, end);
-    expect(yaml).toContain('name: agent-casino');
-    const description = yaml.filter(line => line.startsWith('description:'));
-    expect(description).toHaveLength(1);
-    expect(description[0]).toMatch(/^description: [^\s>|].*\S$/);
-  });
-
-  it('has its sections in order', () => {
-    const all = lines(MD);
-    const at = SECTIONS.map(title => all.indexOf(`## ${title}`));
-    expect(at.every(i => i > 0)).toBe(true);
-    expect([...at].sort((a, b) => a - b)).toEqual(at);
-  });
-
-  it('walks through four steps: queue, wait, act, leaderboard', () => {
-    const play = section(MD, 'How to play');
-    const steps = [1, 2, 3, 4].map(n => play.indexOf(`### Step ${n}`));
-    expect(steps.every(i => i > 0)).toBe(true);
-    expect([...steps].sort((a, b) => a - b)).toEqual(steps);
-
-    // Where the first curl to a matching path sits in the section.
-    const position = (match: (path: string) => boolean) => {
-      const curl = curls(play).find(c => c.path !== undefined && match(c.path));
-      return curl ? play.indexOf(`"$CASINO_URL/${curl.path}"`) : -1;
-    };
-    const order = [
-      position(p => p === 'v1/queue'),
-      position(p => p.endsWith('/wait')),
-      position(p => p.split('?')[0]?.endsWith('/actions') ?? false),
-      position(p => p === 'v1/leaderboard'),
-    ];
-    expect(order.every(i => i > 0)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-  });
-
-  it('is in English: no CJK characters', () => {
+    const frontmatter = MD.split('\n---')[0] ?? '';
+    expect(frontmatter.split('\n')).toContain('name: agent-casino');
+    expect(frontmatter.match(/^description: [^\s>|].*\S$/gm)).toHaveLength(1);
     expect(MD).not.toMatch(/[　-〿぀-ヿ㐀-䶿一-鿿豈-﫿＀-￯]/);
   });
-});
-
-describe('renderSkill: generated from the contract', () => {
-  const endpoints = section(MD, 'Endpoints');
-  const endpointRows = lines(endpoints).filter(l => l.startsWith('|'));
-
-  it.each(Object.entries(API))(
-    '%s has an endpoint row with its route and error codes',
-    (_key, endpoint) => {
-      const route = `\`${endpoint.method} ${docPath(endpoint.path)}\``;
-      const row = endpointRows.find(l => l.includes(route));
-      expect(row, route).toBeDefined();
-      for (const code of endpoint.codes) {
-        expect(row, `${route} ${code}`).toContain(`\`${code}\``);
+  it.each(['https://casino.example', 'https://other.test:8443'])(
+    'fills the download and saved skills with %s',
+    base => {
+      const md = renderSkill(base);
+      expect(md).toContain(`curl -fsS ${base}/casino.sh -o .casino/casino.sh`);
+      for (const folder of [
+        '.claude/skills/agent-casino',
+        '.agents/skills/agent-casino',
+      ]) {
+        expect(md).toContain(`mkdir -p ${folder}`);
+        expect(md).toContain(
+          `curl -fsSL ${base}/skill.md -o ${folder}/SKILL.md`,
+        );
       }
+      expect(
+        md.split('\n').find(line => line.startsWith('description:')),
+      ).toContain(new URL(base).host);
+      expect(md).not.toContain('<平台網域>');
+      expect(md).not.toMatch(/\{\{[A-Z_]+\}\}/);
     },
   );
-
-  // Which credential to send, from the endpoint's middleware: the room token,
-  // nothing, or the admin key. The route cell is left out, since admin paths
-  // contain `admin` themselves.
-  it.each(Object.entries(API))(
-    '%s row says which credential to send',
-    (_key, endpoint) => {
-      const route = `\`${endpoint.method} ${docPath(endpoint.path)}\``;
-      const rest = (endpointRows.find(l => l.includes(route)) ?? '').replace(
-        route,
-        '',
-      );
-      expect(rest, route).not.toBe('');
-      if (endpoint.auth === 'room') {
-        expect(rest, route).toContain('Bearer $(cat .casino/$ROOM_ID.token)');
-      } else if (endpoint.auth === 'none') {
-        expect(rest, route).not.toMatch(/bearer/i);
-        expect(rest, route).not.toMatch(/admin/i);
-      } else {
-        expect(rest, route).toMatch(/admin/i);
-      }
-    },
-  );
-
-  const errorRows = lines(section(MD, 'Error codes')).filter(l =>
-    l.startsWith('|'),
-  );
-
-  it.each(ERROR_CODES)('error code %s has a row with its status', code => {
-    const row = errorRows.find(l => l.includes(`\`${code}\``));
-    expect(row, code).toBeDefined();
-    expect(row).toMatch(new RegExp(`\\b${ERROR_STATUS[code]}\\b`));
-  });
-
-  // A code missing from the advice list would fall back to the same generic
-  // sentence as another one.
-  it('gives every error code its own advice in the last cell', () => {
-    const advice = ERROR_CODES.map(code => {
-      const row = errorRows.find(l => l.includes(`\`${code}\``)) ?? '';
-      const cells = row.split('|').map(cell => cell.trim());
-      // `| a | b | c |` splits into ['', 'a', 'b', 'c', ''].
-      return cells.at(-1) === '' ? (cells.at(-2) ?? '') : (cells.at(-1) ?? '');
-    });
-    ERROR_CODES.forEach((code, i) => {
-      expect(advice[i], code).not.toBe('');
-      expect(advice[i], code).not.toMatch(new RegExp(`^\`${code}\`$`));
-    });
-    const repeated = advice.filter((text, i) => advice.indexOf(text) !== i);
-    expect(repeated).toEqual([]);
-  });
-});
-
-describe('renderSkill: curl examples', () => {
-  it('has curl examples outside the install section', () => {
-    expect(GAME_CURLS.length).toBeGreaterThan(0);
-  });
-
-  it('gives every curl --max-time 40, except the install one-liner', () => {
-    const saveCurls = curls(SAVE);
-    for (const { command } of ALL_CURLS) {
-      if (
-        saveCurls.some(c => c.command === command) &&
-        command.includes('-fsSL')
-      )
-        continue;
-      expect(command).toContain('--max-time 40');
-    }
-  });
-
-  it('uses only $CASINO_URL, $ROOM_ID and $TURN_ID', () => {
-    const allowed = ['CASINO_URL', 'ROOM_ID', 'TURN_ID'];
-    for (const { command } of GAME_CURLS) {
-      for (const [, name] of command.matchAll(/\$\{?([A-Za-z_]\w*)\}?/g)) {
-        expect(allowed, command).toContain(name);
-      }
-    }
-  });
-
-  it('points every curl at "$CASINO_URL/…"', () => {
-    for (const { command, path } of GAME_CURLS) {
-      expect(path, command).toBeDefined();
-      expect(command).not.toMatch(/https?:\/\//);
-    }
-  });
-
-  it('sends the room token only to room endpoints', () => {
-    const bearer = 'Authorization: Bearer $(cat .casino/$ROOM_ID.token)';
-    const room = /^v1\/rooms\/\$ROOM_ID\/(wait|state|actions|leave)$/;
-    const open = /^v1\/(queue|rooms|rooms\/\$ROOM_ID\/join|leaderboard)$/;
-    const paths = GAME_CURLS.map(c => c.path);
-    expect(paths.some(p => p && room.test(p))).toBe(true);
-    for (const { command, path = '' } of GAME_CURLS) {
-      if (room.test(path)) expect(command).toContain(bearer);
-      if (open.test(path)) expect(command).not.toContain('Authorization');
-    }
-  });
-
-  // `curl -d` without -X still POSTs, but a body-less POST like leave needs
-  // -X POST, so every POST says it; a GET must not.
-  it('uses the contract method in every How to play curl', () => {
-    const post = /(^|\s)(-X|--request)\s*POST\b/;
-    const checked: string[] = [];
-    for (const { command, path } of curls(section(MD, 'How to play'))) {
-      const endpoint = path === undefined ? undefined : endpointOf(path);
-      if (!endpoint) continue;
-      checked.push(`${endpoint.method} ${endpoint.path}`);
-      if (endpoint.method === 'POST') expect(command).toMatch(post);
-      if (endpoint.method === 'GET') expect(command).not.toMatch(post);
-    }
-    expect(checked).toEqual(
-      expect.arrayContaining([
-        'POST /v1/queue',
-        'GET /v1/rooms/:room_id/wait',
-        'POST /v1/rooms/:room_id/actions',
-        'GET /v1/leaderboard',
-      ]),
+  it('uses WEB_URL for watch and match links, with baseUrl as its default', () => {
+    const base = 'https://api.test:8443';
+    const web = 'https://web.test';
+    const md = renderSkill(base, web);
+    const urls = [...md.matchAll(/"watch_url": "([^"\n]+)"/g)].map(
+      m => m[1] ?? '',
     );
-    // leave has no body, so nothing but -X POST makes it a POST.
-    const leave = GAME_CURLS.filter(c => c.path?.endsWith('/leave'));
-    expect(leave.length).toBeGreaterThan(0);
-    for (const { command } of leave) expect(command).toMatch(post);
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls)
+      expect(url).toMatch(
+        /^https:\/\/web\.test\/watch\/r_[a-z0-9]{10}\?token=\S+$/,
+      );
+    expect(
+      md
+        .replaceAll(`${web}/watch/`, `${base}/watch/`)
+        .replaceAll(`${web}/matches/`, `${base}/matches/`),
+    ).toBe(renderSkill(base));
+    expect(renderSkill(base, undefined)).toBe(renderSkill(base));
   });
+});
 
-  it.each(Object.entries(EXAMPLES).filter(([, e]) => e.request !== undefined))(
-    'renders the %s request body as a curl -d',
+describe('renderSkill: contract-generated HTTP appendix', () => {
+  it.each(Object.entries(API))(
+    '%s has its route, auth and applicable error codes',
+    (_key, endpoint) => {
+      const route = `\x60${endpoint.method} ${docPath(endpoint.path)}\x60`;
+      const row = APPENDIX.split('\n').find(
+        line => line.startsWith('|') && line.includes(route),
+      );
+      expect(row, route).toBeDefined();
+      for (const code of endpoint.codes)
+        expect(row).toContain(`\x60${code}\x60`);
+      const rest = (row ?? '').replace(route, '');
+      if (endpoint.auth === 'room') expect(rest).toContain('Bearer <token>');
+      else if (endpoint.auth === 'admin') expect(rest).toMatch(/admin/i);
+      else expect(rest).not.toMatch(/bearer|admin/i);
+    },
+  );
+  it.each(ERROR_CODES)(
+    'error %s has its HTTP status and specific advice',
+    code => {
+      const row = APPENDIX.split('\n').find(
+        line =>
+          line.startsWith('|') &&
+          line.includes(`\x60${code}\x60`) &&
+          new RegExp(`\\b${ERROR_STATUS[code]}\\b`).test(line),
+      );
+      expect(row, code).toBeDefined();
+      expect(row?.split('|').at(-2)?.trim()).not.toMatch(
+        /^$|^\x60[^\x60]+\x60$/,
+      );
+    },
+  );
+  it('gives each error different advice', () => {
+    const advice = ERROR_CODES.map(code =>
+      APPENDIX.split('\n')
+        .find(
+          line =>
+            line.startsWith('|') &&
+            line.includes(`\x60${code}\x60`) &&
+            new RegExp(`\\b${ERROR_STATUS[code]}\\b`).test(line),
+        )
+        ?.split('|')
+        .at(-2)
+        ?.trim(),
+    );
+    expect(new Set(advice).size).toBe(ERROR_CODES.length);
+  });
+  it.each(Object.entries(EXAMPLES))(
+    '%s renders its request as HTTP and every response as contract JSON',
     (key, example) => {
       const endpoint = API[key];
       expect(endpoint).toBeDefined();
-      // The curl's path is the endpoint's, with :room_id as $ROOM_ID.
-      const pathPattern = new RegExp(
-        `^${(endpoint?.path ?? '')
-          .slice(1)
-          .replace(':room_id', '\\$ROOM_ID')
-          .replace(/:\w+/g, '[^/"]+')}$`,
+      if (!endpoint) throw new Error(`Missing contract endpoint ${key}`);
+      const requests = fenced(APPENDIX, 'http');
+      const request = requests.find(
+        block =>
+          block.split('\n')[0]?.split('?')[0] ===
+          `${endpoint.method} ${docPath(endpoint.path)}`,
       );
-      const arg = dArg(example.request);
-      const match = ALL_CURLS.find(
-        c =>
-          c.command.includes(arg) &&
-          pathPattern.test(c.path?.split('?')[0] ?? ''),
-      );
-      expect(match, arg).toBeDefined();
-    },
-  );
-
-  it('renders every response example as pretty JSON in a json block', () => {
-    const blocks = fenced(MD, 'json');
-    for (const [key, example] of Object.entries(EXAMPLES)) {
+      expect(request, key).toBeDefined();
+      if (endpoint.auth === 'room')
+        expect(request).toContain('Authorization: Bearer <token>');
+      else expect(request).not.toContain('Authorization: Bearer <token>');
+      if (example.request !== undefined) {
+        expect(request).toContain('Content-Type: application/json');
+        expect(request).toContain(`\n\n${JSON.stringify(example.request)}`);
+        const body = JSON.parse(request?.split('\n\n')[1] ?? 'null');
+        expect(endpoint.payloads.some(schema => decodes(schema, body))).toBe(
+          true,
+        );
+      }
       for (const response of example.responses) {
-        const json = JSON.stringify(response.body, null, 2);
         expect(
-          blocks.some(b => b.includes(json)),
+          fenced(APPENDIX, 'json').some(
+            block => block === JSON.stringify(response.body, null, 2),
+          ),
           `${key}: ${response.title}`,
         ).toBe(true);
       }
-    }
-  });
-});
-
-describe('renderSkill: base URL', () => {
-  it('uses the web URL for spectator links and the API URL for installation', () => {
-    const baseUrl = 'https://api.casino.test:8443';
-    const webUrl = 'https://web.casino.test';
-    const md = renderSkill(baseUrl, webUrl);
-    const urls = [...md.matchAll(/"watch_url": "([^"]*)"/g)].map(
-      m => m[1] ?? '',
-    );
-    expect(urls.length).toBeGreaterThan(0);
-    for (const url of urls) {
-      expect(url).toMatch(
-        /^https:\/\/web\.casino\.test\/watch\/r_[a-z0-9]{10}\?token=\S+$/,
-      );
-    }
-    expect(md).toContain(`export CASINO_URL=${baseUrl}`);
-    expect(md).toContain(
-      `curl -fsSL ${baseUrl}/skill.md -o .claude/skills/agent-casino/SKILL.md`,
-    );
-    expect(lines(md).find(l => l.startsWith('description:'))).toContain(
-      'api.casino.test:8443',
-    );
-    expect(
-      md
-        .replaceAll(`${webUrl}/watch/`, `${baseUrl}/watch/`)
-        .replaceAll(`${webUrl}/matches/`, `${baseUrl}/matches/`),
-    ).toBe(renderSkill(baseUrl));
-  });
-
-  it('keeps the default output when the optional web URL is omitted', () => {
-    expect(renderSkill(BASE_URL, undefined)).toBe(MD);
-  });
-
-  it.each(['https://casino.example', 'https://other.test'])(
-    'fills in %s',
-    baseUrl => {
-      const md = renderSkill(baseUrl);
-      expect(md).toContain(`export CASINO_URL=${baseUrl}`);
-      expect(md).toContain(
-        `curl -fsSL ${baseUrl}/skill.md -o .claude/skills/agent-casino/SKILL.md`,
-      );
-      expect(md).toContain('.agents/skills/agent-casino/SKILL.md');
-      expect(md).not.toContain('<平台網域>');
-      // Compact request JSON like {"settings":{"hands":10}} legitimately ends
-      // in `}}`; anything else left over is an unfilled template placeholder.
-      let rest = md;
-      for (const example of Object.values(EXAMPLES)) {
-        if (example.request !== undefined)
-          rest = rest.replaceAll(dArg(example.request), '');
-      }
-      expect(rest).not.toContain('{{');
-      expect(rest).not.toContain('}}');
     },
   );
-
-  it('writes the bare host where a host, not a URL, is meant', () => {
-    const md = renderSkill('https://other.test:8443');
-    const description = lines(md).find(l => l.startsWith('description:'));
-    expect(description).toContain('other.test:8443');
-    expect(description).not.toContain('https://');
-
-    // Codex's sandbox allow-list takes a host.
-    const sandbox = lines(section(md, 'Save as a skill')).filter(
-      l => l.includes('Codex') && /allow/i.test(l) && /network/i.test(l),
-    );
-    expect(sandbox.length).toBeGreaterThan(0);
-    for (const line of sandbox) {
-      expect(line).toContain('`other.test:8443`');
-      expect(line).not.toContain('https://');
-    }
-  });
-
-  it('changes with the base URL', () => {
-    const other = renderSkill('https://other.test');
-    expect(other).not.toContain('casino.example');
-  });
-
-  // T27 (arena proposal 7): no made-up domain in the examples; watch_url
-  // points at the domain the agent reached.
-  it('shows watch_url on the requested domain', () => {
-    const other = renderSkill('https://other.test');
-    const urls = [...other.matchAll(/"watch_url": "([^"]*)"/g)].map(
-      m => m[1] ?? '',
-    );
-    expect(urls.length).toBeGreaterThan(0);
-    for (const url of urls) {
-      expect(url).toMatch(
-        /^https:\/\/other\.test\/watch\/r_[a-z0-9]{10}\?token=\S+$/,
-      );
-    }
-    expect(other).not.toContain('example.net');
-  });
-});
-
-describe('renderSkill: what an agent must know', () => {
-  // T32: check the rendered manual, including URLs substituted by renderSkill.
-  it('generates a random name instead of offering a name to copy', () => {
-    const profile = section(MD, 'Your profile');
-    expect(profile).not.toContain('sonnet-k7q2');
-    expect(profile).toContain('openssl rand -hex 2');
-  });
-
-  // T15 (arena 10, point 2): an owner's "call yourself Sunny" made Sunny the
-  // name, so everyone told the same shared its rating.
-  it('uses the owner-given name as display_name, not name, unless they say it is their ID', () => {
-    const profile = section(MD, 'Your profile');
-    expect(profile).not.toMatch(/fits the `name` rules, use it instead/);
-    expect(profile).toMatch(
-      /Always make your `name` with a command[^\n]*Even if your owner gave you a name, it is your `display_name`/,
-    );
-    expect(profile).toMatch(
-      /(?:only if|unless) they say it is their ID or account name/,
-    );
-  });
-
-  it.each([undefined, 'https://web.casino.test'])(
-    'saves the response watch_url beside every Step 1 token (web URL: %s)',
-    webUrl => {
-      const md = renderSkill(BASE_URL, webUrl);
-      const play = section(md, 'How to play');
-      const step1 = play.slice(0, play.indexOf('### Step 2'));
-      const blocks = fenced(step1, 'bash');
-      for (const path of ['/v1/queue"', '/v1/rooms"', '/join"']) {
-        const at = blocks.findIndex(block => block.includes(path));
-        expect(at, path).toBeGreaterThanOrEqual(0);
-        expect(blocks[at], 'save the HTTP response directly').toMatch(
-          /(?:-o|--output)\s+\S+/,
-        );
-        const rest = blocks.slice(at + 1);
-        const nextCurl = rest.findIndex(block => /\bcurl\b/.test(block));
-        const saving = [
-          blocks[at],
-          ...rest.slice(0, nextCurl < 0 ? undefined : nextCurl),
-        ].join('\n');
-        for (const field of ['room_id', 'token', 'watch_url']) {
-          expect(saving, `extract ${field} from the saved response`).toMatch(
-            new RegExp(`\\bsed\\b[^\\n]*["']${field}["']`),
-          );
-        }
-        expect(saving).toContain('> .casino/$ROOM_ID.token');
-        expect(saving).toContain('> .casino/$ROOM_ID.watch_url');
-      }
-      for (const block of blocks) {
-        expect(block).not.toMatch(/\b(?:jq|python3?|node|awk)\b/);
-        expect(block).not.toMatch(
-          /(?:echo|printf)[^\n]*(?:eyJ[A-Za-z0-9_-]+\.|https?:\/\/[^\s]+\/watch\/)/,
-        );
-      }
-    },
-  );
-
-  it('requires no manual credential or spectator URL transcription in any save block', () => {
-    for (const block of fenced(MD, 'bash')) {
-      expect(block).not.toMatch(
-        /(?:echo|printf)[^\n]*(?:eyJ[A-Za-z0-9_-]+\.|https?:\/\/[^\s]+\/watch\/)/,
-      );
-    }
-  });
-
-  it('puts the immediate owner relay and language rules before onboarding', () => {
-    const top = MD.slice(0, MD.indexOf('## What this is'));
-    expect(top).toContain('tell_owner');
-    expect(top).toMatch(/immediately/i);
-    expect(top).toMatch(/language/i);
-    expect(top).toMatch(/Traditional/);
-    expect(top).toMatch(/Simplified/);
-    expect(top).toMatch(/links?[^\n]*(?:unchanged|exactly|as is|original)/i);
-  });
-
-  it('returns the saved watch_url to the owner after reconnecting', () => {
-    const crash = section(
-      MD,
-      'If your program crashes or the connection drops',
-    );
-    expect(crash).toContain('.casino/$ROOM_ID.watch_url');
-    expect(crash).toMatch(/watch_url[\s\S]*owner[\s\S]*again/i);
-  });
-
-  it('keeps the saved watch_url readable and explains its finished result before cleanup', () => {
-    const play = section(MD, 'How to play');
-    const report = play.slice(play.indexOf('### Step 4'));
-    expect(MD).toContain('cat .casino/$ROOM_ID.watch_url');
-    expect(report).toMatch(
-      /saved `watch_url`[^\n]*finished result[^\n]*record/i,
-    );
-    expect(report).toContain('rm .casino/$ROOM_ID.*');
-    expect(report.indexOf('saved `watch_url`')).toBeLessThan(
-      report.indexOf('rm .casino/$ROOM_ID.*'),
-    );
-    expect(report).toMatch(/relay `tell_owner`[^\n]*rule at the top/i);
-  });
-
-  it('explains the five-minute cancellation in the private-room instructions', () => {
-    const play = section(MD, 'How to play');
-    const createAt = play.search(/^(?:#{3,6}\s+|-\s+\*\*)Private room/im);
-    const joinAt = play.search(/^(?:#{3,6}\s+|-\s+\*\*)Join/im);
-    expect(createAt).toBeGreaterThan(0);
-    expect(joinAt).toBeGreaterThan(createAt);
-    const privateRoom = play.slice(createAt, joinAt);
-    expect(privateRoom).toMatch(/5 minutes/i);
-    expect(privateRoom).toMatch(/join/i);
-    expect(privateRoom).toContain('cancelled');
-  });
-
-  it('distinguishes settled stack_changes from next-hand stacks after blinds', () => {
-    const rules = section(MD, "Hold'em rules");
-    expect(rules).toMatch(
-      /`stack_changes`[^\n]*(?:settle|result|end|finish|won|lost)/i,
-    );
-    expect(rules).toMatch(/next hand[^\n]*blind/i);
-    expect(rules).toContain('`my_stack`');
-    expect(rules).toContain('`opponent_stack`');
-  });
-
-  // T34 (A19): rising blinds, how the match ends, and why folding every hand
-  // loses.
-  it('explains the blind schedule, the end of a freezeout and the cost of folding', () => {
-    const rules = section(MD, "Hold'em rules");
-    expect(rules).not.toMatch(/blinds are fixed/i);
-    expect(rules).toMatch(/double every `blind_every` hands/);
-    expect(rules).toMatch(/hands 6-10 are 2\/4/);
-    expect(rules).toContain('`view.blinds`');
-    expect(rules).toContain('`view.next_blinds_at_hand`');
-    expect(rules).toMatch(/can't cover a blind[^\n]*all-in/);
-    expect(rules).toMatch(/after `max_hands` hands[^\n]*draw/);
-    expect(rules).toMatch(/folding every hand is not safe/);
-  });
-
-  it('installs into project skill folders and describes global installs and pi', () => {
-    const blocks = fenced(SAVE, 'bash');
-    expect(blocks).toHaveLength(2);
-    for (const [i, path] of [
-      '.claude/skills/agent-casino',
-      '.agents/skills/agent-casino',
-    ].entries()) {
-      expect(blocks[i]).toContain(`mkdir -p ${path}`);
-      expect(blocks[i]).toContain(
-        `curl -fsSL ${BASE_URL}/skill.md -o ${path}/SKILL.md`,
-      );
-      expect(blocks[i]).not.toContain('~/');
-    }
-    const prose = blocks.reduce((text, block) => text.replace(block, ''), SAVE);
-    expect(prose).toContain('~/.claude/skills/agent-casino/');
-    expect(prose).toContain('~/.codex/skills/agent-casino/');
-    expect(prose).toMatch(/Codex[^\n]*pi|pi[^\n]*Codex/i);
-    expect(prose).toContain('/skill:agent-casino');
-    expect(prose).toMatch(/first[\s\S]*trust[\s\S]*folder/i);
-  });
-
-  it.each([undefined, 'https://web.casino.test'])(
-    'puts watch_url before wait in every seat response hint (web URL: %s)',
-    webUrl => {
-      const md = renderSkill(BASE_URL, webUrl);
-      const responses = fenced(md, 'json').map(
-        block => JSON.parse(block) as Record<string, unknown>,
-      );
-      const seats = responses.filter(body => typeof body.token === 'string');
-      expect(seats).toHaveLength(3);
-      for (const body of seats) {
-        const hint = String(body.hint);
-        expect(hint).toMatch(/watch_url[\s\S]*owner/i);
-        const watch = hint.indexOf('watch_url');
-        const wait = hint.indexOf('GET /v1/rooms/r_8f2k1x9q0a/wait');
-        expect(watch).toBeGreaterThanOrEqual(0);
-        expect(wait).toBeGreaterThan(watch);
-      }
-    },
-  );
-
-  it.each([undefined, 'https://web.casino.test'])(
-    'links both match_over examples to the match page (web URL: %s)',
-    webUrl => {
-      const responses = fenced(renderSkill(BASE_URL, webUrl), 'json').map(
-        block => JSON.parse(block) as Record<string, unknown>,
-      );
-      const finished = responses.filter(body => body.status === 'match_over');
-      // wait's, actions?wait=1's (T47) and leave's.
-      expect(finished).toHaveLength(3);
-      for (const body of finished) {
-        expect(String(body.hint)).toContain(
-          `${webUrl ?? BASE_URL}/matches/r_8f2k1x9q0a`,
-        );
-      }
-    },
-  );
-
-  it('explains call and raise amounts and legal_actions', () => {
-    const rules = section(MD, "Hold'em rules");
-    expect(rules.toLowerCase()).toContain('how many more chips');
-    expect(rules.toLowerCase()).toContain('raise to');
-    expect(rules).toContain('legal_actions');
-  });
-
-  // T27 (arena proposal 7): Haiku had 47 chips and was offered max 48.
-  it("says raise max already counts this street's bet", () => {
-    const rules = section(MD, "Hold'em rules");
-    expect(rules).toMatch(/`max`[^\n]*`my_stack` \+ `my_bet_this_street`/);
-  });
-
-  // T27: the real deadline is Date.toISOString(), with milliseconds.
-  it('shows deadline as the server writes it, with milliseconds', () => {
-    const play = section(MD, 'How to play');
-    const deadlines = [...MD.matchAll(/"deadline": "([^"]*)"/g)].map(
-      m => m[1] ?? '',
-    );
-    expect(deadlines.length).toBeGreaterThan(0);
-    for (const deadline of deadlines)
-      expect(new Date(deadline).toISOString()).toBe(deadline);
-    expect(play).toMatch(/milliseconds/);
-  });
-
-  it('says what to do with each response', () => {
-    const todo = section(MD, 'What to do with each response');
-    for (const word of [
-      'waiting',
-      'your_turn',
-      'invalid_action',
-      'not_your_turn',
-      'stale_turn',
-      'match_over',
-      'state',
-    ]) {
-      expect(todo, word).toContain(word);
-    }
-    expect(todo.toLowerCase()).toContain('network');
-  });
-
-  // T26 (casino-api A17), saved to a file since T27.
-  it('makes one queue_key file before queueing and sends it on every queue call', () => {
-    const play = section(MD, 'How to play');
-    const make = play.search(
-      /openssl rand -hex 16\s*>\s*\.casino\/alice\.queue_key/,
-    );
-    const queue = play.indexOf(
-      '\\"queue_key\\":\\"$(cat .casino/alice.queue_key)\\"',
-    );
-    expect(make).toBeGreaterThan(0);
-    expect(queue).toBeGreaterThan(make);
-    // Saved once, never made again for this match.
-    expect(play).toMatch(/same `queue_key`/);
-    expect(play).toMatch(/do not run `openssl` again/i);
-  });
-
-  // T27: no long token pasted into every command, one file set per room so
-  // several matches can run at once, deleted after the report.
-  it('saves the token and queue_key per room, and deletes them after reporting', () => {
-    const play = section(MD, 'How to play');
-    const blocks = fenced(play, 'bash');
-    const matched = blocks.findIndex(
-      b =>
-        b.includes('> .casino/$ROOM_ID.token') &&
-        b.includes('mv .casino/alice.queue_key .casino/$ROOM_ID.queue_key'),
-    );
-    const joined = blocks.findIndex(
-      (b, i) => i !== matched && b.includes('> .casino/$ROOM_ID.token'),
-    );
-    const cleanup = blocks.findIndex(b => b.includes('rm .casino/$ROOM_ID.*'));
-    const queue = blocks.findIndex(b => b.includes('"$CASINO_URL/v1/queue"'));
-    const leaderboard = blocks.findIndex(b =>
-      b.includes('"$CASINO_URL/v1/leaderboard"'),
-    );
-    expect(matched).toBeGreaterThan(queue);
-    expect(joined).toBeGreaterThan(matched);
-    expect(cleanup).toBeGreaterThan(leaderboard);
-    for (const b of [matched, joined])
-      expect(blocks[b]).toMatch(/ROOM_ID=[^\n]*sed/);
-    expect(play).toMatch(/several matches/i);
-    expect(play).toMatch(/same folder/i);
-  });
-
-  it('says how to get the same matched back after a crash, and what name_in_use means', () => {
-    const play = section(MD, 'How to play');
-    expect(play).toMatch(/crash[^\n]*same name[^\n]*same `queue_key`/);
-    const todo = section(MD, 'What to do with each response');
-    expect(todo).toMatch(/\| error `name_in_use` [^\n]*`queue_key`/);
-    expect(todo).toMatch(/network error[^\n]*`queue_key`/);
-  });
-
-  // T23 (casino-api A16).
-  it('says to hand watch_url to the owner and explains the new seat fields', () => {
-    const play = section(MD, 'How to play');
-    expect(play).toMatch(/`watch_url`[^\n]*owner/);
-    expect(play).toMatch(/read-only/);
-    expect(play).toContain('`opponent_name`');
-    expect(play).toContain('`settings`');
-  });
-
-  it('offers an optional note of at most 500 characters that only the owner sees', () => {
-    const play = section(MD, 'How to play');
-    expect(play).toMatch(/`note`/);
-    expect(play).toContain('500 characters');
-    expect(play).toMatch(/opponent never/);
-    expect(play).toMatch(/never let writing it make you miss the deadline/);
-  });
-
-  // T27: arena players skipped the note, or wrote it in English to an owner
-  // who spoke another language.
-  it('suggests a note on every action, in the language the owner uses', () => {
-    const play = section(MD, 'How to play');
-    expect(play).toMatch(/note[^\n]*every action/i);
-    expect(play).toMatch(/language your owner/i);
-  });
-
-  // T27 (arena proposal 1): what "a game" is and the whole flow, up front.
-  // T34: a freezeout, not a fixed number of hands.
-  it('starts with a quick start: one match until someone runs out of chips, and the whole flow', () => {
-    const quick = section(MD, 'Quick start');
-    expect(quick).toMatch(/one match/i);
-    expect(quick).toMatch(/lost all their chips/);
-    expect(quick).toMatch(/double every 5 hands/);
-    expect(quick).toMatch(/10-25 hands/);
-    expect(MD).toContain('`settings.blind_every`');
-    expect(MD).toContain('`settings.max_hands`');
-    expect(quick).not.toMatch(/settings\.hands|fixed number of hands/);
-    // S5 adds an overview mentioning watch_url and waiting before the steps.
-    const flow = quick;
-    const order = [
-      flow.indexOf('POST /v1/queue'),
-      flow.indexOf('tell_owner'),
-      flow.indexOf('wait'),
-      flow.indexOf('actions'),
-      flow.indexOf('match_over'),
-    ];
-    expect(order.every(i => i > 0)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(quick).toMatch(/report/i);
-  });
-
-  // T27 (arena proposal 1): names are public and not accounts.
-  it('says how to pick a name when none was given, and that names are shared', () => {
-    const profile = section(MD, 'Your profile');
-    expect(profile).toMatch(
-      /no name|(?:owner|they)[^\n]*(?:not|hasn't|haven't)[^\n]*(?:name|chosen)|(?:ask|question)[^\n]*name/i,
-    );
-    expect(profile).toContain('openssl rand -hex 2');
-    expect(profile).toMatch(/public/i);
-    expect(MD).toMatch(/same name[^\n]*rating[^\n]*record/i);
-  });
-
-  // T27 (arena proposal 8, casino-api A17).
-  it('says what to do after a crash, near the top', () => {
-    const crash = section(
-      MD,
-      'If your program crashes or the connection drops',
-    );
-    expect(crash).toContain('.casino/$ROOM_ID.token');
-    expect(crash).toMatch(/`wait`[^\n]*`state`/);
-    expect(crash).toMatch(/plays for you/);
-    expect(crash).toMatch(/same name[^\n]*same `queue_key`[^\n]*`matched`/);
-    // A copied credential can recover the same queued seat.
-    expect(crash).toMatch(/invalid_token[\s\S]*same[^\n]*queue_key/i);
-  });
-
-  // T28 (casino-api A4, A15).
-  it('explains seconds_remaining as a guide only', () => {
-    const play = section(MD, 'How to play');
-    expect(play).toMatch(/`seconds_remaining`[^\n]*only a guide/);
-    expect(play).toMatch(/think too long[^\n]*server plays for you/);
-  });
-
-  // T30 (casino-api A18).
-  it('reports to the owner after about 3 minutes without an opponent', () => {
-    const play = section(MD, 'How to play');
-    expect(MD).not.toMatch(/10 minutes/);
-    expect(play).toMatch(/`waited_seconds`[^\n]*`queue_size`/);
-    expect(play).toMatch(
-      /about 3 minutes[^\n]*tell your owner[^\n]*keep waiting[^\n]*house-bot[^\n]*unrated[^\n]*stop/i,
-    );
-    expect(play).toMatch(/don't decide[^\n]*yourself/i);
-    expect(play).toMatch(/owner already told you[^\n]*do that/i);
-    const todo = section(MD, 'What to do with each response');
-    expect(todo).toMatch(/\| `waiting` from `POST \/v1\/queue` [^\n]*owner/);
-  });
-
-  // T32 S4/S5: explain the flow up front, then keep the owner informed.
-  describe.each([undefined, 'https://web.casino.test'])(
-    'queue progress updates (web URL: %s)',
-    webUrl => {
-      const md = renderSkill(BASE_URL, webUrl);
-      const first =
-        md
-          .split(/\n\s*\n/)
-          .find(
-            paragraph =>
-              /(?:two or three|2 or 3|2[–-]3)[ -]sentences/i.test(paragraph) &&
-              /owner/i.test(paragraph),
-          ) ?? '';
-      const play = section(md, 'How to play');
-      const step1 = play.slice(0, play.indexOf('### Step 2'));
-      const items =
-        step1.match(/^[-*] [^\n]*(?:\n(?![-*] |#{1,6} |```)[^\n]*)*/gm) ?? [];
-      const waiting =
-        items.find(item => /"status"\s*:\s*"waiting"/.test(item)) ?? '';
-      const matched =
-        items.find(item => /"status"\s*:\s*"matched"/.test(item)) ?? '';
-
-      it('explains the whole match to the owner before queueing', () => {
-        expect(first, 'owner introduction').not.toBe('');
-        expect.soft(first).toMatch(/(?:before|start|begin)/i);
-        expect.soft(first).toMatch(/(?:tell|say|explain|inform)[\s\S]*owner/i);
-        expect
-          .soft(first)
-          .toMatch(/(?:two or three|2 or 3|2[–-]3)[ -]sentences/i);
-        for (const concept of [
-          'your name',
-          'seconds',
-          'minutes',
-          'runs out of chips',
-          '10-25 hands',
-          'report',
-          'result',
-        ]) {
-          expect.soft(first.toLowerCase(), concept).toContain(concept);
-        }
-        expect.soft(first).toMatch(/queu/i);
-        expect.soft(first).toMatch(/opponent/i);
-        expect.soft(first).toMatch(/(?:matched|match|paired)/i);
-        expect.soft(first).toMatch(/(?:watch_url|watch(?:ing)? link)/i);
-        expect.soft(first).toMatch(/open/i);
-        expect
-          .soft(first)
-          .toMatch(/(?:don't|do not) need to do anything|nothing to do/i);
-      });
-
-      it('starts queueing after the explanation without waiting for an owner answer', () => {
-        expect.soft(first).toMatch(/(?:then|after|once)[\s\S]*(?:queu)/i);
-        expect
-          .soft(first)
-          .toMatch(/(?:immediately|right away|directly|straight)/i);
-        expect
-          .soft(first)
-          .toMatch(
-            /(?:don't|do not|never|without)[^.!\n]*wait[^.!\n]*(?:answer|reply|response)/i,
-          );
-      });
-
-      it('keeps naming, queueing, saving, owner relay, play and reporting in order across their sections', () => {
-        const profileAt = md.indexOf('## Your profile');
-        const playAt = md.indexOf('## How to play');
-        expect(profileAt).toBeGreaterThan(0);
-        expect(profileAt).toBeLessThan(playAt);
-        const quick = section(md, 'Quick start');
-        const order = [
-          quick.indexOf('POST /v1/queue'),
-          quick.search(/sav(?:e|ing)|\.casino\//i),
-          quick.indexOf('tell_owner'),
-          quick.indexOf('wait'),
-          quick.indexOf('actions'),
-          quick.indexOf('match_over'),
-        ];
-        expect(order.every(index => index >= 0)).toBe(true);
-        for (let i = 1; i < order.length; i++) {
-          expect(order[i]).toBeGreaterThan(order[i - 1] ?? -1);
-        }
-        expect(quick).toMatch(/report/i);
-        const playBlocks = fenced(play, 'bash');
-        const leave = playBlocks.findIndex(block => block.includes('/leave"'));
-        const leaderboard = playBlocks.findIndex(block =>
-          block.includes('/v1/leaderboard"'),
-        );
-        expect(leave).toBeGreaterThanOrEqual(0);
-        expect(leaderboard).toBeGreaterThan(leave);
-      });
-
-      it('places the owner explanation or a reference to it before the first queue call', () => {
-        const queueAt = md.indexOf('"$CASINO_URL/v1/queue"');
-        expect(queueAt).toBeGreaterThan(0);
-        expect(first).not.toBe('');
-        expect(md.indexOf(first)).toBeLessThan(queueAt);
-        const beforeQueue = step1.slice(
-          0,
-          step1.indexOf('"$CASINO_URL/v1/queue"'),
-        );
-        expect(beforeQueue).toMatch(
-          /(?:explain|explanation|overview|intro|tell[^\n]*owner)/i,
-        );
-      });
-
-      it('reports both progress fields in one sentence on every waiting response', () => {
-        expect(waiting, 'Step 1 waiting response item').not.toBe('');
-        expect.soft(waiting).toMatch(/(?:each|every|whenever)/i);
-        expect.soft(waiting).toContain('owner');
-        expect.soft(waiting).toMatch(/(?:one|single|1)[ -]sentence/i);
-        expect.soft(waiting).toContain('waited_seconds');
-        expect.soft(waiting).toContain('queue_size');
-      });
-
-      it('immediately queues again after the update without waiting for an owner reply', () => {
-        expect(waiting, 'Step 1 waiting response item').not.toBe('');
-        expect.soft(waiting).toContain('POST /v1/queue');
-        expect.soft(waiting).toMatch(/(?:immediately|right away)/i);
-        expect
-          .soft(waiting)
-          .toMatch(
-            /(?:do not|don't|without|never)[^.!\n]*(?:(?:wait|pause)[^.!\n]*(?:repl|response|answer)|stop)/i,
-          );
-      });
-
-      it('tells the owner the opponent name and hands over watch_url when matched', () => {
-        expect(matched, 'Step 1 matched response item').not.toBe('');
-        expect.soft(matched).toContain('opponent_name');
-        expect.soft(matched).toContain('watch_url');
-        expect.soft(matched).toContain('owner');
-        expect.soft(matched).toMatch(/(?:tell|say|inform|notify|announce)/i);
-        expect.soft(matched).toMatch(/(?:give|send|share|hand|return)/i);
-      });
-
-      it('keeps progress updates brief without delaying calls or missing a deadline', () => {
-        const updates = step1
-          .split(/\n\s*\n/)
-          .find(
-            paragraph =>
-              /(?:updates?|reports?|messages?)/i.test(paragraph) &&
-              /deadline/i.test(paragraph),
-          );
-        expect(
-          updates,
-          'Step 1 timing rule for progress updates',
-        ).toBeDefined();
-        expect.soft(updates ?? '').toMatch(/(?:short|brief|concise)/i);
-        expect
-          .soft(updates ?? '')
-          .toMatch(
-            /(?:do not|don't|never|must not|cannot|can't)[^.!\n]*delay[^.!\n]*(?:call|request)/i,
-          );
-        expect
-          .soft(updates ?? '')
-          .toMatch(
-            /(?:do not|don't|never|must not|cannot|can't)[^.!\n]*miss[^.!\n]*deadline/i,
-          );
-      });
-
-      it('includes the brief update and immediate retry in the queue waiting table row', () => {
-        const todo = section(md, 'What to do with each response');
-        const row =
-          lines(todo).find(line =>
-            /^\| `waiting` from `POST \/v1\/queue`\s*\|/.test(line),
-          ) ?? '';
-        expect(row, 'queue waiting response table row').not.toBe('');
-        expect.soft(row).toContain('owner');
-        expect.soft(row).toMatch(/(?:one|single|1)[ -]sentence/i);
-        expect.soft(row).toMatch(/(?:immediately|right away)/i);
-        expect.soft(row).toMatch(/(?:call|retry|repeat|queue again)/i);
-        expect.soft(row).toMatch(/sentence[\s\S]*(?:immediately|right away)/i);
-      });
-
-      it('preserves the 180-second owner decision and the no-questions match rule', () => {
-        const decision =
-          items.find(
-            item => item.includes('waited_seconds') && item.includes('180'),
-          ) ?? '';
-        expect(decision).toContain('owner');
-        expect(decision).toMatch(/(?:stop|pause)/i);
-        expect(decision).toMatch(/(?:ask|whether|choose|decid)/i);
-        expect(decision).toContain('keep waiting');
-        expect(decision).toContain('house-bot');
-        expect(decision).toContain('unrated');
-        const intro = section(md, 'What this is');
-        expect(intro).toMatch(
-          /While queueing[^\n]*owner[^\n]*progress updates/i,
-        );
-        expect(intro).toMatch(
-          /During the match[^\n]*ask no questions except[^\n]*display name[^\n]*first visit/i,
-        );
-        expect(intro).toMatch(/Get that name before you start/i);
-      });
-    },
-  );
-
-  // T32 S3: stopping the queue needs only local cleanup, outside runnable examples.
-  it.each([undefined, 'https://web.casino.test'])(
-    'explains stop cleanup in the 180-second queue item (web URL: %s)',
-    webUrl => {
-      const play = section(renderSkill(BASE_URL, webUrl), 'How to play');
-      const step1 = play.slice(0, play.indexOf('### Step 2'));
-      const items = step1.match(
-        /^[-*] [^\n]*(?:\n(?![-*] |#{1,6} |```)[^\n]*)*/gm,
-      );
-      const waiting = items?.find(
-        item => item.includes('`waited_seconds`') && item.includes('180'),
-      );
+  it('all HTTP request examples resolve to a real contract endpoint', () => {
+    const requests = fenced(APPENDIX, 'http');
+    expect(requests.length).toBeGreaterThan(0);
+    for (const request of requests) {
+      const [method, target] = (request.split('\n')[0] ?? '').split(' ');
       expect(
-        waiting,
-        'Step 1 queue item mentioning waited_seconds and 180',
-      ).toBeDefined();
-      const text = waiting ?? '';
-      expect.soft(text).toContain('stop');
-      expect.soft(text).toContain('POST /v1/queue');
-      expect.soft(text).toMatch(/(?:stop|no longer)[\s\S]*`POST \/v1\/queue`/i);
-      expect.soft(text).toMatch(/(?:no|nothing|not)[^.!\n]*cancel/i);
-      expect.soft(text).toContain('45 seconds');
-      expect.soft(text).toMatch(/expir/i);
-      expect.soft(text).toContain('`rm .casino/alice.queue_key`');
-      expect.soft(text).toMatch(/(?:can't|cannot|unable|fail)/i);
-      expect
-        .soft(text)
-        .toMatch(
-          /(?:can't|cannot|unable|fail)[\s\S]*(?:tell|inform|report|notify)[\s\S]*owner/i,
-        );
-    },
-  );
-
-  it('keeps stop cleanup out of every Step 1 bash example', () => {
-    const play = section(MD, 'How to play');
-    const step1 = play.slice(0, play.indexOf('### Step 2'));
-    const blocks = fenced(step1, 'bash');
-    expect(blocks.length).toBeGreaterThan(0);
-    for (const block of blocks) {
-      expect(block).not.toContain('rm .casino/alice.queue_key');
+        Object.values(API).some(
+          endpoint =>
+            endpoint.method === method &&
+            docPath(endpoint.path) === target?.split('?')[0],
+        ),
+        request,
+      ).toBe(true);
     }
   });
-
-  it('tells the owner which .casino files are left when they cannot be deleted', () => {
-    const play = section(MD, 'How to play');
-    expect(play).toMatch(
-      /can't delete[^\n]*tell your owner[^\n]*files[^\n]*\.casino/i,
+  it('keeps protocol details in the appendix', () => {
+    for (const field of [
+      'turn_id',
+      'queue_key',
+      '?wait=1',
+      'duplicate',
+      'hands_since_your_turn',
+    ])
+      expect(APPENDIX).toContain(field);
+    expect(
+      fenced(APPENDIX, 'http').some(block =>
+        block.startsWith('POST /v1/rooms/{room_id}/actions?wait=1\n'),
+      ),
+    ).toBe(true);
+    const responses = fenced(APPENDIX, 'json').map(
+      block => JSON.parse(block) as Record<string, unknown>,
     );
+    for (const response of responses.filter(
+      body => typeof body.deadline === 'string',
+    ))
+      expect(new Date(String(response.deadline)).toISOString()).toBe(
+        response.deadline,
+      );
+    expect(responses.some(body => typeof body.deadline === 'string')).toBe(
+      true,
+    );
+    const seats = responses.filter(body => typeof body.token === 'string');
+    expect(seats).toHaveLength(3);
+    for (const seat of seats)
+      expect(String(seat.hint)).toMatch(
+        /watch_url[\s\S]*owner[\s\S]*GET \/v1\/rooms\/r_8f2k1x9q0a\/wait/i,
+      );
+    const finished = responses.filter(body => body.status === 'match_over');
+    expect(finished).toHaveLength(3);
+    for (const body of finished)
+      expect(String(body.hint)).toContain(`${BASE_URL}/matches/r_8f2k1x9q0a`);
   });
 
-  it("explains last_hand's result fields and every hand skipped between turns", () => {
-    const rules = section(MD, "Hold'em rules");
-    expect(rules).toMatch(/`last_hand`[^\n]*`ended_by`[^\n]*`stack_changes`/);
-    expect(rules).toMatch(
-      /`hands_since_your_turn`[^\n]*every hand completed[^\n]*last accepted action[^\n]*oldest first[^\n]*`last_hand`/,
-    );
-    expect(rules).toMatch(
-      /Read every entry[^\n]*`wait` can skip several hands/i,
-    );
-    expect(rules).toMatch(
-      /`last_hand` still shows only the latest completed hand/i,
-    );
-    expect(rules).not.toContain('you missed nothing');
-    expect(rules).toMatch(
-      /Reads and rejected or duplicate actions do not clear it/,
-    );
-  });
-
-  it('distinguishes same-seat queue recovery from joining for a new token', () => {
-    const errors = section(MD, 'Error codes');
-    expect(errors).toMatch(/`invalid_token`[^\n]*(?:cop|saved)/i);
-    expect(errors).toMatch(/same[^\n]*name/i);
-    expect(errors).toMatch(/same[^\n]*queue_key/i);
-    expect(errors).toMatch(/same[^\n]*matched/i);
-    expect(errors).toMatch(/(?:do not|don't|never)[^\n]*join/i);
+  it('retains same-seat queue recovery and credential advice', () => {
+    expect(APPENDIX).toMatch(/invalid_token[\s\S]*(?:cop|saved)/i);
+    expect(APPENDIX).toMatch(/same[^\n]*name[^\n]*same[^\n]*queue_key/i);
+    expect(APPENDIX).toMatch(/same[^\n]*matched/i);
+    expect(APPENDIX).toMatch(/(?:do not|don't|never)[^\n]*join/i);
   });
 });
 
@@ -1216,55 +368,5 @@ describe('EXAMPLES', () => {
     expect(
       (stale?.body as { state?: unknown } | undefined)?.state,
     ).toBeDefined();
-  });
-});
-
-// T35 (casino-api A20): ask once for the display name, keep both names in
-// .casino/profile.json, and send display_name on every way to get a seat.
-describe('display names and the profile', () => {
-  const profile = section(MD, 'Your profile');
-
-  it('reads the profile first and asks the owner only when there is none', () => {
-    const read = profile.indexOf('cat .casino/profile.json');
-    const ask = profile.search(/ask them once/i);
-    expect(read).toBeGreaterThan(0);
-    expect(ask).toBeGreaterThan(read);
-    expect(profile).toMatch(/shown publicly/i);
-    expect(profile).toMatch(
-      /If your owner hasn't said what to call you, ask them once, before anything else/i,
-    );
-    expect(profile).toMatch(/Wait for the answer[^\n]*`display_name`/i);
-    expect(MD.indexOf('## Your profile')).toBeLessThan(
-      MD.indexOf('## How to play'),
-    );
-    expect(section(MD, 'What this is')).toMatch(
-      /During the match[^\n]*ask no questions except[^\n]*display name[^\n]*first visit/i,
-    );
-    expect(profile).toMatch(/don't ask again/i);
-  });
-
-  it('saves both names to profile.json and keeps it after the match', () => {
-    const save = fenced(profile, 'bash').find(b =>
-      b.includes('> .casino/profile.json'),
-    );
-    expect(save).toContain('"name":"alice"');
-    expect(save).toContain('"display_name":"Alice the Shark"');
-    expect(section(MD, 'How to play')).toMatch(
-      /Keep `\.casino\/profile\.json`/,
-    );
-  });
-
-  it('sends display_name when queueing, opening and joining a room', () => {
-    const blocks = fenced(section(MD, 'How to play'), 'bash');
-    for (const path of ['/v1/queue"', '/v1/rooms"', '/join"']) {
-      const block = blocks.find(b => b.includes(path));
-      expect(block, path).toMatch(/\\?"display_name\\?":/);
-    }
-  });
-
-  it('explains the display name fields of the answers', () => {
-    const play = section(MD, 'How to play');
-    expect(play).toContain('`opponent_display_name`');
-    expect(play).toContain('`House Bot`');
   });
 });

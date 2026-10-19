@@ -64,7 +64,7 @@ const queueRequest: typeof QueueRequest.Type = {
   game: 'holdem',
   name: 'alice',
   display_name: ALICE,
-  queue_key: '$(cat .casino/alice.queue_key)',
+  queue_key: '9f2c4e1a7b3d5e8f0a6c2d4b8e1f3a5c',
 };
 
 const matched: typeof QueueResponse.Type = {
@@ -277,7 +277,7 @@ const matchOver: typeof MatchOver.Type = {
 };
 
 const actRequest: typeof ActionRequest.Type = {
-  turn_id: '$TURN_ID',
+  turn_id: 't_41',
   type: 'raise',
   amount: 8,
   note: 'Top pair with the best kicker: raise for value',
