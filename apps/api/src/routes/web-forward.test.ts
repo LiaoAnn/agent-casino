@@ -57,7 +57,7 @@ describe('forwarding into the real API handle', () => {
       expect(response?.status).toBe(200);
       expect(response?.headers.get('content-type')).toMatch(/^text\/markdown/);
       const markdown = await response?.text();
-      expect(markdown).toContain(`export CASINO_URL=${PUBLIC_ORIGIN}`);
+      expect(markdown).toContain(`curl -fsS ${PUBLIC_ORIGIN}/casino.sh`);
       expect(markdown).toContain(`${PUBLIC_ORIGIN}/skill.md`);
       const watchUrls = [
         ...(markdown ?? '').matchAll(/"watch_url": "([^"]+)"/g),
