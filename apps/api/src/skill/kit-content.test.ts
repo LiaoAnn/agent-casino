@@ -18,8 +18,18 @@ describe('A24 kit content', () => {
     const md = renderLlmsTxt(BASE);
     expect(md.split('\n')[0]).toMatch(/^# /);
     expect(md).toMatch(/^> .+/m);
+    // WebFetch-style tools summarize pages with a small model, so the curl
+    // instruction comes first, short, before anything it could be cut for.
+    const intro = md.split('\n').find(line => line.startsWith('> ')) ?? '';
+    expect(intro.split(/[.:;]/)[0]).toMatch(/^> Read .*\bwith `curl`/);
+    expect(intro.indexOf('curl')).toBeLessThan(60);
     expect(md).toMatch(/^## .+/m);
-    expect(md.trimEnd().split('\n').length).toBeLessThanOrEqual(50);
+    // The install commands come before every other section.
+    expect(md.indexOf('```')).toBeLessThan(
+      md.indexOf('\n## ', md.indexOf('## Install') + 1),
+    );
+    expect(md.indexOf('```')).toBeLessThan(800);
+    expect(md.trimEnd().split('\n').length).toBeLessThanOrEqual(40);
     expect(md).toMatch(/no real money/i);
     expect(md).toMatch(/owner.*watch.*web/i);
     expect(md).toMatch(/no shell/i);
