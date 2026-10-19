@@ -54,32 +54,47 @@ post() {
     -d "$2" "${@:3}"
 }
 
-# play <room_id> <token> <out file>: checks when it can, else calls, until
-# match_over, which goes to <out file>.
+# play <room_id> <token> <out file> [two-step]: checks when it can, else
+# calls, until match_over, which goes to <out file>. Each action is sent with
+# ?wait=1, whose answer is the next state (T47); with two-step, the old way:
+# actions answers accepted, then wait.
 play() {
-  local room=$1 token=$2 out=$3 r status turn type
+  local room=$1 token=$2 out=$3 mode=${4-} r="" status turn type
   for _ in $(seq 1 2000); do
-    r=$(get "/v1/rooms/$room/wait" -H "Authorization: Bearer $token")
+    [[ -n $r ]] || r=$(get "/v1/rooms/$room/wait" -H "Authorization: Bearer $token")
     status=$(jq -r .status <<<"$r")
     case $status in
       your_turn)
-        check "your_turn includes completed hands and no owner message" \
+        check "your_turn includes completed hands, no owner message, and points to actions?wait=1" \
           '(.hands_since_your_turn | type) == "array" and (has("tell_owner") | not)
+           and (.hint | contains("/actions?wait=1"))
            and ([.hands_since_your_turn[].hand_number] | . == sort)' "$r"
         turn=$(jq -r .turn_id <<<"$r")
         type=$(jq -r 'if any(.legal_actions[]; .type == "check")
           then "check" else "call" end' <<<"$r")
-        r=$(post "/v1/rooms/$room/actions" \
-          "{\"turn_id\":\"$turn\",\"type\":\"$type\"}" \
-          -H "Authorization: Bearer $token")
-        [[ $(jq -r .status <<<"$r") == accepted ]] || {
-          echo "$r" >&2
-          return 1
-        }
+        if [[ $mode == two-step ]]; then
+          r=$(post "/v1/rooms/$room/actions" \
+            "{\"turn_id\":\"$turn\",\"type\":\"$type\"}" \
+            -H "Authorization: Bearer $token")
+          [[ $(jq -r .status <<<"$r") == accepted ]] || {
+            echo "$r" >&2
+            return 1
+          }
+          r=""
+        else
+          r=$(post "/v1/rooms/$room/actions?wait=1" \
+            "{\"turn_id\":\"$turn\",\"type\":\"$type\"}" \
+            -H "Authorization: Bearer $token")
+          [[ $(jq -r .status <<<"$r") =~ ^(your_turn|waiting|match_over)$ ]] || {
+            echo "$r" >&2
+            return 1
+          }
+        fi
         ;;
       waiting)
         check "waiting has no owner message or completed-hand array" \
-          '(has("tell_owner") or has("hands_since_your_turn")) | not' "$r" ;;
+          '(has("tell_owner") or has("hands_since_your_turn")) | not' "$r"
+        r="" ;;
       match_over)
         check "match_over includes a complete owner report and hand history" \
           '(.hands_since_your_turn | type) == "array"
@@ -158,7 +173,8 @@ check "POST /v1/rooms trims and squeezes the display name; house-bot is House Bo
 check "bot start tells the owner the opponent and exact watch link" \
   '. as $r | .tell_owner | contains("House Bot") and contains($r.watch_url)' "$room"
 bot_room=$(jq -r .room_id <<<"$room")
-play "$bot_room" "$(jq -r .token <<<"$room")" "$TMP/bot" ||
+# The house-bot match keeps the two requests per action (actions, then wait).
+play "$bot_room" "$(jq -r .token <<<"$room")" "$TMP/bot" two-step ||
   fail "play house-bot to match_over"
 check "house-bot match: over, not rated" \
   '.status == "match_over" and (.result | IN("win", "loss", "draw"))
@@ -230,6 +246,16 @@ check "POST /v1/queue again with $a's queue_key and another display name: the sa
   '.[0] == .[1]' \
   "$(jq -s . "$TMP/qa" <(post /v1/queue "$(queue_body "$a" "$key_a" "改名")"))"
 pair_room=$(jq -r .room_id "$TMP/qa")
+# T47: a refused action answers its error at once, without waiting.
+r=$(post "/v1/rooms/$pair_room/actions?wait=1" '{"turn_id":"t_999","type":"fold"}' \
+  -H "Authorization: Bearer $(jq -r .token "$TMP/qb")" -w '\n%{http_code} %{time_total}')
+check "a refused actions?wait=1 answers 409 at once, with state" \
+  '(.[0].code | IN("not_your_turn", "stale_turn")) and (.[0].state | type) == "object"
+   and .[1] == 409 and .[2] < 5' "$(jq -s . <<<"$r")"
+r=$(post "/v1/rooms/$pair_room/actions?wait=true" '{"turn_id":"t_1","type":"fold"}' \
+  -H "Authorization: Bearer $(jq -r .token "$TMP/qa")" -w '\n%{http_code}')
+check "actions?wait=true: 400 invalid_request" \
+  '.[0].code == "invalid_request" and .[1] == 400' "$(jq -s . <<<"$r")"
 play "$pair_room" "$(jq -r .token "$TMP/qa")" "$TMP/a" &
 pa=$!
 play "$pair_room" "$(jq -r .token "$TMP/qb")" "$TMP/b" || fail "play $b to match_over"

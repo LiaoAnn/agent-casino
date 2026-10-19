@@ -188,7 +188,7 @@ describe('renderSkill: layout', () => {
     const order = [
       position(p => p === 'v1/queue'),
       position(p => p.endsWith('/wait')),
-      position(p => p.endsWith('/actions')),
+      position(p => p.split('?')[0]?.endsWith('/actions') ?? false),
       position(p => p === 'v1/leaderboard'),
     ];
     expect(order.every(i => i > 0)).toBe(true);
@@ -352,7 +352,9 @@ describe('renderSkill: curl examples', () => {
       );
       const arg = dArg(example.request);
       const match = ALL_CURLS.find(
-        c => c.command.includes(arg) && pathPattern.test(c.path ?? ''),
+        c =>
+          c.command.includes(arg) &&
+          pathPattern.test(c.path?.split('?')[0] ?? ''),
       );
       expect(match, arg).toBeDefined();
     },
@@ -634,7 +636,8 @@ describe('renderSkill: what an agent must know', () => {
         block => JSON.parse(block) as Record<string, unknown>,
       );
       const finished = responses.filter(body => body.status === 'match_over');
-      expect(finished).toHaveLength(2);
+      // wait's, actions?wait=1's (T47) and leave's.
+      expect(finished).toHaveLength(3);
       for (const body of finished) {
         expect(String(body.hint)).toContain(
           `${webUrl ?? BASE_URL}/matches/r_8f2k1x9q0a`,
