@@ -78,9 +78,9 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 
 **驗收（slice loop 第 5 步）** 照 `/verification-evidence` 拿 Observed 的證據：API 用 `curl https://<route>-<wt>.<vm>.liaoann.net/...`（網址看 `wt-status`），網頁用 t3 preview 截圖。需要 dev server 時開在 tmux（`<wt>-api`），用完就關，VM 記憶體很少。
 
-**Review（slice loop 第 6 步與最後）** 每個 slice 跑 `/review-change`，最後整個 branch 再跑一次（finished-feature 的 lenses）。照 `/review-change` 的規則選 lens（一般 slice 只要 Correctness + Test Quality；碰到合約、持久資料、共用模組才加 Design Fit、Simplicity；碰到驗證、外部輸入、秘密才加 Security），不要每個 slice 都開五個。每個 lens 的 reviewer 用 Grok（見下面「subagent 用誰」），合併重複、確認 Blocker、決定 Hardening 要不要修仍由你自己做。給 reviewer 的 plan 要附 ticket 原文，讓它也檢查：做多、做少、寫死的數字、碰了範圍外的檔案、改了合約、跟 skill 規格不符。有 Blocker 就修，重跑受影響的檢查和驗收。
+**Review（slice loop 第 6 步與最後）** 每個 slice 跑 `/review-change`，最後整個 branch 再跑一次（finished-feature 的 lenses）。照 `/review-change` 的規則選 lens（一般 slice 只要 Correctness + Test Quality；碰到合約、持久資料、共用模組才加 Design Fit、Simplicity；碰到驗證、外部輸入、秘密才加 Security），不要每個 slice 都開五個。每個 lens 的 reviewer 用 Codex（見下面「subagent 用誰」），合併重複、確認 Blocker、決定 Hardening 要不要修仍由你自己做。給 reviewer 的 plan 要附 ticket 原文，讓它也檢查：做多、做少、寫死的數字、碰了範圍外的檔案、改了合約、跟 skill 規格不符。有 Blocker 就修，重跑受影響的檢查和驗收。
 
-**subagent 用誰**（2026-10-19 Ann）：你負責計畫、實作和所有決定。繁瑣但必須做的事交給 subagent：**寫測試用 Codex，review 和 verifier 用 Grok**。主要的 agent（你）一定是 Claude Opus 5.5；subagent 用 OpenAI 和 Grok，不同家的模型比較容易看到作者自己看不到的問題，工作分給兩家也比較不會撞到額度上限。兩邊互相檢查：subagent 寫的測試你檢查，你寫的程式 subagent review，verifier 的結果你看過才開 PR。
+**subagent 用誰**（2026-10-19 Ann）：你負責計畫、實作和所有決定。繁瑣但必須做的事交給 subagent：**寫測試、review、verifier 都用 Codex**。主要的 agent（你）一定是 Claude Opus 5.5；subagent 用 OpenAI，不同家的模型比較容易看到作者自己看不到的問題。Grok 暫停使用（額度用完，Ann 說先不用），等 Ann 說恢復再改回來。兩邊互相檢查：subagent 寫的測試你檢查，你寫的程式 subagent review，verifier 的結果你看過才開 PR。
 
 **任務說明要短**：subagent 自己會讀 Dev VM 的 AGENTS.md（VM 規則與環境）和 [subagents.md](subagents.md)（角色能改什麼、這個 repo 在 VM 的坑、「不要鑽牛角尖」的標準、規格在哪、回報格式），任務說明不要再重寫這些。任務說明只寫：
 - 第一行：「先讀 `<worktree>/.claude/skills/ticket-workflow/subagents.md`。你是 <角色>。」
@@ -93,9 +93,9 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 呼叫方式：
 - 用 t3 的 `delegate_task`，不要用 harness 內建的 subagent。先呼叫 `orchestrator_capabilities` 確認 provider 和模型還在。`role` 填 `test`、`review` 或 `general`。
 - `target`：
-  - test-author：`{"providerInstanceId":"codex","model":"gpt-6.1-sol","options":{"reasoningEffort":"medium"}}`。不要開 Fast，也就是不要設 `serviceTier`，Codex 額度會用得太快（2026-10-18 Ann）。
-  - reviewer、verifier：`{"providerInstanceId":"grok","model":"grok-4.7","options":{"reasoningEffort":"high"}}`。不要選 `grok-4.7-build-fast`，那是另一個模型。
-- **備援**：預定的那一家在 `orchestrator_capabilities` 裡有 constraints、沒有那個模型，或同一個任務實際跑了兩次都失敗（第二次要換新的 `clientRequestId`），就用同一份任務說明改用另一家（Codex ↔ Grok），`clientRequestId` 加上 `-grok` 或 `-codex`。兩家都不能用，再改 `{"providerInstanceId":"claudeAgent","model":"claude-sonnet-5-5","options":{"effort":"high"}}`（加 `-sonnet`）。碰到額度上限要通知 coordinator。PR 裡寫明哪些任務改用備援、為什麼。
+  - test-author、reviewer、verifier：`{"providerInstanceId":"codex","model":"gpt-6.1-sol","options":{"reasoningEffort":"medium"}}`。不要開 Fast，也就是不要設 `serviceTier`，Codex 額度會用得太快（2026-10-18 Ann）。
+  - 不要用 Grok（暫停中）。
+- **備援**：預定的那一家在 `orchestrator_capabilities` 裡有 constraints、沒有那個模型，或同一個任務實際跑了兩次都失敗（第二次要換新的 `clientRequestId`），就用同一份任務說明改用 `{"providerInstanceId":"claudeAgent","model":"claude-sonnet-5-5","options":{"effort":"high"}}`，`clientRequestId` 加上 `-sonnet`。碰到額度上限要通知 coordinator。PR 裡寫明哪些任務改用備援、為什麼。
 - `isolation` 用預設的 `shared`：子任務直接在你的 worktree 裡跑，看得到還沒 commit 的改動。不要用 `worktree`，那會從上一個 commit 開新的 checkout，看不到你正在改的東西。子任務在跑的時候，你不要改檔案。
 - 每個任務一個 `clientRequestId`（例如 `t09-s2-test-author-1`）。同一個 id 再送一次只會拿回原本的結果，不會重跑：呼叫沒有回應、不確定有沒有開成時才用同一個 id 重送；任務失敗要重跑或開新的一輪，就換新 id（例如 `-2`）。記下每個回傳的 `taskId`。
 - 要等結果才能往下走時用 `mode:"wait"`、`timeoutMs: 1800000`。幾個 lens 可以各用 `mode:"async"` 同時開，等它們做完的通知。回傳 `waitTimedOut` 或收到通知後，用 `task_status` 拿最後的報告再往下走。
@@ -104,7 +104,7 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 - PR 的「驗證」和「Review」段寫明每個角色用了哪個 provider 和模型。
 
 ## 4. 獨立驗證
-全部 slice 做完、整體 review 沒有 Blocker 後，開一個**全新的 verifier subagent**（用 Grok，見上面「subagent 用誰」）。作者自己的驗收不算數。給它 ticket 原文、worktree 路徑和網址，請它照 `/verification-evidence`：
+全部 slice 做完、整體 review 沒有 Blocker 後，開一個**全新的 verifier subagent**（用 Codex，見上面「subagent 用誰」）。作者自己的驗收不算數。給它 ticket 原文、worktree 路徑和網址，請它照 `/verification-evidence`：
 1. 確認 `git -C <path> status` 乾淨（都已 commit）。
 2. 在容器裡重裝依賴（`pnpm install --frozen-lockfile`），重跑 `pnpm check` 和 ticket 的每個驗證指令。
 3. 自己起 dev server，照 ticket 的「功能驗證」在 worktree 網址上實際操作。

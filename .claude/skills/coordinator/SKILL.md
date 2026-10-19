@@ -39,7 +39,7 @@ disable-model-invocation: true
 ## 派工
 每張 Ready 的 ticket 用 `t3_thread_launch` 開一個 thread，**不要**自己 `git worktree add`。t3 建 worktree 時會跑 devvm 的 hook 把 compose stack 起好。
 
-ticket thread 一定用 Claude Opus 5.5：`modelSelection` 填 `{"instanceId":"claudeAgent","model":"claude-opus-5-5"}`。Codex 和 Grok 只當 ticket thread 裡的 subagent（2026-10-19 Ann）。
+ticket thread 一定用 Claude Opus 5.5：`modelSelection` 填 `{"instanceId":"claudeAgent","model":"claude-opus-5-5"}`。Codex 只當 ticket thread 裡的 subagent（2026-10-19 Ann）；Grok 暫停使用，等 Ann 說恢復。
 
 - `title`：`T<編號> <中文標題>`
 - `workspaceStrategy`：`{"type":"worktree","baseRef":"main","branch":"t<編號>-<簡短英文>","startFromOrigin":true}`
@@ -74,7 +74,7 @@ ticket thread 一定用 Claude Opus 5.5：`modelSelection` 填 `{"instanceId":"c
 
 ## 流程與授權
 /plan-it → /implement-plan → 整體 /review-change → 獨立 verifier → PR → 合併，細節見 ticket-workflow skill。
-test-author 用 t3 的 delegate_task 交給 Codex（gpt-6.1-sol、medium，不開 Fast）；review lens 和 verifier 交給 Grok（grok-4.7、high）。其中一家不能用就換另一家，兩家都不行再用 Sonnet 5.5（high）。見 ticket-workflow skill「subagent 用誰」。
+test-author、review lens 和 verifier 都用 t3 的 delegate_task 交給 Codex（gpt-6.1-sol、medium，不開 Fast）；Codex 不能用就改 Sonnet 5.5（high）。Grok 暫停使用。見 ticket-workflow skill「subagent 用誰」。
 授權：可以 commit、push 這個 branch、開 PR；沒有 needs-human 的 PR 條件滿足就自己合併。部署正式環境、呼叫外部服務仍要先問人。
 
 ## 回報
