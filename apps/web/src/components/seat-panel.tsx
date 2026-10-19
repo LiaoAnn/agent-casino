@@ -21,6 +21,7 @@ export function SeatPanel({
   deadline = null,
   turnSeconds = 0,
   deal = false,
+  inPlay = false,
 }: {
   name: string;
   stack: number;
@@ -32,6 +33,7 @@ export function SeatPanel({
   deadline?: string | null;
   turnSeconds?: number;
   deal?: boolean;
+  inPlay?: boolean;
 }) {
   return (
     <section
@@ -56,7 +58,11 @@ export function SeatPanel({
           </span>
         )}
         {/* No chips behind, all in the pot: nothing left to bet. */}
-        {stack === 0 && <Badge variant="allin">ALL-IN</Badge>}
+        {stack === 0 && (
+          <Badge variant={inPlay ? 'allin' : 'loss'}>
+            {inPlay ? 'ALL-IN' : '出局'}
+          </Badge>
+        )}
         {won && <Badge variant="win">勝</Badge>}
       </div>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-sm">

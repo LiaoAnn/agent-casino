@@ -629,6 +629,7 @@ describe('responses', () => {
   // 種子與洗牌), in the same 64-lowercase-hex format as test.seed.
   const detail = {
     match_id: ROOM,
+    end_reason: null,
     players: ['alice', 'bob'],
     display_names: ['小愛 🃏', '鮑伯'],
     settings: {
@@ -673,6 +674,22 @@ describe('responses', () => {
     expect(decodes(MatchDetail, detail)).toBe(true);
     expect(decodes(MatchDetail, { ...detail, seed: '0'.repeat(64) })).toBe(
       true,
+    );
+  });
+
+  it.each(['bust', 'max_hands', 'leave', 'void', 'cancelled', null])(
+    'preserves the required nullable match detail end_reason %s',
+    end_reason => {
+      const value = { ...detail, end_reason };
+      expect(Schema.decodeUnknownSync(MatchDetail)(value)).toEqual(value);
+    },
+  );
+
+  it('rejects a missing or unknown match detail end_reason', () => {
+    const { end_reason: _reason, ...missing } = detail;
+    expect(decodes(MatchDetail, missing)).toBe(false);
+    expect(decodes(MatchDetail, { ...detail, end_reason: 'showdown' })).toBe(
+      false,
     );
   });
 
@@ -1183,6 +1200,7 @@ describe('T35 required display names in responses', () => {
   };
   const detail = {
     ...summary,
+    end_reason: null,
     settings,
     seed: SEED,
     final_stacks: [40, 40],

@@ -1,6 +1,6 @@
 // Writing a finished match (casino-api skill: 資料與積分, A10).
 import { eq, getTableColumns, inArray } from 'drizzle-orm';
-import { defaultDisplayName } from '../contract/schemas';
+import { defaultDisplayName, type MatchDetail } from '../contract/schemas';
 import type { HandRecord } from '../holdem/match';
 import type { Db } from './client';
 import { eloUpdate, INITIAL_RATING } from './elo';
@@ -26,6 +26,8 @@ export interface MatchRecordInput {
   seed: string;
   /** From the seats' point of view. */
   result: SeatResult;
+  /** Absent for callers predating T44; never infer a historical reason. */
+  end_reason?: MatchDetail['end_reason'];
   /** ISO-8601 UTC. */
   ended_at: string;
   final_stacks: [number, number];
@@ -216,6 +218,7 @@ export async function recordMatch(
       settings: input.settings,
       seed: input.seed,
       result: input.result,
+      endReason: input.end_reason ?? null,
       rated,
       finalStacks: input.final_stacks,
       ratingChanges,

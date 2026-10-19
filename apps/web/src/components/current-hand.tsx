@@ -39,6 +39,7 @@ export function CurrentHand({
           toAct={watch.to_act_seat === s}
           deadline={mine ? watch.deadline : null}
           turnSeconds={watch.settings.turn_seconds}
+          inPlay
           deal
         />
       ),

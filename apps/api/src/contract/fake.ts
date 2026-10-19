@@ -286,6 +286,7 @@ function fakeWatch(seed: number): {
       settings,
       seed: finished.config.seed,
       result,
+      end_reason: a === 0 || b === 0 ? 'bust' : 'max_hands',
       rated: true,
       ended_at: new Date(startedAt + 60 * 60_000).toISOString(),
       final_stacks: [a, b],
@@ -411,6 +412,13 @@ export function makeFakeData(
       settings,
       seed,
       result,
+      end_reason: legacy
+        ? null
+        : result === 'void' || result === 'cancelled'
+          ? result
+          : stacks.includes(0)
+            ? 'bust'
+            : 'max_hands',
       rated,
       ended_at: new Date(START_TIME + i * 37 * 60_000).toISOString(),
       final_stacks: [stacks[0], stacks[1]],
@@ -434,8 +442,8 @@ export function makeFakeData(
     entries: [...ratings.values()]
       .map(r => ({ ...r, rating: Math.round(r.rating) }))
       .sort((x, y) => y.rating - x.rating || x.name.localeCompare(y.name))
-      .map((r, i) => ({
-        rank: i + 1,
+      .map((r, _i, sorted) => ({
+        rank: sorted.findIndex(entry => entry.rating === r.rating) + 1,
         name: r.name,
         display_name: displayName(r.name),
         rating: r.rating,

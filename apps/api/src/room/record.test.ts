@@ -134,6 +134,7 @@ async function expectRecord(
   result: MatchRecordInput['result'],
   settings = SETTINGS,
   hands = t.hands,
+  endReason = 'max_hands',
 ) {
   expect(t.spy).toHaveBeenCalledTimes(1);
   const response = await over(t);
@@ -144,6 +145,7 @@ async function expectRecord(
     settings,
     seed: SEED,
     result,
+    end_reason: endReason,
     ended_at: new Date(t.clock.ms).toISOString(),
     final_stacks: response.final_stacks,
     hands,
@@ -203,6 +205,8 @@ describe('T13 S1: replay, record, then match_over', () => {
       t,
       final.stacks[0] === 0 ? 'seat1_win' : 'seat0_win',
       settings,
+      t.hands,
+      'bust',
     );
   });
 
@@ -223,7 +227,13 @@ describe('T13 S1: replay, record, then match_over', () => {
           ratings: RECORDED.ratings,
         },
       });
-      await expectRecord(t, seat === 0 ? 'seat1_win' : 'seat0_win');
+      await expectRecord(
+        t,
+        seat === 0 ? 'seat1_win' : 'seat0_win',
+        SETTINGS,
+        t.hands,
+        'leave',
+      );
     },
   );
 
@@ -234,7 +244,7 @@ describe('T13 S1: replay, record, then match_over', () => {
     await t.step({ type: 'raise', amount: 6 });
     t.clock.ms += 2_000;
     expect(await t.referee.abort()).toEqual({ ok: true, value: null });
-    await expectRecord(t, 'void');
+    await expectRecord(t, 'void', SETTINGS, t.hands, 'void');
     expect(await over(t)).toMatchObject({
       result: 'void',
       room_status: 'void',
@@ -322,6 +332,7 @@ describe('T13 S1: replay, record, then match_over', () => {
     await t.finish();
     expect(t.spy).toHaveBeenCalledTimes(1);
     expect(t.spy.mock.calls[0][0].result).toBe('void');
+    expect(t.spy.mock.calls[0][0]).toHaveProperty('end_reason', 'void');
     for (const seat of [0, 1] as const) {
       expect(await over(t, seat)).toMatchObject({
         result: 'void',
@@ -343,6 +354,7 @@ describe('T13 S1: replay, record, then match_over', () => {
     expect(t.spy).toHaveBeenCalledTimes(1);
     const input = t.spy.mock.calls[0][0];
     expect(input.result).toBe('draw');
+    expect(input).toHaveProperty('end_reason', 'max_hands');
     expect(input.hands).toHaveLength(2);
     for (const hand of input.hands) {
       expect(hand.events.some(event => event.timeout === true)).toBe(true);

@@ -31,6 +31,10 @@ web 用 Cloudflare 的 Vite plugin build：環境在 build 時用 `CLOUDFLARE_EN
 
 有新的 migration 先 `pnpm db:migrate:staging`，再 `pnpm deploy:staging`（先 api 再 web）。
 
+T44 新增 `0004_slimy_peter_parker.sql`（對局的 nullable `end_reason`）。T15 必須在 staging、prod 各自先套用 migration，再部署新版 api；舊紀錄保持 null，不回填。
+
+web 透過既有 `API` service binding 轉送 `/skill.md` 和 `/v1/*`，保留公開 Host。單一網域部署時，api 的 `WEB_URL` 要設為公開 web 網址（正式環境為 `https://casino.liaoann.net`），讓 `watch_url` 和說明書範例也使用這個網址。e2e 可把 `CASINO_URL` 與 `WEB_URL` 都設為 web 網址；`--target=prod` 只打不計分的 house-bot，不建立排隊計分帳號。
+
 ## 加一個環境（例如正式環境）
 
 1. 兩個 `wrangler.jsonc` 各加一段 `env.<名字>`，照 staging 那段改名字、D1 和 vars；正式環境不設 `ALLOW_TEST_ROOMS`。

@@ -73,6 +73,7 @@ export const STREETS = {
 export function eventParts(
   event: MatchHand['events'][number],
   players: MatchDetail['players'],
+  previousEvents: readonly MatchHand['events'][number][] = [],
 ) {
   const street = STREETS[event.street];
   const who = players[event.seat];
@@ -86,6 +87,17 @@ export function eventParts(
     case 'call':
       return { street, who, action: '跟注', amount: event.amount };
     case 'raise':
-      return { street, who, action: '加注到', amount: event.amount };
+      return {
+        street,
+        who,
+        action: previousEvents.some(
+          e =>
+            e.street === event.street &&
+            (e.type === 'post_blind' || e.type === 'raise'),
+        )
+          ? '加注到'
+          : '下注',
+        amount: event.amount,
+      };
   }
 }

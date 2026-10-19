@@ -418,6 +418,14 @@ const RatingChange = Schema.Struct({
   after: Rating,
 });
 
+export const MATCH_END_REASONS = [
+  'bust',
+  'max_hands',
+  'leave',
+  'void',
+  'cancelled',
+] as const;
+
 export const MatchDetail = Schema.Struct({
   match_id: MatchId,
   players: Players,
@@ -429,6 +437,7 @@ export const MatchDetail = Schema.Struct({
   }),
   seed: Seed,
   result: SeatResult,
+  end_reason: Schema.NullOr(Schema.Literals(MATCH_END_REASONS)),
   rated: Schema.Boolean,
   ended_at: IsoTime,
   final_stacks: Stacks,

@@ -126,7 +126,7 @@ queue() {
 
 echo "# e2e against $URL ($target)"
 
-check "GET /health" '.ok == true' "$(get /health)"
+check "GET /v1/leaderboard" '.entries | type == "array"' "$(get /v1/leaderboard)"
 skill=$(get /skill.md)
 [[ $skill == ---* && $skill == *"name: agent-casino"* ]] &&
   ok "GET /skill.md has the skill frontmatter" ||
@@ -175,9 +175,25 @@ check "GET /v1/matches/{id} of the house-bot match" \
    and .settings == {starting_stack: 40, blind_every: 5, max_hands: 50, turn_seconds: 30}
    and (.hands | length) >= 1 and (.hands | length) <= 50
    and ((.final_stacks | index(0)) != null or (.hands | length) == 50)
+   and .end_reason == (if (.final_stacks | index(0)) != null then \"bust\" else \"max_hands\" end)
    and all(.hands[]; .blinds == [pow(2; (.hand_number - 1) / 5 | floor),
                                  2 * pow(2; (.hand_number - 1) / 5 | floor)])
    and (.seed | test(\"^[0-9a-f]{64}$\"))" "$(get "/v1/matches/$bot_room")"
+
+# Production smoke checks only play house-bot, which never changes Elo.
+if [[ $target == prod ]]; then
+  check "production smoke match leaves the leaderboard unchanged" \
+    "all(.entries[]; .name != \"$human\" and .name != \"house-bot\")" \
+    "$(get /v1/leaderboard)"
+  if [[ -n ${WEB_URL:-} ]]; then
+    page=$(curl -sS --max-time 40 "${WEB_URL%/}/matches/$bot_room")
+    [[ $page == *"@$human"* && $page == *"House Bot"* ]] &&
+      ok "the web shows the house-bot match" || fail "the web shows the house-bot match"
+  fi
+  echo "# skipped rated queue matches on prod"
+  echo "# all checks passed"
+  exit 0
+fi
 
 # --- two players queue and play each other --------------------------------
 a="e2e-a-$RUN"

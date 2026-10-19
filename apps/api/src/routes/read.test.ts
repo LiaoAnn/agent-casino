@@ -241,9 +241,9 @@ describe('GET /v1/leaderboard', () => {
     const entries = (await leaderboard()).entries;
     expect(entries.map(e => [e.rank, e.name])).toEqual([
       [1, 'alice'],
-      [2, 'Bob'],
-      [3, 'Carol'],
-      [4, 'dave'],
+      [1, 'Bob'],
+      [1, 'Carol'],
+      [1, 'dave'],
     ]);
   });
 
@@ -277,16 +277,17 @@ describe('GET /v1/leaderboard', () => {
     expect(await leaderboard()).toEqual({ entries: [] });
   });
 
-  it('lists at most 100 entries, ranked 1 to 100', async () => {
+  it('lists at most 100 entries with competition ranks for tied ratings', async () => {
     for (let i = 0; i < 51; i++) {
       const n = String(i).padStart(2, '0');
       await record({ players: [`w${n}`, `l${n}`], hands: [hand(1)] });
     }
     const entries = (await leaderboard()).entries;
     expect(entries).toHaveLength(100);
-    expect(entries.map(e => e.rank)).toEqual(
-      Array.from({ length: 100 }, (_, i) => i + 1),
-    );
+    expect(entries.map(e => e.rank)).toEqual([
+      ...Array.from({ length: 51 }, () => 1),
+      ...Array.from({ length: 49 }, () => 52),
+    ]);
     const names = (prefix: string, count: number) =>
       Array.from(
         { length: count },
@@ -500,6 +501,7 @@ describe('GET /v1/matches/{match_id}', () => {
       },
       seed: RECORDED_SEED,
       result: 'seat0_win',
+      end_reason: null,
       rated: true,
       ended_at: '2026-10-18T10:31:07.250Z',
       final_stacks: [300, 100],

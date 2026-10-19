@@ -9,6 +9,7 @@ import {
   sqliteTable,
   text,
 } from 'drizzle-orm/sqlite-core';
+import { MATCH_END_REASONS } from '../contract/schemas';
 import type { Card } from '../holdem/cards';
 
 export const SEAT_RESULTS = [
@@ -60,6 +61,7 @@ export const matches = sqliteTable(
     // Opaque: a 64-hex-character secret once T20 lands (holdem-rules 種子與洗牌).
     seed: text('seed').notNull(),
     result: text('result', { enum: SEAT_RESULTS }).notNull(),
+    endReason: text('end_reason', { enum: MATCH_END_REASONS }),
     rated: integer('rated', { mode: 'boolean' }).notNull(),
     finalStacks: text('final_stacks', { mode: 'json' })
       .$type<[number, number]>()

@@ -11,6 +11,22 @@ import {
 // The facts of a finished match, above its hands.
 export function MatchInfo({ match }: { match: MatchDetail }) {
   const { players, display_names: shown, settings } = match;
+  const reason = (() => {
+    switch (match.end_reason) {
+      case 'bust':
+        return '一方輸光';
+      case 'max_hands':
+        return `打滿 ${settings.max_hands} 手，比籌碼`;
+      case 'leave':
+        return `${shown[match.result === 'seat0_win' ? 1 : 0]} 離席`;
+      case 'void':
+        return '作廢';
+      case 'cancelled':
+        return '取消';
+      case null:
+        return null;
+    }
+  })();
   const items: Pair[] = [
     [
       '玩家',
@@ -34,6 +50,7 @@ export function MatchInfo({ match }: { match: MatchDetail }) {
       <BySeat key="f" players={shown} values={match.final_stacks} />,
     ],
   ];
+  if (reason !== null) items.splice(2, 0, ['結束原因', reason]);
   if (match.rating_changes !== null) {
     items.push([
       'Elo',

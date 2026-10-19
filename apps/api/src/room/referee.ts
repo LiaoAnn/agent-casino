@@ -910,6 +910,7 @@ export class RoomReferee {
         settings: loaded.settings,
         seed: loaded.seed,
         result: seatResult(final),
+        end_reason: endReason(final),
         ended_at: new Date(final.at).toISOString(),
         final_stacks: final.final_stacks,
         hands,
@@ -1102,6 +1103,19 @@ function replays(match: MatchState, hands: HandRecord[]): boolean {
 }
 
 // The result from the seats' point of view (matches, A15).
+function endReason(ended: Ended): NonNullable<MatchRecordInput['end_reason']> {
+  switch (ended.reason) {
+    case 'complete':
+      return ended.final_stacks.includes(0) ? 'bust' : 'max_hands';
+    case 'left':
+      return 'leave';
+    case 'void':
+      return 'void';
+    case 'cancelled':
+      return 'cancelled';
+  }
+}
+
 function seatResult(ended: Ended): MatchRecordInput['result'] {
   if (ended.reason === 'void' || ended.reason === 'cancelled') {
     return ended.reason;
