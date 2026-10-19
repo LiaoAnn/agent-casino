@@ -34,6 +34,42 @@ test('T44 root not found is Chinese and links home without framework controls', 
   await expect(page.locator('button, form, input')).toHaveCount(0);
 });
 
+test('T44 child homepage loader failure explains the error without framework controls', async ({
+  page,
+}) => {
+  // Start outside the homepage so its loader is not already cached. A client
+  // navigation lets this test fail the loader without a production fault hook.
+  await page.goto('/t44-page-does-not-exist');
+  await page.waitForLoadState('networkidle');
+  const rawError = 'The database did not answer';
+  await page.route('**/_serverFn/**', route =>
+    route.fulfill({
+      status: 503,
+      // A non-JSON 503 makes the server-function transport throw an Error,
+      // rather than returning a JSON object as successful loader data.
+      contentType: 'text/plain',
+      body: rawError,
+    }),
+  );
+  const failure = page.waitForResponse(response =>
+    new URL(response.url()).pathname.startsWith('/_serverFn/'),
+  );
+  await page.getByRole('link', { name: '回首頁', exact: true }).click();
+  expect((await failure).status()).toBe(503);
+  await expect(page).toHaveURL('/');
+
+  const main = page.locator('main');
+  await expect.soft(main).toContainText(/發生錯誤|無法載入|暫時無法|出了問題/);
+  await expect
+    .soft(page.getByRole('link', { name: '回首頁', exact: true }))
+    .toHaveAttribute('href', '/');
+  await expect
+    .soft(main)
+    .not.toContainText(/Something went wrong|Hide Error|Show Error/);
+  await expect.soft(main).not.toContainText(rawError);
+  await expect.soft(page.locator('button, form, input')).toHaveCount(0);
+});
+
 for (const reason of ['bust', 'max_hands', 'void', 'cancelled'] as const) {
   test(`T44 match explains ${reason} from its recorded end reason`, async ({
     page,

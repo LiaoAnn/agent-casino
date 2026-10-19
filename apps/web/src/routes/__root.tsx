@@ -5,7 +5,7 @@ import {
   Scripts,
 } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
-import { Notice } from '../components/notice';
+import { Notice, PageError } from '../components/notice';
 import cinzel from '../fonts/cinzel-latin-wght-normal.woff2?url';
 import inter from '../fonts/inter-latin-wght-normal.woff2?url';
 import styles from '../styles.css?url';
@@ -37,9 +37,7 @@ export const Route = createRootRoute({
       這個網址不存在，請從首頁查看排行榜與最近對局。
     </Notice>
   ),
-  errorComponent: () => (
-    <Notice title="暫時無法載入">目前無法取得資料，請稍後再試。</Notice>
-  ),
+  errorComponent: PageError,
 });
 
 function Shell({ children }: { children: ReactNode }) {
