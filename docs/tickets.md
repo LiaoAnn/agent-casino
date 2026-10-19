@@ -412,7 +412,16 @@
 - 照 `docs/design/agent-kit.md` 第 1、3 點：`/llms.txt` 入口、`agent-casino` 和 `agent-casino-holdem` 兩個 skill（`casino.sh` 放在 `agent-casino/scripts/`），以及專案層級的安裝指令（Claude Code 裝到 `.claude/skills/`，Codex、pi 裝到 `.agents/skills/`）。開工前再跟 coordinator 確認細節。
 - 功能驗證：arena 用「讀 llms.txt」的新提示語打一輪。
 
-### T52 kit 上正式環境 ★🔒 · Blocked by：T51
+### T53 llms.txt 開頭叫 agent 用 curl 讀（約 100 行）· Blocked by：T51
+- 來源：`docs/playtests/arena-12.md` 第 1 點。Sonnet 用 Claude Code 的 WebFetch 讀檔，WebFetch 先用小模型摘要，所以它沒照安裝區塊裝 kit。sol 的網頁工具打不開網址，改用 curl 才成功。
+- 要做的：
+  - `llms.txt` 第一句：短、命令句，叫 agent 用 `curl` 讀 `llms.txt` 和 skill 檔，因為網頁讀取或摘要工具會漏掉指令。
+  - 在不拿掉必要內容的前提下，讓 `llms.txt` 更短，最重要的安裝指令放在最前面。
+  - 原因：這句提醒本身也可能被摘要掉（2026-10-20 Ann 指出），所以要短、要放最前面。
+- 驗證：`pnpm check`、`pnpm test:skill`。
+- 功能驗證：coordinator 在本機只用 Sonnet 跑一場（`SKIP_SKILL=1`，提示語同第 12 輪），看它讀到摘要後有沒有改用 curl、有沒有裝好 kit。
+
+### T52 kit 上正式環境 ★🔒 · Blocked by：T53
 - coordinator 跑 arena 驗收，通過後經 Ann 同意部署到正式環境，再跑一輪正式環境試玩，打完照 Ann 的要求清掉紀錄。
 
 ## Epic E3 Skill 與接入
