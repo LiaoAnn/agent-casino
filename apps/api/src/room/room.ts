@@ -1,6 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Matchmaker } from '../matchmaker/matchmaker';
-import { recordHeadsUp } from './record';
 import { type CreateInput, type RoomApi, RoomReferee } from './referee';
 
 // One referee per room: the RPC surface of routes/room.ts. The rules of the
@@ -18,7 +17,7 @@ export class Room extends DurableObject<Env> implements RoomApi {
         env.MATCHMAKER.idFromName('global'),
       ) as unknown as Pick<Matchmaker, 'recordMatch'>;
     this.#referee = new RoomReferee(ctx.storage, {
-      record: recordHeadsUp(input => matchmaker().recordMatch(input)),
+      record: input => matchmaker().recordMatch(input),
       // WEB_URL is a plain var, not in the generated Env (room/client.ts).
       webUrl: (env as Env & { WEB_URL?: string }).WEB_URL || undefined,
     });

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MatchRecordInput, RecordedMatch } from '../db/records';
+import { applyTableAction, startTable } from '../holdem/table';
 import { legacyRoom } from './legacy-fixture';
 import {
   type CreateInput,
@@ -694,5 +695,216 @@ describe('pre-T38 RoomData and HandRecord storage compatibility', () => {
         },
       });
     }
+  });
+});
+
+describe('pre-T38 finished room that was never recorded', () => {
+  // A heads-up room that ended by fold before T38 wrote it, so `recorded` is
+  // still null when the new referee first reads it.
+  const unrecorded = () => {
+    const legacy = legacyRoom(true);
+    return {
+      legacy,
+      room: { ...legacy.room, recorded: null },
+    };
+  };
+
+  it('the fixture replays on the current engine to the same fold-ended result', () => {
+    const { legacy } = unrecorded();
+    const start = startTable({
+      seed: legacy.room.seed,
+      players: 2,
+      startingStack: 40,
+      blindEvery: 50,
+      maxHands: 1,
+    });
+    const folded = applyTableAction(start, 0, { type: 'fold' });
+    if (!folded.ok) throw new Error(folded.message);
+    expect(folded.state.over).toBe(true);
+    expect(folded.state.places).toEqual([2, 1]);
+    expect(folded.state.stacks).toEqual([39, 41]);
+    expect(folded.finishedHands).toHaveLength(1);
+    expect(folded.finishedHands[0]).toMatchObject({
+      ended_by: 'fold',
+      winner_seat: 1,
+      stacks: [39, 41],
+    });
+    expect(legacy.hand).toMatchObject({ ended_by: 'fold', winner_seat: 1 });
+  });
+
+  it.each(['alarm', 'status'] as const)(
+    'records it on first %s as a real result, not a void, exactly once',
+    async trigger => {
+      const { legacy, room: stored } = unrecorded();
+      const storage = new MemoryStorage();
+      await storage.put('room', stored);
+      await storage.put('hand:1', legacy.hand);
+      const rated: RecordedMatch = {
+        rated: true,
+        ratings: [
+          { name: 'alice', rating: 1484, change: -16 },
+          { name: 'bob', rating: 1516, change: 16 },
+        ],
+      };
+      const record = vi.fn(async (_input: TableRecordInput) => rated);
+      const options = { now: () => legacy.at, waitMs: 1, record };
+      const room = new RoomReferee(storage, options);
+      if (trigger === 'alarm') await room.alarm();
+      else await room.status('alice', { wait: false });
+
+      expect(record).toHaveBeenCalledTimes(1);
+      expect(record.mock.calls[0][0]).toMatchObject({
+        match_id: legacy.room.room_id,
+        players: ['alice', 'bob'],
+        display_names: ['小愛', '小包'],
+        seed: legacy.room.seed,
+        result: 'seat1_win',
+        places: [2, 1],
+        final_stacks: [39, 41],
+        ended_at: new Date(legacy.at).toISOString(),
+        hands: [
+          {
+            ended_by: 'fold',
+            winner_seat: 1,
+            stacks: [39, 41],
+            pots: [{ amount: 2, winners: [1] }],
+          },
+        ],
+      });
+      for (const [name, result, place] of [
+        ['alice', 'loss', 2],
+        ['bob', 'win', 1],
+      ] as const) {
+        expect(await room.status(name, { wait: false })).toMatchObject({
+          ok: true,
+          value: {
+            status: 'match_over',
+            room_status: 'finished',
+            result,
+            place,
+            final_stacks: [39, 41],
+            ratings: rated.ratings,
+          },
+        });
+      }
+      // The write is remembered: a fresh referee over the same storage does not repeat it.
+      const again = new RoomReferee(storage, options);
+      await again.alarm();
+      await again.status('bob', { wait: false });
+      expect(record).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
+describe('Room DO hands an N-seat table to the Matchmaker (A10)', () => {
+  const settings = {
+    max_hands: 1,
+    turn_seconds: 5,
+    blind_every: 50,
+    starting_stack: 40,
+  };
+  const NAMES = ['alice', 'bob', 'carol'];
+  const recorded: RecordedMatch = {
+    rated: true,
+    ratings: [
+      { name: 'alice', rating: 1510, change: 10 },
+      { name: 'bob', rating: 1495, change: -5 },
+      { name: 'carol', rating: 1495, change: -5 },
+    ],
+  };
+
+  const seated = async () => {
+    const recordMatch = vi.fn(async (_input: MatchRecordInput) => recorded);
+    const id = { name: 'global' };
+    const matchmaker = {
+      idFromName: vi.fn((_name: string) => id),
+      get: vi.fn((_id: unknown) => ({ recordMatch })),
+    };
+    const room = new Room(
+      { storage: new MemoryStorage() } as unknown as DurableObjectState,
+      { MATCHMAKER: matchmaker } as unknown as Env,
+    );
+    expect(
+      await room.create({
+        room_id: 'r_multi00002',
+        invite_code: 'ABCDEF',
+        name: 'alice',
+        settings,
+        seed: '0'.repeat(64),
+        test: null,
+        visibility: 'public',
+      }),
+    ).toMatchObject({ ok: true });
+    for (const name of NAMES.slice(1))
+      expect(await room.join({ name })).toMatchObject({ ok: true });
+    expect(await room.start('alice', {})).toMatchObject({ ok: true });
+    return { room, recordMatch, matchmaker, id };
+  };
+
+  const expectRatings = async (room: Room) => {
+    for (const name of NAMES) {
+      expect(await room.status(name, { wait: false })).toMatchObject({
+        ok: true,
+        value: { status: 'match_over', ratings: recorded.ratings },
+      });
+    }
+  };
+
+  it('a table played out sends 3 players, 3 places and TableHandRecords; match_over carries the 3 ratings', async () => {
+    const { room, recordMatch, matchmaker, id } = await seated();
+    for (
+      let turn = 0;
+      turn < 20 && recordMatch.mock.calls.length === 0;
+      turn++
+    ) {
+      for (const name of NAMES) {
+        const state = await room.status(name, { wait: false });
+        if (state.ok && state.value.status === 'your_turn') {
+          await room.act(name, { turn_id: state.value.turn_id, type: 'fold' });
+          break;
+        }
+      }
+    }
+    expect(matchmaker.idFromName).toHaveBeenCalledWith('global');
+    expect(matchmaker.get).toHaveBeenCalledWith(id);
+    expect(recordMatch).toHaveBeenCalledTimes(1);
+    const input = recordMatch.mock.calls[0][0];
+    expect(input).toMatchObject({
+      match_id: 'r_multi00002',
+      players: NAMES,
+      seed: '0'.repeat(64),
+      end_reason: 'max_hands',
+    });
+    expect(input.display_names).toHaveLength(3);
+    expect(input.final_stacks).toHaveLength(3);
+    expect(input.places).toHaveLength(3);
+    expect(input.places?.every(place => Number.isInteger(place))).toBe(true);
+    expect(input.hands.length).toBeGreaterThan(0);
+    for (const hand of input.hands) {
+      expect(hand.pots).toEqual(expect.any(Array));
+      expect(hand.pots?.length).toBeGreaterThan(0);
+    }
+    await expectRatings(room);
+  });
+
+  it('two seats leaving ends the match by leave and still records all 3 seats', async () => {
+    const { room, recordMatch } = await seated();
+    expect(await room.leave('bob')).toMatchObject({
+      ok: true,
+      value: { place: 3 },
+    });
+    expect(recordMatch).not.toHaveBeenCalled();
+    expect(await room.leave('carol')).toMatchObject({
+      ok: true,
+      value: { place: 2 },
+    });
+    expect(recordMatch).toHaveBeenCalledTimes(1);
+    expect(recordMatch.mock.calls[0][0]).toMatchObject({
+      players: NAMES,
+      places: [1, 3, 2],
+      end_reason: 'leave',
+    });
+    expect(recordMatch.mock.calls[0][0].final_stacks).toHaveLength(3);
+    await expectRatings(room);
   });
 });

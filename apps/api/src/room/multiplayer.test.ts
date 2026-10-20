@@ -943,3 +943,113 @@ describe('T38 A11 per-seat chaos', () => {
     });
   });
 });
+
+// A passive all-in line that busts exactly one of three seats in hand 1: the
+// button shoves, the next seat calls, the big blind folds; the shover and the
+// caller must not split. Found with the pure engine, independent of the referee.
+function oneBustOfThreeOracle() {
+  for (let n = 0; n < 2000; n++) {
+    const seed = n.toString(16).padStart(64, '0');
+    const config = {
+      seed,
+      players: 3,
+      startingStack: 10,
+      blindEvery: 50,
+      maxHands: 50,
+    };
+    let state = startTable(config);
+    const actions: [number, Action][] = [];
+    let valid = true;
+    for (const action of [
+      { type: 'raise', amount: 10 },
+      { type: 'call' },
+      { type: 'fold' },
+    ] as Action[]) {
+      const seat = state.toAct;
+      const next = seat === null ? null : applyTableAction(state, seat, action);
+      if (seat === null || !next?.ok) {
+        valid = false;
+        break;
+      }
+      actions.push([seat, action]);
+      state = next.state;
+    }
+    const busted = state.places.findIndex(place => place !== null);
+    if (
+      valid &&
+      !state.over &&
+      state.places.filter(place => place !== null).length === 1 &&
+      state.places[busted] === 3
+    ) {
+      const survivors = [0, 1, 2].filter(seat => seat !== busted);
+      return {
+        seed,
+        actions,
+        busted,
+        leaver: survivors[0],
+        winner: survivors[1],
+      };
+    }
+  }
+  throw new Error('No one-bust seed found in deterministic search');
+}
+
+describe('T38 A9: a leave that ends the match tells every other seat its own result', () => {
+  it('busted seat 3 of 3 learns it lost (not that it won) after the second seat leaves; the last seat is told it won', async () => {
+    const oracle = oneBustOfThreeOracle();
+    const f = fixture({
+      seed: oracle.seed,
+      settings: { starting_stack: 10, blind_every: 50 },
+    });
+    await f.sit(3);
+    value(await f.room.start('alice', {}));
+    let engine = startTable({
+      seed: oracle.seed,
+      players: 3,
+      startingStack: 10,
+      blindEvery: 50,
+      maxHands: 50,
+    });
+    for (const [seat, action] of oracle.actions)
+      engine = (await step(f, engine, seat, action)).state;
+    expect(engine.places[oracle.busted]).toBe(3);
+    expect(engine.over).toBe(false);
+
+    expect(value(await f.room.leave(NAMES[oracle.leaver]))).toMatchObject({
+      status: 'match_over',
+      result: 'loss',
+      place: 2,
+    });
+
+    const busted = await f.state(NAMES[oracle.busted]);
+    expect(busted).toMatchObject({
+      status: 'match_over',
+      room_status: 'finished',
+      result: 'loss',
+      place: 3,
+    });
+    expect(busted.hint).not.toMatch(/you won/i);
+
+    const winner = await f.state(NAMES[oracle.winner]);
+    expect(winner).toMatchObject({
+      status: 'match_over',
+      room_status: 'finished',
+      result: 'win',
+      place: 1,
+    });
+    expect(winner.hint).toMatch(/you won/i);
+
+    expect(f.records).toHaveLength(1);
+    expect(f.records[0]).toMatchObject({
+      end_reason: 'leave',
+      places: [0, 1, 2].map(
+        seat =>
+          ({
+            [oracle.busted]: 3,
+            [oracle.leaver]: 2,
+            [oracle.winner]: 1,
+          })[seat],
+      ),
+    });
+  });
+});

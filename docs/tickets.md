@@ -618,11 +618,11 @@
   - 中途 `leave`；
   - 只剩 house-bot 就結束；
   - 保留 `opponent: bot` 的舊用法；
-  - 把 room 換到 T36 的 table API（`holdem/table.ts`），刪掉 `holdem/match.ts` 的單挑轉接層（`replay.ts`、`view.ts` 的單挑版一起換掉）。
+  - 把 room 換到 T36 的 table API（`holdem/table.ts`）；單挑轉接層（`holdem/match.ts`、`replay.ts`、`view.ts`）的刪除留給 T56。
 - 只改：`apps/api/src/room/`、`routes/room.ts`、`holdem/` 的單挑轉接層、casino-api skill。
 - 驗證：`pnpm test:api`，狀況處理表每一列一個測試。
 - 範圍例外（2026-10-20 coordinator）：`contract/fake.ts` 只改呼叫（換成 N 人的 `watchView`），schemas 不動；`token/token.ts` 的 `seat` 改成 0–5。
-- `holdem/match.ts`、`view.ts`、`replay.ts` 和 `room/heads-up.ts` 剩下的單挑轉接（`contract/fake.ts`、`db/`、`heads-up-golden` 等 holdem 測試和 `scripts/holdem-play.ts` 還在用；Room DO 已經不用），由 T38、T40 中後合併的那張刪掉。
+- `holdem/match.ts`、`view.ts`、`replay.ts` 和 `room/heads-up.ts` 剩下的單挑轉接（Room DO 已經不用），刪除留給 T56。
 - 單挑舊模式（過渡用，casino-api「房間狀態」）：queue 開的房，以及沒帶 `visibility` 的 `POST /v1/rooms`，第 2 人入座就開打，讓 queue 和舊版 `casino.sh` 照舊能用。
 
 ### T56 刪掉單挑轉接層（約 600 行，多半是測試搬移）· Blocked by：T38
@@ -653,7 +653,7 @@
   - `/v1/matches`、排行榜列出 N 人。
 - 跟 T38 接上 `recordMatch`：由大廳依序寫入，跟 A10 一樣。
 - 只改：`apps/api/src/db/`、`matchmaker/` 寫 Elo 的部分、`routes/read.ts`、casino-api skill。
-- `holdem/match.ts`、`view.ts`、`replay.ts` 和 `room/heads-up.ts` 剩下的單挑轉接，由 T38、T40 中後合併的那張刪掉。T38 傳給 `recordMatch` 的 N 人形狀：`players[]`、`display_names[]`、`final_stacks[]`、`places[]`、`hands` 用 `holdem/table.ts` 的 `TableHandRecord`；T40 合併前 3 人以上的場先不寫、回 unrated。
+- `holdem/match.ts`、`view.ts`、`replay.ts` 和 `room/heads-up.ts` 剩下的單挑轉接，刪除留給 T56。T38 傳給 `recordMatch` 的 N 人形狀：`players[]`、`display_names[]`、`final_stacks[]`、`places[]`（一律帶）、`hands` 用 `holdem/table.ts` 的 `TableHandRecord`。
 - 驗證：`pnpm test:api`。2 人桌的 Elo 跟舊算法逐位相同；3 人並列算 0.5；有 bot 的場不計分。
 
 ### T41 網頁多人版（約 900 行）· Blocked by：T37

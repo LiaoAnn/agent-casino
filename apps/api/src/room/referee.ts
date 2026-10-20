@@ -17,6 +17,7 @@ import {
   MAX_SEATS,
   RESERVED_NAMES,
 } from '../contract/schemas';
+import type { MatchRecordInput, RecordedMatch } from '../db/records';
 import { randomAction } from '../holdem/bot';
 import {
   type Action,
@@ -47,46 +48,18 @@ export interface RoomStorage {
   deleteAlarm(): Promise<void>;
 }
 
-type SeatResult =
-  | `seat${0 | 1 | 2 | 3 | 4 | 5}_win`
-  | 'draw'
-  | 'void'
-  | 'cancelled';
+type SeatResult = MatchRecordInput['result'];
 
-// A finished match as the Room DO hands it on to be stored (A10). T40 owns
-// how it is stored; room/room.ts adapts it to db/records.ts until then.
-export interface TableRecordInput {
-  /** = room_id. */
-  match_id: string;
-  /** By seat, as typed in this room. */
-  players: string[];
+// A finished match as the Room DO hands it to the Matchmaker to store (A10):
+// every seat with its place, and the engine's hands.
+export type TableRecordInput = MatchRecordInput & {
   display_names: string[];
-  settings: {
-    starting_stack: number;
-    blind_every: number;
-    max_hands: number;
-    turn_seconds: number;
-  };
-  seed: string;
-  /** From the seats' point of view. */
-  result: SeatResult;
-  /** Each seat's place; `null` for void and cancelled. */
   places: number[] | null;
   end_reason: (typeof MATCH_END_REASONS)[number];
-  /** ISO-8601 UTC. */
-  ended_at: string;
-  final_stacks: number[];
-  /** The engine's finished hands, in order. */
   hands: TableHandRecord[];
-  /** Each seat's notes (A16); `seq` is the step's position in the hand's events. */
-  notes?: { hand_number: number; seq: number; note: string }[];
-}
+};
 
-export interface RecordedMatch {
-  rated: boolean;
-  /** By seat; `null` when unrated. */
-  ratings: { name: string; rating: number; change: number }[] | null;
-}
+export type { RecordedMatch };
 
 export interface RefereeOptions {
   // How long `wait` holds a request before answering `waiting`.
