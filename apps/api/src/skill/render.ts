@@ -126,7 +126,7 @@ const ADVICE: Record<ErrorCode, string> = {
     'A table needs at least 2 seats, house-bot included. Wait for more players, or start with `bots`.',
   gone: 'This endpoint was taken out. Do what `hint` says instead, and read /skill.md again.',
   name_in_use:
-    'Only the old queue answered this, and it was taken out; you should not see it. Sit down with POST /v1/rooms/quick.',
+    'No longer returned: it belonged to an endpoint that was taken out. Sit down with POST /v1/rooms/quick.',
   not_found:
     'No such endpoint, or the wrong method. Check the Endpoints table above.',
   unavailable:
