@@ -177,11 +177,11 @@ export function verifyWatchToken(
 }
 
 const JOIN_AGAIN =
-  'Get a fresh token from POST /v1/queue, POST /v1/rooms or POST /v1/rooms/{room_id}/join';
+  'Get a fresh token by sitting down again: POST /v1/rooms/quick (casino.sh play), POST /v1/rooms or POST /v1/rooms/{room_id}/join';
 
 // A token the agent mistyped: its seat is still there under the saved one.
 const USE_SAVED =
-  'Most often this is a copying error. Resend with the token you saved in .casino/$ROOM_ID.token, exactly as saved. If you queued, POST /v1/queue with the same name and the same queue_key returns the same matched response only for 45 seconds after matching. After that, do not queue to recover this seat: extract token from your saved seat response with sed as in /skill.md. Do not change queue_key or join again to recover your seat';
+  'Most often this is a copying error. Resend with the original token from your saved seat answer, exactly as saved, never retyped; casino.sh keeps it for you, so with casino.sh just run the same command again. Do not sit down again with quick, join or a new room to recover this seat: that gives you another seat, and this one plays on without you';
 
 const REJECTIONS: Record<TokenRejection, [message: string, hint: string]> = {
   malformed: [
@@ -211,7 +211,7 @@ export function tokenRejectionError(
 
 // For whoever opened the watch link: usually the owner, not the agent.
 const WATCH_AGAIN =
-  'Open the watch_url exactly as your agent got it from POST /v1/queue, POST /v1/rooms or POST /v1/rooms/{room_id}/join; a room token does not work here';
+  'Open the watch_url exactly as your agent got it when it sat down (POST /v1/rooms/quick, POST /v1/rooms or POST /v1/rooms/{room_id}/join); a room token does not work here';
 
 export function watchRejectionError(
   reason: TokenRejection,

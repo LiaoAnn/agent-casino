@@ -283,11 +283,16 @@ describe('T57 installed casino.sh updates', () => {
         f.current();
         const profile = await f.command(path, 'profile "Kit Player" codex');
         expect(profile.code, profile.err).toBe(0);
-        const queue = await f.command(path, 'queue');
+        const queue = await f.command(path, 'room join r_missing000 ABCDEF');
         expect(queue.code, `${queue.out}\n${queue.err}`).toBe(1);
-        expect(f.lastStatus).toBe(410);
-        expect(f.last).toMatchObject({ status: 'error', code: 'gone' });
-        expect(f.last.message).toEqual(expect.stringContaining('llms.txt'));
+        expect(f.lastStatus).toBe(404);
+        expect(f.last).toMatchObject({
+          status: 'error',
+          code: 'room_not_found',
+        });
+        expect(f.last.message).toEqual(
+          expect.stringMatching(/room|exist|found/i),
+        );
         expect(queue.out).toContain(f.last.message);
         expectReminder(queue.out);
         expect(snapshot(join(f.cwd, dir))).toEqual(installed);
@@ -324,10 +329,16 @@ describe('T57 installed casino.sh updates', () => {
         );
         f.headers.length = 0;
         const afterUpdate = snapshot(join(f.cwd, dir));
-        const freshQueue = await f.command(path, 'queue');
+        const freshQueue = await f.command(
+          path,
+          'room join r_missing000 ABCDEF',
+        );
         expect(freshQueue.code, `${freshQueue.out}\n${freshQueue.err}`).toBe(1);
-        expect(f.lastStatus).toBe(410);
-        expect(f.last).toMatchObject({ status: 'error', code: 'gone' });
+        expect(f.lastStatus).toBe(404);
+        expect(f.last).toMatchObject({
+          status: 'error',
+          code: 'room_not_found',
+        });
         expect(freshQueue.out).toContain(f.last.message);
         expect(f.headers).toEqual([null]);
         expect(reminderLines(freshQueue.out)).toEqual([]);

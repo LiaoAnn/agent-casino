@@ -28,6 +28,8 @@ const COMMANDS = [
   'help',
   'version',
   'profile',
+  'play',
+  'start',
   'queue',
   'bot',
   'room',
@@ -132,7 +134,6 @@ async function serve(
     dropResponse?: (path: string, answer: Record<string, unknown>) => boolean;
     unavailableRooms?: number;
     unavailableJoin?: number;
-    waitedSeconds?: number;
     deadlineMs?: number;
     tellOwner?: string;
     answer?: (path: string, answer: Record<string, unknown>) => void;
@@ -175,7 +176,8 @@ async function serve(
       );
       let response: Response;
       if (
-        (path === '/v1/rooms' && (faults.unavailableRooms ?? 0) > 0) ||
+        ((path === '/v1/rooms' || path === '/v1/rooms/quick') &&
+          (faults.unavailableRooms ?? 0) > 0) ||
         (path.endsWith('/join') && (faults.unavailableJoin ?? 0) > 0)
       ) {
         if (path.endsWith('/join'))
@@ -193,12 +195,6 @@ async function serve(
       } else response = await handle(request, env);
       const answer = JSON.parse(await response.text());
       faults.answer?.(path, answer);
-      if (
-        path === '/v1/queue' &&
-        answer.status === 'waiting' &&
-        faults.waitedSeconds !== undefined
-      )
-        answer.waited_seconds = faults.waitedSeconds;
       if (answer.status === 'your_turn' && faults.deadlineMs !== undefined) {
         answer.deadline = new Date(
           Date.now() + faults.deadlineMs,
@@ -305,7 +301,8 @@ async function runShell(
     ).toBeNull();
     if (
       !['help', '-h', '--help', 'version', 'report'].includes(args[0] ?? '') &&
-      !args.includes('--help')
+      !args.includes('--help') &&
+      !args.includes('-h')
     ) {
       expect(out.trimEnd().split('\n').at(-1), `${out}\n${err}`).toMatch(
         /^Next: sh .+ .+/,
@@ -359,6 +356,140 @@ async function finish(cwd: string, first?: Result): Promise<Result> {
 
 function profile(cwd: string): { name: string; display_name: string } {
   return JSON.parse(readFileSync(join(cwd, '.casino/profile.json'), 'utf8'));
+}
+
+function fakeTime(cwd: string, seconds: number) {
+  writeFileSync(
+    join(cwd, 'bin/date'),
+    `#!/bin/sh\nif [ "$1" = '+%s' ]; then printf '%s\\n' '${seconds}'; else exec /usr/bin/date "$@"; fi\n`,
+    { mode: 0o755 },
+  );
+}
+
+function ownerBlocks(out: string): string[] {
+  return out
+    .split(`${BEGIN}\n`)
+    .slice(1)
+    .map(block => {
+      expect(block).toContain(END);
+      return block.slice(0, block.indexOf(END));
+    });
+}
+
+function waiting(result: Result) {
+  expect(result.code, `${result.out}\n${result.err}`).toBe(2);
+  expect(result.out.trimEnd().split('\n').at(-1)).toMatch(
+    /^Next: sh \.casino\/casino\.sh wait\b/,
+  );
+}
+
+function hostReport(result: Result, names: string[], open: number) {
+  const block = ownerBlocks(result.out).at(-1);
+  expect(block, result.out).toBeDefined();
+  for (const name of names) expect(block).toContain(name);
+  expect(block).toMatch(new RegExp(`\\b${open}\\b`));
+  if (open > 0) {
+    expect(block).toMatch(/house-bot|bot/i);
+    expect(block).toMatch(/unrated|not rated|no rating/i);
+    expect(block).toMatch(/keep waiting|continue waiting/i);
+    if (names.length > 1) expect(block).toMatch(/start/i);
+  } else {
+    expect(block).toMatch(/start/i);
+    expect(block).toMatch(/leave/i);
+    expect(block).not.toMatch(/house-bot|bot/i);
+  }
+  expect(result.out).toMatch(/start/);
+  expect(result.out).toMatch(/2 minutes|two minutes|120 seconds|2-minute/i);
+  expect(result.out).toMatch(/owner|answer|reply|respond/i);
+  expect(result.out.trimEnd().split('\n').at(-1)).toMatch(
+    /^Next: sh \.casino\/casino\.sh wait\b/,
+  );
+}
+
+interface TableSeat {
+  seat: number;
+  display_name: string;
+  stack: number;
+}
+
+function multiplayerSummary(result: Result, response: Record<string, unknown>) {
+  const seats = response.seats as TableSeat[];
+  const view = response.view as {
+    my_seat: number;
+    history: { seat: number; street: string; type: string; amount?: number }[];
+  };
+  const mySeat =
+    view?.my_seat ??
+    seats.find(seat => seat.display_name === response.display_name)?.seat;
+  const escapePattern = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let tableAt = result.out.length;
+  if (result.code === 0) {
+    legal(result);
+    tableAt = result.out.search(
+      new RegExp(`^Hand\\s+${response.hand_number}\\b`, 'm'),
+    );
+    expect(tableAt, result.out).toBeGreaterThanOrEqual(0);
+    const table = result.out.slice(tableAt, result.out.indexOf('Legal:'));
+    for (const seat of seats.filter(seat => seat.seat !== view.my_seat)) {
+      expect(table, result.out).toMatch(
+        new RegExp(
+          `${escapePattern(seat.display_name)}[^\\n]*\\b${seat.stack}\\b`,
+        ),
+      );
+    }
+    const history = result.out.slice(
+      result.out.indexOf('This hand so far:'),
+      tableAt,
+    );
+    for (const move of view.history) {
+      const actor = seats.find(seat => seat.seat === move.seat);
+      expect(actor).toBeDefined();
+      if (move.seat !== view.my_seat)
+        expect(history).toContain(actor?.display_name);
+      expect(history).toContain(move.street);
+    }
+  }
+  const hands = response.hands_since_your_turn as {
+    hand_number: number;
+    pots: { amount: number; winner_seats: number[] }[];
+  }[];
+  if (hands?.length) {
+    const historyAt = result.out.indexOf('This hand so far:');
+    const since = result.out.slice(
+      result.out.indexOf('Since your last move:'),
+      historyAt >= 0 ? Math.min(historyAt, tableAt) : tableAt,
+    );
+    expect(result.out).toContain('Since your last move:');
+    for (const hand of hands) {
+      const nextHand = hands.find(
+        candidate => candidate.hand_number > hand.hand_number,
+      );
+      const lines = since.split('\n');
+      const first = lines.findIndex(line =>
+        new RegExp(`\\b${hand.hand_number}\\b`).test(line),
+      );
+      expect(first, since).toBeGreaterThanOrEqual(0);
+      const end = nextHand
+        ? lines.findIndex(
+            (line, index) =>
+              index > first &&
+              new RegExp(`\\b${nextHand.hand_number}\\b`).test(line),
+          )
+        : -1;
+      const section = lines.slice(first, end < 0 ? undefined : end).join('\n');
+      for (const pot of hand.pots) {
+        expect(section).toMatch(new RegExp(`\\b${pot.amount}\\b`));
+        for (const winner of pot.winner_seats) {
+          expect(section).toContain(
+            winner === mySeat
+              ? 'you'
+              : seats.find(seat => seat.seat === winner)?.display_name,
+          );
+        }
+      }
+    }
+  }
 }
 
 function checkRequests(api: Awaited<ReturnType<typeof serve>>) {
@@ -461,6 +592,406 @@ async function report(
 }
 
 describe('casino.sh in fresh POSIX shells (A23)', () => {
+  it('seats three play users together, reports roster changes and finishes every seat', async () => {
+    const api = await serve();
+    const players = [player(api.url), player(api.url), player(api.url)];
+    const names = ['Alice Shark', 'Bob River', 'Carol Ace'];
+    const host = players[0];
+    if (!host) throw new Error('Missing host');
+    for (const [index, cwd] of players.entries()) {
+      await run(cwd, 'profile', names[index] ?? '');
+      const seated = await run(cwd, 'play');
+      expect(seated.code, seated.out).toBe(0);
+      const quick = api.exchanges.findLast(
+        exchange => exchange.path === '/v1/rooms/quick',
+      );
+      expect(quick?.body).toEqual({ game: 'holdem', ...profile(cwd) });
+      expect(quick?.response.is_host).toBe(index === 0);
+      if (index > 0) relay(seated.out, quick?.response.tell_owner);
+      else hostReport(seated, names.slice(0, 1), 5);
+      const changed = await run(host, 'wait');
+      waiting(changed);
+      if (index > 0) hostReport(changed, names.slice(0, index + 1), 5 - index);
+      else expect(changed.out).not.toContain(BEGIN);
+      const unchanged = await run(host, 'wait');
+      waiting(unchanged);
+      expect(unchanged.out).not.toContain(BEGIN);
+      expect(unchanged.out).toMatch(/start/);
+      expect(unchanged.out).toMatch(
+        /2 minutes|two minutes|120 seconds|2-minute/i,
+      );
+      if (index > 0) waiting(await run(cwd, 'wait'));
+    }
+    const quick = api.exchanges.filter(
+      exchange => exchange.path === '/v1/rooms/quick',
+    );
+    expect(quick).toHaveLength(3);
+    expect(new Set(quick.map(exchange => exchange.response.room_id)).size).toBe(
+      1,
+    );
+    const started = await run(host, 'start');
+    expect([0, 2], started.out).toContain(started.code);
+    expect(api.exchanges.at(-1)?.body).toEqual({});
+    const finished = new Set<string>();
+    let sawHistory = false;
+    let sawCompleted = false;
+    for (let step = 0; step < 200 && finished.size < 3; step++) {
+      for (const cwd of players) {
+        if (finished.has(cwd)) continue;
+        let result = await run(cwd, 'state');
+        let response = api.exchanges.at(-1)?.response;
+        if (!response) throw new Error('Missing state');
+        multiplayerSummary(result, response);
+        sawCompleted ||=
+          ((response.hands_since_your_turn as unknown[])?.length ?? 0) > 0;
+        sawHistory ||=
+          ((response.view as { history?: unknown[] } | null)?.history?.length ??
+            0) > 0;
+        if (result.code === 0) {
+          result = await run(cwd, ...action(result));
+          response = api.exchanges.at(-1)?.response;
+          if (!response) throw new Error('Missing action response');
+          multiplayerSummary(result, response);
+        } else if (result.code === 2) {
+          result = await run(cwd, 'wait');
+          response = api.exchanges.at(-1)?.response;
+          if (!response) throw new Error('Missing wait response');
+          multiplayerSummary(result, response);
+        }
+        sawCompleted ||=
+          ((response.hands_since_your_turn as unknown[])?.length ?? 0) > 0;
+        expect([0, 2, 3], `${result.out}\n${result.err}`).toContain(
+          result.code,
+        );
+        if (result.code === 3) {
+          await report(cwd, result, api);
+          finished.add(cwd);
+        }
+      }
+    }
+    expect(finished.size).toBe(3);
+    expect(sawHistory).toBe(true);
+    expect(sawCompleted).toBe(true);
+    checkRequests(api);
+  }, 180_000);
+
+  it('reports its own place when another seat has an earlier numeric place', async () => {
+    const api = await serve(false, {
+      answer: (path, answer) => {
+        if (!path.endsWith('/wait') || answer.status !== 'match_over') return;
+        // A25 permits seats[].place to precede the caller's top-level place.
+        const place = answer.place;
+        delete answer.place;
+        answer.place = place;
+      },
+    });
+    const host = player(api.url);
+    const runnerUp = player(api.url);
+    const third = player(api.url);
+    for (const [cwd, name] of [
+      [host, 'Champion'],
+      [runnerUp, 'Runner Up'],
+      [third, 'Third Place'],
+    ] as const) {
+      await run(cwd, 'profile', name);
+      expect(await run(cwd, 'play')).toMatchObject({ code: 0 });
+    }
+    expect(await run(host, 'start')).toMatchObject({ code: 0 });
+    expect(await run(third, 'leave')).toMatchObject({ code: 3 });
+    expect(await run(runnerUp, 'leave')).toMatchObject({ code: 3 });
+    const result = await run(runnerUp, 'wait');
+    expect(result.code, result.out).toBe(3);
+    const response = api.exchanges.at(-1)?.response;
+    expect(response).toMatchObject({
+      status: 'match_over',
+      room_status: 'finished',
+      place: 2,
+      seats: [{ place: 1 }, { place: 2 }, { place: 3 }],
+    });
+    expect(JSON.stringify(response)).toMatch(
+      /"seats":\[.*"place":1.*"place":2}$/,
+    );
+    const summary = result.out.split(END).at(-1) ?? '';
+    expect(summary, result.out).toMatch(/\bplace\s+2\s+of\s+3\b/i);
+    checkRequests(api);
+  });
+
+  it('prints main and side amounts from the current multiplayer view pots', async () => {
+    const api = await serve(false, {
+      answer: (path, answer) => {
+        if (!path.endsWith('/state') || answer.status !== 'your_turn') return;
+        Object.assign(answer.view as object, { pot: 14, pots: [9, 5] });
+      },
+    });
+    const host = player(api.url);
+    for (const [cwd, name] of [
+      [host, 'Pot Reader'],
+      [player(api.url), 'Short Stack'],
+      [player(api.url), 'Deep Stack'],
+    ] as const) {
+      await run(cwd, 'profile', name);
+      expect(await run(cwd, 'play')).toMatchObject({ code: 0 });
+    }
+    expect(await run(host, 'start')).toMatchObject({ code: 0 });
+    const result = await run(host, 'state');
+    expect(result.code, result.out).toBe(0);
+    expect(api.exchanges.at(-1)?.response.view).toMatchObject({
+      pot: 14,
+      pots: [9, 5],
+    });
+    expect(result.out).toMatch(/\bmain\b[^\n]*\b9\b/i);
+    expect(result.out).toMatch(/\bside\b[^\n]*\b5\b/i);
+    checkRequests(api);
+  });
+
+  it('prints each showdown pot winner and every revealed multiplayer hand', async () => {
+    const hand = {
+      hand_number: 6,
+      blinds: [1, 2],
+      winner_seat: null,
+      pot: 14,
+      pots: [
+        { amount: 9, winner_seats: [1] },
+        { amount: 5, winner_seats: [0] },
+      ],
+      ended_by: 'showdown',
+      board: ['Kc', '2d', '7s', '8h', 'Jc'],
+      hole_cards: [['Qh', 'Qs'], ['Kh', 'Ks'], null],
+      stacks: [43, 46, 31],
+      stack_changes: [3, 6, -9],
+    };
+    const api = await serve(false, {
+      answer: (path, answer) => {
+        if (!path.endsWith('/state') || answer.status !== 'your_turn') return;
+        Object.assign(answer, {
+          hand_number: 7,
+          last_hand: hand,
+          hands_since_your_turn: [hand],
+        });
+      },
+    });
+    const host = player(api.url);
+    for (const [cwd, name] of [
+      [host, 'Side Winner'],
+      [player(api.url), 'Main Winner'],
+      [player(api.url), 'Mucked Player'],
+    ] as const) {
+      await run(cwd, 'profile', name);
+      expect(await run(cwd, 'play')).toMatchObject({ code: 0 });
+    }
+    expect(await run(host, 'start')).toMatchObject({ code: 0 });
+    const result = await run(host, 'state');
+    expect(result.code, result.out).toBe(0);
+    expect(api.exchanges.at(-1)?.response.hands_since_your_turn).toEqual([
+      hand,
+    ]);
+    const section =
+      result.out
+        .slice(result.out.indexOf('Since your last move:'))
+        .split(/This hand so far:|\nHand\s+7\b/)[0] ?? '';
+    expect(section, result.out).toMatch(/\b6\b[^\n]*showdown/i);
+    expect(section).toMatch(/\b9\b[^\n]*Main Winner|Main Winner[^\n]*\b9\b/);
+    expect(section).toMatch(/\b5\b[^\n]*\byou\b|\byou\b[^\n]*\b5\b/);
+    for (const card of ['Qh', 'Qs', 'Kh', 'Ks', ...hand.board])
+      expect(section).toContain(card);
+    expect(section).not.toMatch(/Mucked Player[^\n]*\b[2-9TJQKA][cdhs]\b/);
+    checkRequests(api);
+  });
+
+  it('asks only to start or leave when all six seats are occupied', async () => {
+    const api = await serve();
+    const host = player(api.url);
+    await run(host, 'profile', 'Full Host');
+    expect(await run(host, 'play')).toMatchObject({ code: 0 });
+    const names = ['Full Host'];
+    for (let index = 1; index < 6; index++) {
+      const cwd = player(api.url);
+      const name = `Guest ${index}`;
+      names.push(name);
+      await run(cwd, 'profile', name);
+      expect(await run(cwd, 'play')).toMatchObject({ code: 0 });
+    }
+    const full = await run(host, 'wait');
+    waiting(full);
+    hostReport(full, names, 0);
+    expect(ownerBlocks(full.out)[0]).not.toMatch(
+      /keep waiting|continue waiting/i,
+    );
+    const unchanged = await run(host, 'wait');
+    waiting(unchanged);
+    expect(unchanged.out).not.toContain(BEGIN);
+    checkRequests(api);
+  }, 60_000);
+
+  it.each([false, true])('queue aliases play for is_host=%s', async isHost => {
+    const api = await serve();
+    if (!isHost) {
+      const host = player(api.url);
+      await run(host, 'profile', 'Alias Host');
+      expect(await run(host, 'play')).toMatchObject({ code: 0 });
+    }
+    const cwd = player(api.url);
+    await run(cwd, 'profile', 'Alias Player');
+    const before = api.exchanges.length;
+    const result = await run(cwd, 'queue');
+    expect(result.code, result.out).toBe(0);
+    expect(result.out.split('\n')[0]).toMatch(/play/);
+    const calls = api.exchanges.slice(before);
+    expect(calls.filter(exchange => exchange.method === 'POST')).toHaveLength(
+      1,
+    );
+    const seated = calls.find(exchange => exchange.path === '/v1/rooms/quick');
+    expect(seated?.body).toEqual({ game: 'holdem', ...profile(cwd) });
+    expect(seated?.response.is_host).toBe(isHost);
+    if (isHost) hostReport(result, ['Alias Player'], 5);
+    else relay(result.out, seated?.response.tell_owner);
+    expect(result.out.trimEnd().split('\n').at(-1)).toMatch(/^Next: .* wait\b/);
+    checkRequests(api);
+  });
+
+  it.each(['-1', '6', '1.5', 'two'])(
+    'rejects start %s locally without a request',
+    async bots => {
+      const api = await serve();
+      const cwd = player(api.url);
+      await run(cwd, 'profile', 'Invalid Bots Host');
+      expect(await run(cwd, 'play')).toMatchObject({ code: 0 });
+      const before = api.exchanges.length;
+      const invalid = await run(cwd, 'start', bots);
+      expect(invalid.code, invalid.out).toBe(1);
+      expect(api.exchanges).toHaveLength(before);
+    },
+  );
+
+  it('prints server errors for starting alone and starting as a non-host', async () => {
+    const api = await serve();
+    const host = player(api.url);
+    const guest = player(api.url);
+    await run(host, 'profile', 'Start Host');
+    expect(await run(host, 'play')).toMatchObject({ code: 0 });
+    const alone = await run(host, 'start');
+    expect(alone.code, alone.out).toBe(1);
+    expect(api.exchanges.at(-1)?.response.code).toBe('not_enough_players');
+    expect(api.exchanges.at(-1)?.body).toEqual({});
+    expect(alone.out).toContain(api.exchanges.at(-1)?.response.message);
+    await run(guest, 'profile', 'Start Guest');
+    expect(await run(guest, 'play')).toMatchObject({ code: 0 });
+    const unauthorized = await run(guest, 'start');
+    expect(unauthorized.code, unauthorized.out).toBe(1);
+    expect(api.exchanges.at(-1)?.response.code).toBe('not_host');
+    expect(unauthorized.out).toContain(api.exchanges.at(-1)?.response.message);
+    const started = await run(host, 'start', '0');
+    expect([0, 2], started.out).toContain(started.code);
+    expect(api.exchanges.at(-1)?.body).toEqual({ bots: 0 });
+    if (started.code === 0)
+      tableSummary(started, api.exchanges.at(-1)?.response ?? {});
+    checkRequests(api);
+  });
+
+  it('reports place after busting while the table continues and defers leaderboard lookup', async () => {
+    const api = await serve();
+    const host = player(api.url);
+    const loser = player(api.url);
+    const third = player(api.url);
+    for (const [cwd, name] of [
+      [host, 'Shoving Host'],
+      [loser, 'Calling Guest'],
+      [third, 'Folding Guest'],
+    ] as const) {
+      await run(cwd, 'profile', name);
+      expect(await run(cwd, 'play')).toMatchObject({ code: 0 });
+    }
+    expect(await run(host, 'start')).toMatchObject({ code: 0 });
+    // Seed 0: seat 0 wins 82; seat 1 busts; seat 2 keeps 38.
+    expect(await run(host, 'act', 'raise', '40')).toMatchObject({ code: 2 });
+    expect(await run(loser, 'wait')).toMatchObject({ code: 0 });
+    expect(await run(loser, 'act', 'call')).toMatchObject({ code: 2 });
+    expect(await run(third, 'wait')).toMatchObject({ code: 0 });
+    const next = await run(third, 'act', 'fold');
+    expect(next.code, next.out).toBe(0);
+    multiplayerSummary(next, api.exchanges.at(-1)?.response ?? {});
+    const final = await run(loser, 'wait');
+    expect(final.code, final.out).toBe(3);
+    const over = api.exchanges.at(-1)?.response;
+    expect(over).toMatchObject({
+      status: 'match_over',
+      room_status: 'playing',
+      place: 3,
+      ratings: null,
+    });
+    expect(final.out).toMatch(/place[^\n]*3|3(?:rd|\s*\/\s*3)/i);
+    const before = api.exchanges.length;
+    const result = await run(loser, 'report');
+    expect(result.code, result.out).toBe(0);
+    relay(result.out, over?.tell_owner);
+    const rank = result.out.split('\n').find(line => /leaderboard/i.test(line));
+    expect(rank, result.out).toMatch(/rat(?:ing|ings)|elo|points/i);
+    expect(rank, result.out).toMatch(/table/i);
+    expect(rank, result.out).toMatch(/end|finish|complete/i);
+    expect(
+      api.exchanges
+        .slice(before)
+        .some(exchange => exchange.path.startsWith('/v1/leaderboard')),
+    ).toBe(false);
+    expect(readdirSync(join(loser, '.casino')).sort()).toEqual([
+      'casino.sh',
+      'profile.json',
+    ]);
+    checkRequests(api);
+  }, 60_000);
+
+  it.each([
+    ['play', '-h'],
+    ['start', '-h'],
+    ['help', 'play'],
+    ['help', 'start'],
+  ])('documents %s %s with an example', async (...args) => {
+    const cwd = player('http://127.0.0.1:1');
+    const result = await run(cwd, ...args);
+    expect(result.code, result.out).toBe(0);
+    expect(result.out).toMatch(/sh \.casino\/casino\.sh (?:play|start)\b/);
+  });
+
+  it('keeps a private multiplayer room waiting after two guests join until its host starts', async () => {
+    const api = await serve();
+    const host = player(api.url);
+    await run(host, 'profile', 'Private Host');
+    const created = await run(host, 'room', 'create');
+    expect(created.code, created.out).toBe(0);
+    const creation = api.exchanges.find(
+      exchange => exchange.path === '/v1/rooms',
+    );
+    expect(creation?.body).toMatchObject({
+      game: 'holdem',
+      visibility: 'private',
+      ...profile(host),
+    });
+    const room = creation?.response;
+    expect(created.out).toContain(
+      `room join ${room?.room_id} ${room?.invite_code}`,
+    );
+    hostReport(created, ['Private Host'], 5);
+    const guests = [player(api.url), player(api.url)];
+    for (const [index, cwd] of guests.entries()) {
+      await run(cwd, 'profile', `Private Guest ${index}`);
+      const joined = await run(
+        cwd,
+        'room',
+        'join',
+        String(room?.room_id),
+        String(room?.invite_code),
+      );
+      expect(joined.code, joined.out).toBe(0);
+      relay(joined.out, api.exchanges.at(-1)?.response.tell_owner);
+      waiting(await run(cwd, 'wait'));
+    }
+    waiting(await run(host, 'wait'));
+    const started = await run(host, 'start');
+    expect([0, 2], started.out).toContain(started.code);
+    expect(api.exchanges.at(-1)?.response.room_status).toBe('playing');
+    expect(api.exchanges.at(-1)?.body).toEqual({});
+    checkRequests(api);
+  }, 60_000);
   it.each([
     '.casino/casino.sh',
     '.claude/skills/agent-casino/scripts/casino.sh',
@@ -525,6 +1056,7 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
         String(created?.invite_code),
       ),
     ).toMatchObject({ code: 0 });
+    expect([0, 2]).toContain((await run(cwd, 'start')).code);
     expect(await run(opponent, 'leave')).toMatchObject({ code: 3 });
     expect(await run(cwd, 'wait')).toMatchObject({ code: 3 });
     const result = await run(cwd, 'report');
@@ -861,12 +1393,13 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
     60_000,
   );
 
-  it.each([['bot'], ['room', 'create']])(
+  it.each([['bot'], ['room', 'create'], ['play']])(
     'does not reopen %s after a dropped room-creation connection',
     async (...command) => {
       let drops = 1;
+      const endpoint = command[0] === 'play' ? '/v1/rooms/quick' : '/v1/rooms';
       const api = await serve(false, {
-        drop: path => path === '/v1/rooms' && drops-- > 0,
+        drop: path => path === endpoint && drops-- > 0,
       });
       const cwd = player(api.url);
       await run(cwd, 'profile', 'dropped-create');
@@ -877,8 +1410,7 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
       );
       expect(
         api.exchanges.filter(
-          exchange =>
-            exchange.method === 'POST' && exchange.path === '/v1/rooms',
+          exchange => exchange.method === 'POST' && exchange.path === endpoint,
         ),
       ).toHaveLength(1);
       checkRequests(api);
@@ -886,7 +1418,7 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
     60_000,
   );
 
-  it.each([['bot'], ['room', 'create']])(
+  it.each([['bot'], ['room', 'create'], ['play']])(
     'retries %s creation after an explicit 503',
     async (...command) => {
       const api = await serve(false, { unavailableRooms: 1 });
@@ -894,8 +1426,9 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
       await run(cwd, 'profile', 'unavailable-create');
       const result = await run(cwd, ...command);
       expect(result.code, `${result.out}\n${result.err}`).toBe(0);
+      const endpoint = command[0] === 'play' ? '/v1/rooms/quick' : '/v1/rooms';
       const calls = api.exchanges.filter(
-        exchange => exchange.path === '/v1/rooms',
+        exchange => exchange.path === endpoint,
       );
       expect(calls.map(exchange => exchange.status)).toEqual([503, 200]);
       expect(calls[1]?.body).toEqual(calls[0]?.body);
@@ -980,6 +1513,7 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
             String(created?.invite_code),
           ),
         ).toMatchObject({ code: 0 });
+        expect([0, 2]).toContain((await run(cwd, 'start')).code);
       } else expect(await run(cwd, 'bot')).toMatchObject({ code: 0 });
       let turn = await run(cwd, 'wait');
       for (let step = 0; step < 100 && !lost; step++) {
@@ -1025,29 +1559,34 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
     180_000,
   );
 
-  // T42: casino.sh queue → quick. T39 took the queue out (POST /v1/queue
-  // answers 410 gone), so this fails until T42 rewrites it for quick.
-  it.fails.each([180, 181])(
-    'asks the owner to choose and pauses queue instructions after %i seconds',
-    async waitedSeconds => {
-      const api = await serve(false, { waitedSeconds });
-      const cwd = player(api.url);
-      await run(cwd, 'profile', 'patient-player');
-      const result = await run(cwd, 'queue');
-      expect(result.code, `${result.out}\n${result.err}`).toBe(2);
-      const block = result.out.slice(
-        result.out.indexOf(BEGIN) + BEGIN.length,
-        result.out.indexOf(END),
-      );
-      expect(result.out).toContain(BEGIN);
-      expect(result.out).toContain(END);
+  it.each([180, 181])(
+    'asks a non-host owner once after %i seconds while continuing wait',
+    async seconds => {
+      const api = await serve();
+      const host = player(api.url);
+      const guest = player(api.url);
+      await run(host, 'profile', 'Patient Host');
+      await run(guest, 'profile', 'Patient Guest');
+      fakeTime(guest, 1_000_000);
+      expect(await run(host, 'play')).toMatchObject({ code: 0 });
+      expect(await run(guest, 'play')).toMatchObject({ code: 0 });
+      fakeTime(guest, 1_000_179);
+      const early = await run(guest, 'wait');
+      waiting(early);
+      expect(early.out).not.toContain(BEGIN);
+      fakeTime(guest, 1_000_000 + seconds);
+      const result = await run(guest, 'wait');
+      waiting(result);
+      const block = ownerBlocks(result.out)[0];
+      expect(block, result.out).toBeDefined();
+      expect(block).toContain('Patient Host');
+      expect(block).toContain('Patient Guest');
       expect(block).toMatch(/keep waiting|continue waiting/i);
-      expect(block).toMatch(/bot/i);
-      expect(block).toMatch(/stop/i);
+      expect(block).toMatch(/leave/i);
       expect(block).toMatch(/ask|choose|would you|want|\?/i);
-      expect(result.out.trimEnd().split('\n').at(-1)).toMatch(
-        /^Next: .*wait.*owner.*(?:answer|reply|respond)/i,
-      );
+      const again = await run(guest, 'wait');
+      waiting(again);
+      expect(again.out).not.toContain(BEGIN);
       checkRequests(api);
     },
     60_000,
@@ -1078,6 +1617,7 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
         String(created?.invite_code),
       ),
     ).toMatchObject({ code: 0 });
+    expect([0, 2]).toContain((await run(a, 'start')).code);
     const turn = await run(a, 'wait');
     expect(turn.code, `${turn.out}\n${turn.err}`).toBe(0);
     const acted = await run(a, ...action(turn));
@@ -1103,18 +1643,37 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
     checkRequests(api);
   }, 60_000);
 
-  // T42: casino.sh queue → quick. T39 took the queue out (POST /v1/queue
-  // answers 410 gone), so this fails until T42 rewrites it for quick.
-  it.fails('switches from a waiting queue to a bot and clears the queue key when reporting', async () => {
+  it('opens a solo table with play, starts one house-bot and reports the match', async () => {
     const api = await serve();
     const cwd = player(api.url);
-    await run(cwd, 'profile', 'queue-to-bot');
-    const queued = await run(cwd, 'queue');
-    expect(queued.code, `${queued.out}\n${queued.err}`).toBe(2);
-    expect(api.exchanges.at(-1)?.body.queue_key).toMatch(/^[0-9a-f]{32}$/);
-    const bot = await run(cwd, 'bot');
-    expect(bot.code, `${bot.out}\n${bot.err}`).toBe(0);
-    await report(cwd, await finish(cwd), api);
+    await run(cwd, 'profile', 'Solo Host');
+    const seated = await run(cwd, 'play');
+    expect(seated.code, seated.out).toBe(0);
+    const created = api.exchanges.find(
+      exchange => exchange.path === '/v1/rooms/quick',
+    );
+    expect(created?.response.is_host).toBe(true);
+    expect(seated.out).toContain(String(created?.response.watch_url));
+    expect(ownerBlocks(seated.out)).toHaveLength(2);
+    expect(ownerBlocks(seated.out)[0]).toContain(
+      String(created?.response.watch_url),
+    );
+    hostReport(seated, ['Solo Host'], 5);
+    expect(ownerBlocks(seated.out).at(-1)).not.toMatch(
+      /start now|start (?:the )?(?:game|match|table) now/i,
+    );
+    const unchanged = await run(cwd, 'wait');
+    waiting(unchanged);
+    expect(unchanged.out).not.toContain(BEGIN);
+    const started = await run(cwd, 'start', '1');
+    expect([0, 2], started.out).toContain(started.code);
+    const call = api.exchanges.find(exchange =>
+      exchange.path.endsWith('/start'),
+    );
+    expect(call?.body).toEqual({ bots: 1 });
+    expect(call?.response.room_status).toBe('playing');
+    if (started.code === 0 && call) tableSummary(started, call.response);
+    await report(cwd, await finish(cwd, started), api);
     checkRequests(api);
   }, 180_000);
 
@@ -1260,8 +1819,10 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
       expect(await run(cwd, 'profile', name)).toMatchObject({ code: 0 });
       expect(profile(cwd).name).toMatch(/^agent-[0-9a-f]{4}$/);
     }
-    // T39: was the queue; T42 moves this to quick.
-    expect(await run(a, 'room', 'create')).toMatchObject({ code: 0 });
+    const opened = await run(a, 'room', 'create');
+    expect(opened).toMatchObject({ code: 0 });
+    expect(api.exchanges.at(-1)?.body.visibility).toBe('private');
+    hostReport(opened, ['甲'], 5);
     const created = api.exchanges.at(-1)?.response;
     const joined = await run(
       b,
@@ -1272,6 +1833,13 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
     );
     expect(joined.code, `${joined.out}\n${joined.err}`).toBe(0);
     relay(joined.out, api.exchanges.at(-1)?.response.tell_owner);
+    expect(opened.out).toContain(
+      `room join ${created?.room_id} ${created?.invite_code}`,
+    );
+    waiting(await run(a, 'wait'));
+    waiting(await run(b, 'wait'));
+    expect([0, 2]).toContain((await run(a, 'start')).code);
+    expect(api.exchanges.at(-1)?.body).toEqual({});
     const results = new Map<string, Result>();
     for (let step = 0; step < 200 && results.size < 2; step++) {
       for (const cwd of [a, b]) {
@@ -1300,7 +1868,7 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
   it('rejects missing profile and pending turn locally, and blocks a second room', async () => {
     const api = await serve();
     const cwd = player(api.url);
-    expect(await run(cwd, 'queue')).toMatchObject({ code: 1 });
+    expect(await run(cwd, 'play')).toMatchObject({ code: 1 });
     expect(await run(cwd, 'act', 'check')).toMatchObject({ code: 1 });
     expect(api.exchanges).toHaveLength(0);
     expect(await run(cwd, 'profile', '測試')).toMatchObject({ code: 0 });
@@ -1308,7 +1876,7 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
     const before = api.exchanges.length;
     expect(await run(cwd, 'act', 'check')).toMatchObject({ code: 1 });
     expect(api.exchanges.length).toBe(before);
-    expect(await run(cwd, 'queue')).toMatchObject({ code: 1 });
+    expect(await run(cwd, 'play')).toMatchObject({ code: 1 });
     expect(await run(cwd, 'bot')).toMatchObject({ code: 1 });
     const left = await run(cwd, 'leave');
     expect(left).toMatchObject({ code: 3 });

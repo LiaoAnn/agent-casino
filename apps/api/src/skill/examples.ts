@@ -3,7 +3,9 @@
 // annotations, so these live here; render.test.ts decodes each one with the
 // endpoint's schemas, and the types below catch most mistakes earlier.
 // One story runs through them: alice (seat 0) plays bob (seat 1) in
-// r_8f2k1x9q0a, 80 chips in play, and is on the flop of hand 3.
+// r_8f2k1x9q0a, 80 chips in play, and is on the flop of hand 3. The quick
+// and start examples (T42) are another table: bob sits at alice's public
+// table r_3m7p2k9x4d, and she starts it with one house-bot.
 // Values look like the server's: renderSkill puts the requested origin in
 // place of EXAMPLE_ORIGIN, and deadline has milliseconds (T27).
 import type { ApiError } from '../contract/errors';
@@ -16,8 +18,11 @@ import type {
   JoinResponse,
   Leaderboard,
   MatchOver,
+  QuickRoomRequest,
   RoomStatus,
   SeatInfo,
+  SeatResponse,
+  StartRequest,
 } from '../contract/schemas';
 
 interface ResponseExample {
@@ -56,6 +61,7 @@ const OPPONENT = {
   settings: SETTINGS,
 };
 // The A25 fields of alice's answers: she opened the room, so she is host.
+// A private table has 6 seats; once it starts, none are open.
 type SeatStatus = (typeof SeatInfo.Type)['status'];
 const seat = (
   n: 0 | 1,
@@ -75,7 +81,7 @@ const seat = (
 const table = (seats: ReturnType<typeof seat>[]) => ({
   visibility: 'private' as const,
   is_host: true,
-  seats_open: seats.length === 1 ? 1 : 0,
+  seats_open: seats.every(s => s.status === 'waiting') ? 6 - seats.length : 0,
   seats,
 });
 const ACT = `POST /v1/rooms/${ROOM}/actions`;
@@ -86,6 +92,7 @@ const createRoomRequest: typeof CreateRoomRequest.Type = {
   game: 'holdem',
   name: 'alice',
   display_name: ALICE,
+  visibility: 'private',
   settings: SETTINGS,
 };
 
@@ -99,7 +106,7 @@ const created: typeof CreateRoomResponse.Type = {
   opponent_display_name: null,
   settings: SETTINGS,
   watch_url: WATCH_URL,
-  hint: `${SHARE_WATCH_URL}, and give room_id and invite_code to your opponent. Then call ${WAIT}. Make a request at least every 2 minutes, or the room closes`,
+  hint: `${SHARE_WATCH_URL}, and give room_id and invite_code to the players you invite. Then call ${WAIT}: it answers whenever someone joins, and you start the table with POST /v1/rooms/${ROOM}/start when your owner says so. Make a request at least every 2 minutes, or the room closes`,
   ...table([seat(0, 40, 0, 'waiting')]),
 };
 
@@ -116,14 +123,14 @@ const joined: typeof JoinResponse.Type = {
   opponent_name: 'alice',
   display_name: BOB,
   opponent_display_name: ALICE,
-  tell_owner: `Playing against ${ALICE}. Watch: ${watchUrl('eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe')}`,
+  tell_owner: `Joined the table of ${ALICE}; seated: ${ALICE}, ${BOB}. Watch: ${watchUrl('eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe')}`,
   settings: SETTINGS,
   watch_url: watchUrl(
     'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe',
   ),
-  hint: `Joined. ${SHARE_WATCH_URL}, then call ${WAIT} for your first turn`,
+  hint: `Joined. ${SHARE_WATCH_URL}. The host's owner decides when the table starts: call ${WAIT} until it does. Make a request at least every 2 minutes, or you lose your seat`,
   invite_code: null,
-  ...table([seat(0, 40, 0), seat(1, 40, 0)]),
+  ...table([seat(0, 40, 0, 'waiting'), seat(1, 40, 0, 'waiting')]),
   is_host: false,
 };
 
@@ -225,7 +232,7 @@ const opponentNotHere: RoomStatus = {
   to_act_seat: null,
   hand_number: null,
   view: null,
-  hint: `Waiting for an opponent to join. Call ${WAIT}`,
+  hint: `Seated now (1 of 6): ${ALICE}. If this list changed since you last told your owner, tell them who is seated and ask: start now (POST /v1/rooms/${ROOM}/start with {}), fill the 5 empty seats with house-bot (POST /v1/rooms/${ROOM}/start with {"bots":N}, unrated), or keep waiting. Keep calling wait while you wait for their answer: after 2 minutes without a request the room closes. Call ${WAIT} again`,
   ...table([seat(0, 40, 0, 'waiting')]),
 };
 
@@ -373,7 +380,142 @@ const leaderboard: Leaderboard = {
   ],
 };
 
+// T42: bob sits at alice's public table with POST /v1/rooms/quick, then
+// alice starts it with one house-bot (A25).
+const PUBLIC_ROOM = 'r_3m7p2k9x4d';
+const PUBLIC_WAIT = `GET /v1/rooms/${PUBLIC_ROOM}/wait`;
+const publicWatch = (token: string) =>
+  `${EXAMPLE_ORIGIN}/watch/${PUBLIC_ROOM}?token=${token}`;
+const PUBLIC_SETTINGS = { ...SETTINGS, blind_every: null };
+const atPublic = (
+  n: 0 | 1 | 2,
+  stack: number,
+  bet: number,
+  status: SeatStatus,
+) => ({
+  ...(n === 2
+    ? { seat: n, name: 'house-bot', display_name: 'House Bot' }
+    : seat(n, stack, bet, status)),
+  stack,
+  bet_this_street: bet,
+  status,
+  place: null,
+});
+
+const quickRequest: typeof QuickRoomRequest.Type = {
+  game: 'holdem',
+  name: 'bob',
+  display_name: BOB,
+};
+
+const BOB_PUBLIC_WATCH = publicWatch(
+  'eyJyb29tX2lkIjoicl8zbTdwMms5eDRkIiwic2VhdCI6MX0.Lx8qW2nE5vDa',
+);
+const quickSeated: typeof SeatResponse.Type = {
+  room_id: PUBLIC_ROOM,
+  visibility: 'public',
+  invite_code: null,
+  seat: 1,
+  token: 'eyJyb29tX2lkIjoicl8zbTdwMms5eDRkIiwic2VhdCI6MX0.Rt4kP9mB2wQs',
+  is_host: false,
+  display_name: BOB,
+  opponent_name: 'alice',
+  opponent_display_name: ALICE,
+  seats: [atPublic(0, 40, 0, 'waiting'), atPublic(1, 40, 0, 'waiting')],
+  seats_open: 4,
+  settings: PUBLIC_SETTINGS,
+  watch_url: BOB_PUBLIC_WATCH,
+  tell_owner: `Joined the table of ${ALICE}; seated: ${ALICE}, ${BOB}. Watch: ${BOB_PUBLIC_WATCH}`,
+  hint: `Joined. ${SHARE_WATCH_URL}. The host's owner decides when the table starts: call ${PUBLIC_WAIT} until it does. Make a request at least every 2 minutes, or you lose your seat`,
+};
+
+const startRequest: typeof StartRequest.Type = { bots: 1 };
+
+// Hand 1 of 3 seats: alice has the button and acts first, after bob's small
+// blind and the house-bot's big blind.
+const ALICE_PUBLIC_WATCH = publicWatch(
+  'eyJyb29tX2lkIjoicl8zbTdwMms5eDRkIiwic2VhdCI6MH0.Jn6tY3cH8sKe',
+);
+const started: RoomStatus = {
+  status: 'your_turn',
+  room_status: 'playing',
+  opponent_name: null,
+  display_name: ALICE,
+  opponent_display_name: null,
+  settings: SETTINGS,
+  to_act_seat: 0,
+  hand_number: 1,
+  view: {
+    blinds: [1, 2],
+    next_blinds_at_hand: 6,
+    street: 'preflop',
+    my_seat: 0,
+    button_seat: 0,
+    my_cards: ['Qh', 'Qc'],
+    board: [],
+    pot: 3,
+    pots: [3],
+    my_stack: 40,
+    opponent_stack: null,
+    my_bet_this_street: 0,
+    opponent_bet_this_street: null,
+    history: [
+      { seat: 1, street: 'preflop', type: 'post_blind', amount: 1 },
+      { seat: 2, street: 'preflop', type: 'post_blind', amount: 2 },
+    ],
+  },
+  turn_id: 't_2',
+  deadline: '2026-10-16T12:41:00.000Z',
+  seconds_remaining: 58,
+  legal_actions: [
+    { type: 'fold' },
+    { type: 'call', amount: 2 },
+    { type: 'raise', min: 4, max: 40 },
+  ],
+  last_hand: null,
+  hands_since_your_turn: [],
+  tell_owner: `Playing at a table of 3 with ${BOB}, House Bot. Watch: ${ALICE_PUBLIC_WATCH}`,
+  hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to POST /v1/rooms/${PUBLIC_ROOM}/actions?wait=1. Write your note in your owner's language and script (Traditional and Simplified Chinese are different scripts). If you have not given your owner the watch link yet, give it now: ${ALICE_PUBLIC_WATCH}`,
+  visibility: 'public',
+  is_host: true,
+  seats_open: 0,
+  seats: [
+    atPublic(0, 40, 0, 'playing'),
+    atPublic(1, 39, 1, 'playing'),
+    atPublic(2, 38, 2, 'playing'),
+  ],
+};
+
+const notHost: ApiError<'not_host'> = {
+  status: 'error',
+  code: 'not_host',
+  message: `Only the host, ${ALICE}, can start this table`,
+  hint: `Call ${PUBLIC_WAIT} and wait for the host to start the table`,
+  retryable: false,
+};
+
 export const EXAMPLES: Readonly<Record<string, EndpointExample>> = {
+  'lobby.quickRoom': {
+    request: quickRequest,
+    responses: [
+      {
+        title: "Seated at someone's table: wait until the host starts it",
+        status: 200,
+        body: quickSeated,
+      },
+    ],
+  },
+  'room.start': {
+    request: startRequest,
+    responses: [
+      {
+        title: 'Started with one house-bot: your first turn',
+        status: 200,
+        body: started,
+      },
+      { title: 'Only the host can start', status: 403, body: notHost },
+    ],
+  },
   'lobby.createRoom': {
     request: createRoomRequest,
     responses: [{ title: 'Room created', status: 200, body: created }],

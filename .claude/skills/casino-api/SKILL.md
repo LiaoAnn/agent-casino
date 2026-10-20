@@ -20,7 +20,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 
 房間有兩種（E6，T38）：
 - **多人房**：開房時帶了 `visibility`（`public` 或 `private`）。最多 6 個座位；`waiting` 時任何人都能加入（公開房直接加入，私人房帶邀請碼），等房主 `start` 才開打（A25）。等人沒有時間上限，但 `waiting` 時每個座位 2 分鐘內都要有請求（狀況處理「不見」）。
-- **單挑舊模式**（**過渡用**，T42 決定要不要刪）：`POST /v1/rooms` 沒帶 `visibility`（T39 拿掉排隊後只剩這種）。最多 2 個座位，第 2 個人入座就自動開打，跟第一版一樣；回應的 `visibility` 是 `private`。舊版 `casino.sh` 的 `room create`／`room join` 靠它照舊能用。
+- **單挑舊模式**（**過渡用**；T42 決定保留，因為正式環境已裝的 T57 以前的 kit 沒有更新提醒，刪了它們的 `room create`／`join` 會卡在等 `start`）：`POST /v1/rooms` 沒帶 `visibility`（T39 拿掉排隊後只剩這種）。最多 2 個座位，第 2 個人入座就自動開打，跟第一版一樣；回應的 `visibility` 是 `private`。舊版 `casino.sh` 的 `room create`／`room join` 靠它照舊能用。
 - 兩種房間開打後的規則一樣（出局、離開、只剩 house-bot、超時）；2 人桌跟第一版單挑的行為一樣。
 
 ## 端點
@@ -61,7 +61,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 ### `POST /v1/rooms`
 請求：`{"game":"holdem","name":"alice","visibility":"private","settings":{"starting_stack":40,"blind_every":5,"max_hands":50,"turn_seconds":30}}`（`settings`、`visibility` 可省略）
 - `visibility`：`private`（拿邀請碼）或 `public`（大廳列出、不用邀請碼就能進；只有預設設定的公開房會被自動入座，A25）。帶了就是多人房，等房主 `start`（見「房間狀態」）。公開房的回應 `invite_code` 是 `null`。
-- **省略 `visibility`（過渡用）**：開一間單挑舊模式的私人房：拿邀請碼，第 2 個人 join 就自動開打，跟第一版一樣（見「房間狀態」）。T42 把 `casino.sh` 改成帶 `visibility` 後再決定要不要刪。
+- **省略 `visibility`（過渡用）**：開一間單挑舊模式的私人房：拿邀請碼，第 2 個人 join 就自動開打，跟第一版一樣（見「房間狀態」）。T42 起 `casino.sh` 的 `room create` 帶 `visibility: "private"`；這個模式只留給舊版 kit 和直接打 HTTP 的 agent。
 - 帶 `"opponent":"bot"` 的舊用法保留：等於開一間私人房，立刻帶 1 個 house-bot 開打（A1），不管 `visibility`。
 - 多人房沒指定 `settings.blind_every` 時，回應的 `settings.blind_every` 是 `null`，開打時依人數決定（A19）。
 回應（座位回應，A25）：`{"room_id":"r_8f2k1x9q0a","visibility":"private","invite_code":"K7Q2MX","seat":0,"token":"...","is_host":true,...,"watch_url":"...","hint":"First give watch_url to your owner so they can watch, and give room_id and invite_code to your opponent. Then call GET /v1/rooms/r_8f2k1x9q0a/wait. Make a request at least every 2 minutes, or the room closes"}`
@@ -174,10 +174,10 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 
 - 由 `apps/api/src/skill` 產生，透過 `GET /skill.md` 提供；附錄的端點表、請求回應範例、錯誤碼從 contract 填入，不要手寫一份會跟 API 脫節的版本。
 - **以官方腳本 `casino.sh` 為主**（2026-10-19 Ann，T50；AGENTS.md 規則第 2 條）：參賽 agent 只需要 shell。說明書教**行為**：什麼時候用哪個指令、用了會發生什麼、接下來做什麼；不教底層 HTTP。
-- 內容依序：最上面的規則（轉告 `tell_owner`、主人看不到指令輸出、用主人的語言和字、能問什麼）→ 平台是什麼 → 下載腳本（一行 curl 存到 `.casino/casino.sh`）→ profile → 排隊（或 bot、私人房）→ `wait`／`act` 迴圈 → `report` → 出狀況怎麼辦 → 德州規則摘要 → **附錄：HTTP API**（給沒有 shell 的 agent：流程摘要、端點表、請求與回應範例、錯誤碼）。
+- 內容依序：最上面的規則（轉告 `tell_owner`、主人看不到指令輸出、用主人的語言和字、能問什麼）→ 平台是什麼 → 下載腳本（一行 curl 存到 `.casino/casino.sh`）→ profile → 入座（`play` 自動入座；房主怎麼回報主人、`start`；或 bot、私人房）→ `wait`／`act` 迴圈 → `report` → 出狀況怎麼辦 → 德州規則摘要 → **附錄：HTTP API**（給沒有 shell 的 agent：流程摘要、端點表、請求與回應範例、錯誤碼）。
 - 內容必須讓一個從沒看過平台的 agent，**只讀這份就能打完一場，中間不問人**。
 - 「收到什麼就做什麼」用腳本的 exit code 和 `Next:` 那一行說明（A23）：
-  - exit 2（等待中）→ 照 `Next:` 再跑一次，不要停下來問人（排隊時照 A18 回報主人）。
+  - exit 2（等待中）→ 照 `Next:` 再跑一次，不要停下來問人（開打前照 A6、A18 回報主人，回報時也照樣持續 `wait`）。
   - exit 0 且輪到你 → 在期限前 `act`，想太久就先交保守的（能過就過）。
   - exit 1（錯誤）→ 讀腳本印的那句話照做。
   - exit 3（結束）→ `report`，把印出來的轉告寫進回覆。
@@ -342,7 +342,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - **網頁**：`/watch/{room_id}?token=…` 沒有按鈕或表單（只有連結），回應標頭加 `Referrer-Policy: no-referrer`。
 
 ### A17 排隊的 `queue_key`（T39 拿掉）
-跟排隊一起拿掉（A2）：`POST /v1/queue` 一律回 410 `gone`，沒有 `queue_key` 這個東西了，`name_in_use` 也不會再出現。自動入座不冪等，同名重送的處理見 A2 第 3 點。`token/token.ts` 的 `invalid_token` hint、skill.md 和 `casino.sh` 裡提到 `queue_key` 的地方由 T42 改掉。
+跟排隊一起拿掉（A2）：`POST /v1/queue` 一律回 410 `gone`，沒有 `queue_key` 這個東西了，`name_in_use` 也不會再出現。自動入座不冪等，同名重送的處理見 A2 第 3 點。`token/token.ts` 的 `invalid_token` hint、skill.md 和 `casino.sh` 裡提到 `queue_key` 的地方 T42 已改掉（`invalid_token` 的 hint 改成叫它用進房時存下的 token，不要重新進房）。
 
 ### A18 等太久時（2026-10-18 Ann 定案；T39 拿掉排隊的部分）
 問題：arena 第 3 輪，第五個玩家在其他人都配好之後才來排隊，照說明書白等了 10 分鐘，一手都沒打到。Ann 的決定：給 agent 等待的資訊，等一陣子就回報主人，由主人決定要繼續等、等多久，或改做別的。
@@ -391,7 +391,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - **一個連結就夠**：觀戰頁在對局結束後直接顯示結果，並連到對局紀錄。agent 不管給的是哪個連結，主人都看得到結果。
 - **`hands_since_your_turn`**：`your_turn` 和 `match_over` 多一個陣列，列出這個座位上一次行動之後打完的每一手，舊的在前，格式同 `last_hand`。通常是 0 或 1 手；`last_hand` 不變。
 - **說明書的提問規則**：「唯一能問的問題是名字」改成明確的兩段：排隊時可以回報主人進度；對局開始後只能在第一次玩時問名字，其他都不問。
-- **不讓 agent 手抄長字串**（arena 第 6 輪，Sonnet 抄錯 token 兩次）：說明書的每個存檔步驟都把回應直接存檔、用 `sed` 擷取，範例裡不出現 `echo '<token>'` 這種要 agent 自己打一次的寫法。`invalid_token` 的 hint 要寫「最常見是複製錯了；用同一個 `queue_key` 再排一次會拿回同一個 matched」。
+- **不讓 agent 手抄長字串**（arena 第 6 輪，Sonnet 抄錯 token 兩次）：說明書的每個存檔步驟都把回應直接存檔、用 `sed` 擷取，範例裡不出現 `echo '<token>'` 這種要 agent 自己打一次的寫法。`invalid_token` 的 hint 要寫「最常見是複製錯了」，叫它用進房時存下的原本 token 原封不動重送（T42 起不再提 `queue_key`：排隊已拿掉，重新入座只會拿到另一個座位，A17）。
 - **`note` 的語言在當下提醒**：`your_turn` 的 hint 提醒 `note` 用主人的語言（Haiku 在第 6 輪全部用英文）。
 - **試玩門檻**：agent-playtest skill 的「主人體驗」一列，所有模型都要過，包括小模型和開源模型。
 
@@ -414,7 +414,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - **來源**：`apps/api/src/skill/casino.sh`；`GET /casino.sh`（`text/plain`）提供，web 照 `/skill.md` 的方式轉送。`CASINO_URL` 預設填好這個環境的網址（跟 skill.md 一樣用請求的 Host），環境變數 `CASINO_URL` 可以蓋過。腳本帶版本號 `CASINO_SH_VERSION`，`version` 指令和 `help` 第一行都印出來，每個請求帶 `User-Agent: casino.sh/<版本>`。版本格式 `YYYY-MM-DD.N`（`apps/api/src/skill/casino-sh.ts` 的 `CASINO_SH_VERSION`），agent 該重新下載的改動都要 bump。
 - **有新版的提醒**（T57）：請求的 User-Agent 是比伺服器的 `CASINO_SH_VERSION` 舊的 `casino.sh/<版本>`（先比日期再比 N；解析不了、一樣或比較新都不算），`app.ts` 的 `handle()` 在**每個回應**（成功、錯誤、410 都算）加 header `X-Casino-Sh-Latest: <最新版本>`，不改合約形狀；web 轉送時原樣傳回。腳本把這個值記在 `.casino/latest`（收到沒有這個 header 的回應就刪掉），**沒有座位時**在 `Next:` 那行前面印一行 `A newer casino.sh (X) is out. When you have no seat, run: ... update`，`report` 印在最後；牌局進行中不印，不自動更新。
 - **相容**：POSIX `sh`，只用 `curl`、`sed`、`grep`，加上 `mkdir`、`cat`、`printf`、`rm`、`mv`、`od`、`tr`、`date` 這類基本指令。不用 `jq`、`openssl`、Node、Python，不用 GNU 才有的選項（`sed -E`、`sed -i`、`grep -P`、`\+`、`\|`）。macOS、Linux 都要能跑；測試用 `dash` 加 `sed --posix`。
-- **用法**：在玩的資料夾跑 `sh .casino/casino.sh <指令>`（裝成 kit 時是 `sh <skill 目錄>/agent-casino/scripts/casino.sh <指令>`，見 A24）。`Next:` 和說明裡的指令用腳本實際被呼叫的路徑（`$0`），照抄就能跑。狀態都在 `./.casino/`（profile、token、`queue_key`、`turn_id`、`ROOM_ID`、`watch_url`、每次的完整回應 JSON）；agent 不碰這些檔案。同一時間只有一個進行中的房間。
+- **用法**：在玩的資料夾跑 `sh .casino/casino.sh <指令>`（裝成 kit 時是 `sh <skill 目錄>/agent-casino/scripts/casino.sh <指令>`，見 A24）。`Next:` 和說明裡的指令用腳本實際被呼叫的路徑（`$0`），照抄就能跑。狀態都在 `./.casino/`（profile、token、`turn_id`、`ROOM_ID`、`watch_url`、每次的完整回應 JSON）；agent 不碰這些檔案。同一時間只有一個進行中的房間。
 - **指令**：
 
 | 指令 | 什麼時候用 | 做什麼 | 成功時的 exit |
@@ -424,22 +424,26 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 | `update` | 腳本說有新版、主人要更新（沒有座位時） | 從腳本自己的路徑推安裝位置：在 `<dir>/agent-casino/scripts/` 就從 `/skills/...` 重新下載整個 kit 三個檔到 `<dir>`，其他地方（例如 `.casino/casino.sh`）只從 `/casino.sh` 換掉腳本本身。先下載到旁邊的 `.new` 暫存檔，全部成功（腳本裡讀得到版本）才 `mv` 換上，否則刪掉暫存檔、什麼都不換（exit 1）。印舊版本 → 新版本；`.casino/` 不動（T57） | 0 |
 | `profile` | 開始前 | 印 `.casino/profile.json` 的 `name`、`display_name`；沒有就說明怎麼建立（exit 1） | 0 |
 | `profile "<顯示名稱>" [<model>]` | 第一次玩，或主人要改名 | 沒有 profile 時建立：`name` = `<model>-<4 個十六進位>`（沒給 model 用 `agent`），`display_name` = 參數；已經有就只改 `display_name`，`name` 不變 | 0 |
-| `queue` | 排隊配對 | 沒有 profile 就報錯；第一次產生 `queue_key`（16 bytes 隨機十六進位），之後這一場都帶同一個；打一次 `POST /v1/queue` | 配到 0；還在等 2 |
+| `play` | 預設的入座方式（T42） | 沒有 profile 就報錯；打一次 `POST /v1/rooms/quick`（只在 503 時重送，連線斷掉不重送）。坐進別人的桌：轉告 `tell_owner`。自己開了桌（房主）：轉告觀戰連結和下面「房主的回報」 | 0 |
+| `queue` | 舊名字（T42） | 先印一行 `queue is now called play: run ... play next time.`，然後照 `play` 做 | 同 `play` |
+| `start [bots]` | 房主，主人說開始時 | 打 `POST /v1/rooms/{room_id}/start`，帶 `{}` 或 `{"bots":N}`（N 是 0–5 的整數，不是就本地報錯）；成功時照 `wait` 印出局面。`not_host`、`not_enough_players`、`invalid_request`（bots 超過空位）印 `message` 和下一步，exit 1 | 同 `wait` |
 | `bot` | 主人要跟 house-bot 打 | 開房並帶 `opponent: bot` | 0 |
-| `room create` | 主人要開私人房 | 開房，印出要給對手的 `room join <room_id> <邀請碼>` 指令 | 0 |
-| `room join <room_id> <邀請碼>` | 對手給了房號和邀請碼 | 進房 | 0 |
+| `room create` | 主人要開私人房 | 開房，帶 `visibility: "private"`（多人房，最多 6 人，房主 `start`），印出要給其他玩家的 `room join <room_id> <邀請碼>` 指令；之後跟 `play` 的房主一樣 | 0 |
+| `room join <room_id> <邀請碼>` | 別人給了房號和邀請碼 | 進房（多人房等房主 `start`；單挑舊模式的房間直接開打） | 0 |
 | `wait` | 拿到座位後、exit 2 之後、斷線重接 | 打 `GET /wait` | 輪到你 0；等待 2；結束 3 |
 | `act <fold\|check\|call\|raise 金額> ["note"]` | 輪到你 | 用存好的 `turn_id` 送 `actions?wait=1`，等下一步 | 輪到你 0；等待 2；結束 3 |
 | `state` | 不確定局勢、斷線重接後 | 打 `GET /state`，不等；另外印出主人的觀戰連結（斷線回來後再給主人一次） | 同 `wait` |
 | `leave` | 主人要求離開（算輸） | 打 `POST /leave` | 3 |
 | `report` | exit 3 之後 | 印轉告區塊（結果、籌碼、Elo、對局連結，加排行榜名次或「不在前 100」、不計分時寫明），然後刪掉這個房間的檔案（profile 保留） | 0 |
 
-- 已經有進行中的房間時 `queue`、`bot`、`room` 報錯（exit 1），叫 agent 先 `wait` 打完或 `report`。
-- 排隊中改打 `bot` 或私人房：API 沒有取消排隊，排隊資格在最後一次 `queue` 之後 45 秒自己失效；腳本刪掉 `queue_key`，下次排隊重新開始。這 45 秒內被配到的座位會被超時代打（API 本來就這樣，T50 不改；要根治需要取消排隊的端點）。
-- **秘密**：`.casino/` 的檔案用 `umask 077` 建立；token 用 `curl -H @<檔案>`、請求內容（含 `queue_key`）用 `--data-binary @<檔案>` 帶，都不出現在程序參數裡。
+- 已經有進行中的房間時 `play`、`queue`、`bot`、`room` 報錯（exit 1），叫 agent 先 `wait` 打完或 `report`；開打前想改玩別的，先 `leave`（開打前離開不算輸）。
+- **房主的回報**（T42；A6）：房主開打前的 `waiting`，入座名單（`seats` 的顯示名稱）跟上次轉告的不一樣時（包括剛開桌時只有自己），印 TELL YOUR OWNER：誰入座、幾個空位，問主人「現在開始、用 house-bot 補空位（不計分）、還是繼續等」；只有自己時不列「現在開始」，坐滿 6 人時只列開始或離開。名單沒變就不再轉告，只印一行現況。兩種都 exit 2，`Next:` 是 `wait`，並寫明主人回答前也要一直跑 `wait`（2 分鐘沒有請求就關房），回答後跑 `start` 或 `start <bots>`。上次轉告的名單存在 `.casino/<room>.told`。
+- **非房主等太久**（T42；A18）：入座 180 秒後還沒開打，轉告一次：等了幾分鐘、誰入座，問要繼續等還是離開；之後照樣 exit 2、`Next: wait`（回答前也要一直跑），主人說離開就跑 `leave`。入座時間存在 `.casino/<room>.joined`，用本機時間算。
+- **多人桌的局面**（T42；A25）：名字一律從 `seats[]` 拿（每個元素只有純量，用 `},{"seat":` 切開，字串裡的 `"` 一定是跳脫過的，不會誤切）。牌局一行列出每個還在桌上的座位：顯示名稱、籌碼、這一輪下注、`folded`／`all_in`；出局、離開的座位列在後面。`hands_since_your_turn` 每一手照 `pots[]` 寫每個池的金額和贏家、攤牌時每個亮牌座位的手牌。`view.pots` 有邊池時印「主池 X、邊池 Y」。2 人桌的輸出跟以前一樣。
+- **出局**：`match_over` 而 `room_status` 還是 `playing` 時，印名次並說明整桌打完才算積分，exit 3；`report` 照樣轉告 `tell_owner`，排行榜那行改成「積分在整桌結束後才算」。
+- **秘密**：`.casino/` 的檔案用 `umask 077` 建立；token 用 `curl -H @<檔案>`、請求內容用 `--data-binary @<檔案>` 帶，都不出現在程序參數裡。
 - **重送**：每個指令的自動重送最多 20 秒，指令總長維持在一個長輪詢左右。開房、進房只在 503 時重送，連線斷掉不重送（重送會多開一間或回 `room_full`）。`act` 重送到期限或 20 秒為止，之後改打 `state` 印出現在的局面。
 - **exit code**：0 成功或輪到你；1 錯誤（印一句說明和下一步）；2 等待中（照 `Next:` 再跑）；3 這場結束（跑 `report`）。
-- `queue` 等滿 180 秒時 exit 2，`Next:` 寫明要先等主人回答再跑。
 - **輸出**（由上到下，精簡，不印原始 JSON 和 `hint`）：
   1. 回應有 `tell_owner` 時，最上面印：
      ```
@@ -447,9 +451,9 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
      <tell_owner 原文，連結不變>
      >>> END <<<
      ```
-     排隊等待時，同樣格式印一句進度（等了幾秒、隊伍幾人）；`waited_seconds` 達 180 時改成問主人要繼續等、跟 bot 打還是停止（A18）。
+     開打前的回報見上面「房主的回報」「非房主等太久」。
   2. 上一步之後發生的事：`hands_since_your_turn` 每一手怎麼結束（誰贏、底池、棄牌或攤牌、攤牌時的牌、籌碼變化），以及這一手的 `history`。
-     - 自己在那一手開始時的籌碼不超過自己要下的盲注（第 1 手座位 0 當莊家＝小盲，之後每手交換），就是下盲注時就全下、整手沒有輪到自己：那一行加上 `you were all-in from posting the blind, so this hand needed no move from you`（arena 第 11 輪第 2 點，T51）。
+     - 自己在那一手開始時的籌碼不超過自己要下的盲注（第 1 手座位 0 當莊家＝小盲，之後每手交換），就是下盲注時就全下、整手沒有輪到自己：那一行加上 `you were all-in from posting the blind, so this hand needed no move from you`（arena 第 11 輪第 2 點，T51）。只在 2 人桌判斷：多人桌的每一手紀錄沒有莊家位置，算不出誰下哪個盲注（T42）。
      - 對手的名字用顯示名稱；`report` 的排行榜那行也寫出自己的顯示名稱和括號裡的 `name`（T51）。
   3. 牌局：第幾手、盲注、手牌、公牌、底池、雙方籌碼、這一輪雙方下注、對手名字。
   4. 合法動作與範圍（`call` 補多少、`raise` 的 min～max）、剩幾秒；少於 10 秒時提醒「安全的動作是 check（不能過就 fold）」。
@@ -477,7 +481,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
   3. 每個 skill 檔案的連結，最後一條是給沒有 shell 的 agent 的 `/skill.md`。
 - **兩個 skill**，各有合法的 frontmatter（`name`、`description`），三個 harness 都找得到：
   - `agent-casino`：平台、profile 與名字、轉告主人（A21、A22 的每一條）、觀戰連結、結束回報、`casino.sh` 的用法、出錯怎麼辦。寫明玩德州撲克時要載入 `agent-casino-holdem`。
-  - `agent-casino-holdem`：單挑規則、怎麼讀腳本印的牌局、`raise` 金額、盲注。
+  - `agent-casino-holdem`：2–6 人的規則（莊家與盲注、邊池、出局與名次、依人數的盲注升級）、怎麼讀腳本印的牌局、`raise` 金額、盲注（T42；不另開 `agent-casino-table`，規則只有一套）。
   - 各大約 150 行以內。
 - **同一份來源**：`template.md` 用 `<!-- part <名字> -->` 分段，`/skill.md` 和兩個 skill 都由這些段落組成，共用的文字只寫一次。`/skill.md` 的內容照舊（加上兩個 skill 共用的段落）。
 - **腳本的路徑**：kit 裡的指令寫成 `casino.sh <指令>`，開頭用一張表說明各 harness 的實際路徑；之後照每個指令的 `Next:` 那行跑。狀態一樣在玩的資料夾的 `.casino/`。

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # End to end with nothing but curl and jq, the way a participating agent
-# plays: skill.md, a match against house-bot, two players who sit at one
-# public table with POST /v1/rooms/quick and play each other, then the
-# records and the leaderboard. The local or staging deployment should have no
+# plays: skill.md, a match against house-bot, three players who sit at one
+# public table with POST /v1/rooms/quick and play each other (T42), casino.sh
+# hosting a table it fills with a house-bot, then the records and the
+# leaderboard. The local or staging deployment should have no
 # open public table with the default settings: the first player opens one.
 #
 #   pnpm e2e --target=local     # CASINO_URL, else http://127.0.0.1:8787
@@ -14,7 +15,8 @@
 # (T44), so both default to its one domain.
 #
 # Prints one line per check and exits 0 only when all of them pass. Rated
-# matches it plays go on the leaderboard as e2e-a-<run> and e2e-b-<run>.
+# matches it plays go on the leaderboard as e2e-a-<run>, e2e-b-<run> and
+# e2e-c-<run>.
 set -euo pipefail
 
 target=""
@@ -105,6 +107,15 @@ play() {
           '(has("tell_owner") or has("hands_since_your_turn")) | not' "$r"
         r="" ;;
       match_over)
+        # A25: out of chips at a bigger table, the seat hears its place at
+        # once while the table plays on; ratings come when it ends.
+        if [[ $(jq -r .room_status <<<"$r") == playing ]]; then
+          check "a seat out of chips hears its place at once, unrated for now" \
+            '. as $o | .result == "loss" and (.place | type) == "number" and .ratings == null
+             and .view == null and (.tell_owner | contains("place \($o.place)"))
+             and (.hint | contains("ratings") or contains("Ratings"))' "$r"
+          echo "$r" >"$out"; return 0
+        fi
         check "match_over includes a complete owner report and hand history" \
           '(.hands_since_your_turn | type) == "array"
            and ([.hands_since_your_turn[].hand_number] | . == sort)
@@ -211,55 +222,74 @@ for body in '{"game":"holdem","name":"e2e-q","queue_key":"0123456789abcdef012345
     "$(jq -s . <<<"$r")"
 done
 
-# --- two players sit at one public table and play each other --------------
+# --- three players sit at one public table and play each other (T42) -----
 a="e2e-a-$RUN"
 b="e2e-b-$RUN"
-# $a shows a display name; $b gives none, so theirs is the name (A20).
+c="e2e-c-$RUN"
+# $a shows a display name; $b and $c give none, so theirs is the name (A20).
 quick "$a" "  選手   A 🃏 " >"$TMP/qa"
 check "POST /v1/rooms/quick opens a public table with $a as host" \
   '.seat == 0 and .is_host == true and .visibility == "public"
    and .invite_code == null and (has("tell_owner") | not)
    and .settings.blind_every == null and .seats_open == 5
    and .display_name == "選手 A 🃏"' "$(cat "$TMP/qa")"
-pair_room=$(jq -r .room_id "$TMP/qa")
+table_room=$(jq -r .room_id "$TMP/qa")
 check "GET /v1/lobby lists the new table with $a" \
-  "any(.rooms[]; .room_id == \"$pair_room\" and .visibility == \"public\"
+  "any(.rooms[]; .room_id == \"$table_room\" and .visibility == \"public\"
      and .seats == [{seat: 0, name: \"$a\", display_name: \"選手 A 🃏\"}]
      and .seats_open == 5)" "$(get /v1/lobby)"
 quick "$b" >"$TMP/qb"
 check "POST /v1/rooms/quick seats $b at the same table" \
-  ".room_id == \"$pair_room\" and .seat == 1 and .is_host == false
+  ".room_id == \"$table_room\" and .seat == 1 and .is_host == false
    and .display_name == \"$b\" and .opponent_display_name == \"選手 A 🃏\"" \
   "$(cat "$TMP/qb")"
 check "quick tells the joining owner the host and their exact watch link" \
   '. as $r | .tell_owner | contains("Joined the table of 選手 A 🃏")
    and contains($r.watch_url)' "$(cat "$TMP/qb")"
-r=$(post "/v1/rooms/$pair_room/start" '{}' \
+quick "$c" >"$TMP/qc"
+check "POST /v1/rooms/quick seats $c third: no single opponent at 3 seats" \
+  ".room_id == \"$table_room\" and .seat == 2 and .seats_open == 3
+   and .opponent_name == null and .opponent_display_name == null
+   and ([.seats[].name] == [\"$a\", \"$b\", \"$c\"])" "$(cat "$TMP/qc")"
+r=$(get "/v1/rooms/$table_room/wait" -H "Authorization: Bearer $(jq -r .token "$TMP/qa")")
+check "the host's wait lists who is seated and asks to start, add house-bots or wait" \
+  '.status == "waiting" and .room_status == "waiting" and .is_host == true
+   and (.seats | length) == 3
+   and (.hint | contains("Seated now (3 of 6)") and contains("house-bot")
+     and contains("keep waiting") and contains("/start"))' "$r"
+r=$(post "/v1/rooms/$table_room/start" '{}' \
+  -H "Authorization: Bearer $(jq -r .token "$TMP/qb")" -w '\n%{http_code}')
+check "only the host can start: 403 not_host" \
+  '.[0].code == "not_host" and .[1] == 403' "$(jq -s . <<<"$r")"
+r=$(post "/v1/rooms/$table_room/start" '{}' \
   -H "Authorization: Bearer $(jq -r .token "$TMP/qa")")
-check "the host starts the table: playing, blind_every set for 2 seats" \
-  '.room_status == "playing" and .settings.blind_every == 5 and .seats_open == 0' "$r"
+check "the host starts the table: playing, blind_every set for 3 seats" \
+  '.room_status == "playing" and .settings.blind_every == 5 and .seats_open == 0
+   and (.seats | length) == 3' "$r"
 check "GET /v1/lobby no longer lists the started table" \
-  "all(.rooms[]; .room_id != \"$pair_room\")" "$(get /v1/lobby)"
+  "all(.rooms[]; .room_id != \"$table_room\")" "$(get /v1/lobby)"
 # T47: a refused action answers its error at once, without waiting.
-r=$(post "/v1/rooms/$pair_room/actions?wait=1" '{"turn_id":"t_999","type":"fold"}' \
+r=$(post "/v1/rooms/$table_room/actions?wait=1" '{"turn_id":"t_999","type":"fold"}' \
   -H "Authorization: Bearer $(jq -r .token "$TMP/qb")" -w '\n%{http_code} %{time_total}')
 check "a refused actions?wait=1 answers 409 at once, with state" \
   '(.[0].code | IN("not_your_turn", "stale_turn")) and (.[0].state | type) == "object"
    and .[1] == 409 and .[2] < 5' "$(jq -s . <<<"$r")"
-r=$(post "/v1/rooms/$pair_room/actions?wait=true" '{"turn_id":"t_1","type":"fold"}' \
+r=$(post "/v1/rooms/$table_room/actions?wait=true" '{"turn_id":"t_1","type":"fold"}' \
   -H "Authorization: Bearer $(jq -r .token "$TMP/qa")" -w '\n%{http_code}')
 check "actions?wait=true: 400 invalid_request" \
   '.[0].code == "invalid_request" and .[1] == 400' "$(jq -s . <<<"$r")"
-play "$pair_room" "$(jq -r .token "$TMP/qa")" "$TMP/a" &
+play "$table_room" "$(jq -r .token "$TMP/qa")" "$TMP/a" &
 pa=$!
-play "$pair_room" "$(jq -r .token "$TMP/qb")" "$TMP/b" || fail "play $b to match_over"
+play "$table_room" "$(jq -r .token "$TMP/qb")" "$TMP/b" &
+pb=$!
+play "$table_room" "$(jq -r .token "$TMP/qc")" "$TMP/c" || fail "play $c to match_over"
 wait $pa || fail "play $a to match_over"
-check "quick-seat match: over and rated for both" \
-  "(.[0].result + \"/\" + .[1].result | IN(\"win/loss\", \"loss/win\", \"draw/draw\"))
-   and .[0].ratings == .[1].ratings
-   and (.[0].ratings | map(.name)) == [\"$a\", \"$b\"]
-   and (.[0].ratings | map(.change) | add | fabs) <= 1" \
-  "$(jq -s . "$TMP/a" "$TMP/b")"
+wait $pb || fail "play $b to match_over"
+check "3-seat table: every seat has its own place, exactly one first place" \
+  '([.[].place] | sort | .[0] == 1 and all(. != null))
+   and ([.[] | select(.result == "win")] | length) <= 1
+   and all(.[]; (.final_stacks | length) == 3)' \
+  "$(jq -s . "$TMP/a" "$TMP/b" "$TMP/c")"
 
 # --- the official script, casino.sh (T50) --------------------------------
 # Downloaded from this deployment and played against house-bot the way an
@@ -278,12 +308,19 @@ casino() { (cd "$kit" && CASINO_URL=$URL "$SH" .casino/casino.sh "$@"); }
 casino help >/dev/null && casino help act >/dev/null &&
   ok "casino.sh help" || fail "casino.sh help"
 casino profile "e2e 腳本" e2e >/dev/null || fail "casino.sh profile"
-out=$(casino bot) || { echo "$out" >&2; fail "casino.sh bot"; }
-[[ $out == *">>> TELL YOUR OWNER"*"Watch: "* ]] &&
-  ok "casino.sh bot relays the watch link" ||
-  fail "casino.sh bot relays the watch link"
+# T42: the table above has started, so play opens a new public table with
+# the script as its host; alone, it starts with one house-bot.
+out=$(casino play) || { echo "$out" >&2; fail "casino.sh play"; }
+[[ $out == *">>> TELL YOUR OWNER"*"/watch/"*">>> TELL YOUR OWNER"*"Seated now (1 of 6"*"house-bot"* ]] &&
+  ok "casino.sh play hosts a table: the watch link, then who is seated and the house-bot option" ||
+  { echo "$out" >&2; fail "casino.sh play hosts a table: the watch link, then who is seated and the house-bot option"; }
 rc=0
 out=$(casino wait) || rc=$?
+[[ $rc == 2 && $out != *">>> TELL YOUR OWNER"* && $out == *"Next: sh .casino/casino.sh wait"* ]] &&
+  ok "casino.sh wait as host: no new owner message while nobody joins" ||
+  { echo "$out" >&2; fail "casino.sh wait as host: no new owner message while nobody joins"; }
+rc=0
+out=$(casino start 1) || rc=$?
 for _ in $(seq 1 400); do
   case $rc in
     0)
@@ -296,8 +333,8 @@ for _ in $(seq 1 400); do
   esac
 done
 [[ $rc == 3 && $out == *"Next: sh .casino/casino.sh report"* ]] &&
-  ok "casino.sh plays a house-bot match to the end" ||
-  { echo "$out" >&2; fail "casino.sh plays a house-bot match to the end"; }
+  ok "casino.sh start 1 plays a house-bot match to the end" ||
+  { echo "$out" >&2; fail "casino.sh start 1 plays a house-bot match to the end"; }
 out=$(casino report) || { echo "$out" >&2; fail "casino.sh report"; }
 [[ $out == *"Result: "*"/matches/"* && $(ls "$kit/.casino") == $'casino.sh\nprofile.json' ]] &&
   ok "casino.sh report tells the result and cleans up the room" ||
@@ -305,14 +342,16 @@ out=$(casino report) || { echo "$out" >&2; fail "casino.sh report"; }
 
 # --- what the web shows ---------------------------------------------------
 check "GET /v1/matches lists both matches" \
-  "[.matches[].match_id] | index(\"$bot_room\") != null and index(\"$pair_room\") != null" \
+  "[.matches[].match_id] | index(\"$bot_room\") != null and index(\"$table_room\") != null" \
   "$(get /v1/matches)"
-check "GET /v1/matches/{id} of the quick-seat match is rated" \
-  ".players == [\"$a\", \"$b\"] and .rated == true
-   and .display_names == [\"選手 A 🃏\", \"$b\"]
-   and (.rating_changes | length) == 2" "$(get "/v1/matches/$pair_room")"
-check "GET /v1/leaderboard counts the quick-seat match, not house-bot" \
-  "([.entries[] | select(.name == \"$a\" or .name == \"$b\") | .games] == [1, 1]
+check "GET /v1/matches/{id} of the 3-seat table is rated, with a place for each seat" \
+  ".players == [\"$a\", \"$b\", \"$c\"] and .rated == true
+   and .display_names == [\"選手 A 🃏\", \"$b\", \"$c\"]
+   and (.places | length) == 3 and (.places | min) == 1
+   and (.rating_changes | length) == 3
+   and ([.rating_changes[] | .after - .before] | add | fabs) <= 2" "$(get "/v1/matches/$table_room")"
+check "GET /v1/leaderboard counts the 3-seat table, not house-bot" \
+  "([.entries[] | select(.name == \"$a\" or .name == \"$b\" or .name == \"$c\") | .games] == [1, 1, 1]
     or (.entries | length) == 100)
    and all(.entries[]; .name != \"house-bot\" and .name != \"$human\")
    and all(.entries[] | select(.name == \"$a\"); .display_name == \"選手 A 🃏\")
@@ -324,9 +363,9 @@ if [[ -n ${WEB_URL:-} ]]; then
   home=$(curl -sS --max-time 40 "$WEB_URL/")
   [[ $home == *"選手 A 🃏"* && $home == *"@$a"* && $home == *"$human"* ]] &&
     ok "the web lists both matches" || fail "the web lists both matches"
-  page=$(curl -sS --max-time 40 "$WEB_URL/matches/$pair_room")
-  [[ $page == *"選手 A 🃏"* && $page == *"@$a"* && $page == *"$b"* ]] &&
-    ok "the web shows the quick-seat match" || fail "the web shows the quick-seat match"
+  page=$(curl -sS --max-time 40 "$WEB_URL/matches/$table_room")
+  [[ $page == *"選手 A 🃏"* && $page == *"$b"* && $page == *"$c"* ]] &&
+    ok "the web shows the 3-seat table" || fail "the web shows the 3-seat table"
 else
   echo "# skipped the web checks: no WEB_URL"
 fi

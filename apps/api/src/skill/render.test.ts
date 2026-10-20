@@ -247,10 +247,31 @@ describe('renderSkill: contract-generated HTTP appendix', () => {
       ).toBe(true);
     }
   });
+  it('starts the HTTP flow with quick seating and teaches the host to start', () => {
+    const flow = APPENDIX.split(/^\|/m)[0] ?? '';
+    expect(flow.match(/POST \/v1\/[^`\s]+/)?.[0]).toBe('POST /v1/rooms/quick');
+    expect(flow).toContain('POST /v1/rooms/quick');
+    expect(flow).toContain('POST /v1/rooms/{room_id}/start');
+    expect(flow.indexOf('POST /v1/rooms/quick')).toBeLessThan(
+      flow.indexOf('POST /v1/rooms/{room_id}/start'),
+    );
+    for (const key of ['lobby.quickRoom', 'room.start']) {
+      const example = EXAMPLES[key];
+      expect(example, key).toBeDefined();
+      expect(example?.request, `${key} request`).toBeDefined();
+      expect(
+        example?.responses.some(response => response.status === 200),
+        `${key} success`,
+      ).toBe(true);
+    }
+  });
+
   it('keeps protocol details in the appendix', () => {
     for (const field of [
       'turn_id',
-      'queue_key',
+      'players',
+      'place',
+      'pots',
       '?wait=1',
       'duplicate',
       'hands_since_your_turn',
@@ -273,12 +294,15 @@ describe('renderSkill: contract-generated HTTP appendix', () => {
     expect(responses.some(body => typeof body.deadline === 'string')).toBe(
       true,
     );
-    // Open a room and join: T39 took the queue's `matched` out.
+    // Quick-seat, create and join all return reusable seat credentials.
     const seats = responses.filter(body => typeof body.token === 'string');
-    expect(seats).toHaveLength(2);
+    expect(seats.length).toBeGreaterThanOrEqual(3);
     for (const seat of seats)
       expect(String(seat.hint)).toMatch(
-        /watch_url[\s\S]*owner[\s\S]*GET \/v1\/rooms\/r_8f2k1x9q0a\/wait/i,
+        new RegExp(
+          `watch_url[\\s\\S]*owner[\\s\\S]*GET /v1/rooms/${seat.room_id}/wait`,
+          'i',
+        ),
       );
     const finished = responses.filter(body => body.status === 'match_over');
     expect(finished).toHaveLength(3);
@@ -286,10 +310,12 @@ describe('renderSkill: contract-generated HTTP appendix', () => {
       expect(String(body.hint)).toContain(`${BASE_URL}/matches/r_8f2k1x9q0a`);
   });
 
-  it('retains same-seat queue recovery and credential advice', () => {
+  it('teaches saved-token recovery without acquiring another seat', () => {
     expect(APPENDIX).toMatch(/invalid_token[\s\S]*(?:cop|saved)/i);
-    expect(APPENDIX).toMatch(/same[^\n]*name[^\n]*same[^\n]*queue_key/i);
-    expect(APPENDIX).toMatch(/same[^\n]*matched/i);
+    expect(APPENDIX).toMatch(/(?:saved|original)[^\n]*token/i);
+    expect(APPENDIX).toMatch(/(?:unchanged|exact|as[- ]is)/i);
+    expect(APPENDIX).toMatch(/(?:another|different|new)[^\n]*seat/i);
+    expect(APPENDIX).not.toMatch(/queue_key|POST \/v1\/queue|fresh|new token/i);
     expect(APPENDIX).toMatch(/(?:do not|don't|never)[^\n]*join/i);
   });
 });
@@ -304,6 +330,8 @@ describe('EXAMPLES', () => {
     const keys = Object.keys(EXAMPLES);
     expect(keys).toEqual(
       expect.arrayContaining([
+        'lobby.quickRoom',
+        'room.start',
         'lobby.createRoom',
         'lobby.joinRoom',
         'room.wait',

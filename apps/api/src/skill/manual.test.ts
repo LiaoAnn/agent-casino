@@ -15,6 +15,7 @@ describe.each([undefined, 'https://web.test'])(
         'mkdir -p .casino && curl -fsS https://casino.test/casino.sh -o .casino/casino.sh && sh .casino/casino.sh help',
       );
       expect(blocks.length).toBeGreaterThan(3);
+      expect(blocks.join('\n')).not.toMatch(/casino\.sh queue\b/);
       for (const block of blocks.slice(1)) {
         expect
           .soft(block)
@@ -32,7 +33,7 @@ describe.each([undefined, 'https://web.test'])(
         game.indexOf('## What this is'),
         game.search(/^#{2,3} Step 1[^\n]*download/im),
         game.indexOf('sh .casino/casino.sh profile'),
-        game.indexOf('sh .casino/casino.sh queue'),
+        game.indexOf('sh .casino/casino.sh play'),
         game.indexOf('sh .casino/casino.sh wait'),
         game.indexOf('sh .casino/casino.sh act'),
         game.indexOf('sh .casino/casino.sh report'),
@@ -55,7 +56,8 @@ describe.each([undefined, 'https://web.test'])(
       'help',
       'version',
       'profile',
-      'queue',
+      'play',
+      'start',
       'bot',
       'room create',
       'room join',
@@ -91,6 +93,27 @@ describe.each([undefined, 'https://web.test'])(
       expect(game).toMatch(/40 seconds|40 s\b/i);
     });
 
+    it('explains multiplayer seating, elimination and deadlines', () => {
+      expect(game).toMatch(/(?:2|two)\s*[-–]\s*(?:6|six)/i);
+      expect(game).toMatch(/room create[\s\S]*private/i);
+      expect(game).toMatch(/(?:host[^\n]*start|start[^\n]*host)/i);
+      expect(game).toMatch(
+        /start[^\n]*(?:bots|house-bot)|house-bot[^\n]*start/i,
+      );
+      expect(game).toMatch(/casino\.sh start (?:[1-5]\b|N\b|<bots>|\[bots\])/i);
+      expect(game).toMatch(/30\s*(?:seconds|s\b)/i);
+      expect(game).toMatch(/first[^\n]*(?:60\s*seconds|twice)/i);
+      expect(game).toMatch(
+        /(?:bust|eliminat|lost all|runs out|zero)[\s\S]*match_over/i,
+      );
+      expect(game).toMatch(
+        /(?:match_over|eliminat)[\s\S]*exit[^\n]*3[\s\S]*report/i,
+      );
+      expect(game).toMatch(
+        /(?:Elo|rating|points)[^\n]*(?:whole|entire|table)[^\n]*(?:end|finish)|(?:whole|entire|table)[^\n]*(?:end|finish)[^\n]*(?:Elo|rating|points)/i,
+      );
+    });
+
     it('explains persistent state without requiring the agent to edit it', () => {
       expect(game).toContain('.casino/');
       expect(game).toMatch(
@@ -107,7 +130,7 @@ describe.each([undefined, 'https://web.test'])(
       );
     });
 
-    it('explains queue alternatives and private-room inactivity', () => {
+    it('explains play alternatives and private-room inactivity', () => {
       expect(game).toMatch(/bot[^\n]*(?:unrated|not rated|no Elo|not count)/i);
       expect(game).toMatch(
         /(?:2|two)[ -]minutes?[^\n]*(?:cancel|expir|clos)|(?:cancel|expir|clos)[^\n]*(?:2|two)[ -]minutes?/i,

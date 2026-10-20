@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderKitSkill, renderLlmsTxt } from './render';
+import { renderKitSkill, renderLlmsTxt, renderSkill } from './render';
 
 const BASE = 'https://kit.example:8443';
 const FILES = [
@@ -47,6 +47,7 @@ describe('A24 kit content', () => {
       expect(index).toBeLessThan(md.indexOf('\n## ', md.indexOf('## Install')));
     expect(md.trimEnd().split('\n').length).toBeLessThanOrEqual(40);
     expect(md).toMatch(/no real money/i);
+    expect(md).not.toMatch(/heads[- ]up/i);
     expect(md).toMatch(/owner.*watch.*web/i);
     expect(md).toMatch(/no shell/i);
     expect(md).toContain(`](${BASE}/skill.md)`);
@@ -103,6 +104,10 @@ describe('A24 kit content', () => {
       'tell_owner',
       'Traditional and Simplified Chinese',
       'profile',
+      'play',
+      'start',
+      'room create',
+      'room join',
       'display_name',
       'watch',
       'report',
@@ -118,35 +123,124 @@ describe('A24 kit content', () => {
     expect(md).toMatch(/first turn.*twice|first turn.*60 seconds/);
     expect(md).toMatch(/no questions|ask no questions/);
     expect(md).toMatch(/180 seconds|3 minutes/);
+    expect(blocks(md).join('\n')).not.toMatch(/casino\.sh queue\b/);
+    expect(md).toMatch(/30 seconds/);
+    expect(md).toMatch(
+      /house-bot[^\n]*(?:unrated|not rated|no Elo|not count)/i,
+    );
+    expect(md).toMatch(
+      /(?:while|until|before)[^\n]*(?:answer|repl)[^\n]*wait|wait[^\n]*(?:while|until|before)[^\n]*(?:answer|repl)/i,
+    );
+    expect(md).toMatch(/(?:2|two)[ -]minutes?/i);
+    expect(md).toMatch(/match_over/);
+    expect(md).toMatch(/(?:eliminat|bust|lost all|runs out)/i);
+    expect(md).toMatch(
+      /(?:Elo|rating)[^\n]*(?:table|whole|entire)[^\n]*(?:finish|end)|(?:table|whole|entire)[^\n]*(?:finish|end)[^\n]*(?:Elo|rating)/i,
+    );
     expect(md).toMatch(/report.*result[\s\S]*chips[\s\S]*Elo[\s\S]*link/);
     for (const dir of DIRS)
       expect(md).toContain(`sh ${dir}/agent-casino/scripts/casino.sh`);
   });
 
-  it('holdem teaches table fields, total raises, blinds and heads-up rules', () => {
-    const md = renderKitSkill('agent-casino-holdem', BASE);
-    for (const text of [
-      'Legal:',
-      'Time left:',
-      'Your cards',
-      'Board',
-      'Pot',
-      'Since your last move',
-      'This hand so far',
-      'raise',
-      'total',
-      'small blind',
-      'big blind',
-      'button',
-      'flop',
-      'turn',
-      'river',
-      'all-in',
-    ])
-      expect(md).toContain(text);
-    expect(md).toMatch(/2 players|Two players/);
-    expect(md).toMatch(/double/);
-    expect(md).toMatch(/tie splits|split.*pot/);
-    expect(md).toMatch(/before the flop.*blind counts|blind counts.*bet/);
+  it.each([
+    ['manual', renderSkill(BASE).split('## Save as a skill')[0] ?? ''],
+    ['core kit', renderKitSkill('agent-casino', BASE)],
+  ])('%s teaches host choices, private tables and elimination', (_name, md) => {
+    expect(md).toMatch(/room create[\s\S]*room join/i);
+    expect(md).toMatch(/private/i);
+    expect(md).toMatch(
+      /(?:up to|maximum|max|at most)[^\n]*(?:6|six)|(?:2[-–]6|2 to 6)/i,
+    );
+    expect(md).toMatch(/host[^\n]*start|start[^\n]*host/i);
+    expect(md).toMatch(
+      /(?:roster|seats|seated|lineup)[^\n]*(?:chang|different)|(?:chang|different)[^\n]*(?:roster|seats|seated|lineup)/i,
+    );
+    expect(md).toMatch(
+      /start now|start (?:the match|playing)|start immediately/i,
+    );
+    expect(md).toMatch(
+      /house-bot[^\n]*(?:fill|empty|open|seat)|(?:fill|empty|open)[^\n]*house-bot/i,
+    );
+    expect(md).toMatch(/keep waiting|continue waiting/i);
+    expect(md).toMatch(
+      /(?:while|until|before)[^\n]*(?:answer|repl)[^\n]*wait|wait[^\n]*(?:while|until|before)[^\n]*(?:answer|repl)/i,
+    );
+    expect(md).toMatch(/(?:3|three) minutes|180 seconds/i);
+    expect(md).toMatch(/leave/i);
+    expect(md).toMatch(/match_over[\s\S]*(?:exit[^\n]*3|\|[^\n]*3)/i);
+    expect(md).toMatch(
+      /(?:Elo|rating|points)[^\n]*(?:table|whole|entire)[^\n]*(?:finish|end)|(?:table|whole|entire)[^\n]*(?:finish|end)[^\n]*(?:Elo|rating|points)/i,
+    );
   });
+
+  it.each([
+    ['manual', renderSkill(BASE).split('## Appendix: the HTTP API')[0] ?? ''],
+    ['holdem kit', renderKitSkill('agent-casino-holdem', BASE)],
+  ])(
+    '%s teaches table fields, total raises, blinds and 2–6 player rules',
+    (_name, md) => {
+      // These output labels belong to the dedicated holdem kit.
+      if (_name === 'holdem kit') {
+        for (const text of [
+          'Legal:',
+          'Time left:',
+          'Your cards',
+          'Board',
+          'Pot',
+          'Since your last move',
+          'This hand so far',
+          'raise',
+          'total',
+          'small blind',
+          'big blind',
+          'button',
+          'flop',
+          'turn',
+          'river',
+          'all-in',
+        ])
+          expect(md).toContain(text);
+      }
+      expect(md).toMatch(/2\s*[-–]\s*6|two to six/i);
+      expect(md).toMatch(/button[^\n]*(?:mov|next)|(?:mov|next)[^\n]*button/i);
+      expect(md).toMatch(/(?:3|three)[^\n]*(?:players|more)/i);
+      expect(md).toMatch(
+        /small blind[^\n]*(?:next|left)[^\n]*button|button[^\n]*(?:next|left)[^\n]*small blind/i,
+      );
+      expect(md).toMatch(
+        /big blind[^\n]*(?:next|left)[^\n]*small blind|small blind[^\n]*(?:next|left)[^\n]*big blind/i,
+      );
+      expect(md).toMatch(
+        /before the flop[^\n]*(?:after|left|next)[^\n]*big blind/i,
+      );
+      expect(md).toMatch(
+        /after the flop[^\n]*(?:after|left|next)[^\n]*button/i,
+      );
+      expect(md).toMatch(
+        /(?:2|two)[^\n]*(?:remain|left)|(?:remain|left)[^\n]*(?:2|two)/i,
+      );
+      expect(md).toMatch(/button[^\n]*(?:is|=)[^\n]*small blind/i);
+      expect(md).toMatch(
+        /before the flop[^\n]*button[^\n]*first|button[^\n]*first[^\n]*before the flop/i,
+      );
+      expect(md).toMatch(
+        /after the flop[^\n]*big blind[^\n]*first|big blind[^\n]*first[^\n]*after the flop/i,
+      );
+      expect(md).toMatch(/side pots?/i);
+      expect(md).toMatch(
+        /(?:each|every)[^\n]*pot[^\n]*(?:eligib|win)|eligib[^\n]*pot/i,
+      );
+      expect(md).toMatch(/place|rank/i);
+      expect(md).toMatch(
+        /(?:same hand|simultaneous)[^\n]*(?:start|before)[^\n]*(?:chips|stack)/i,
+      );
+      expect(md).toMatch(/max_hands[^\n]*(?:chips|stack|rank|place)/i);
+      expect(md).toMatch(/(?:2[-–]3|2 to 3)[^\n]*5/i);
+      expect(md).toMatch(/4[^\n]*4[^\n]*hands?/i);
+      expect(md).toMatch(/(?:5[-–]6|5 to 6)[^\n]*3/i);
+      expect(md).toMatch(/double/);
+      expect(md).toMatch(/tie splits|split.*pot/);
+      expect(md).toMatch(/before the flop.*blind counts|blind counts.*bet/);
+    },
+  );
 });

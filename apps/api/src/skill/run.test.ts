@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { handle } from '../app';
 import { startTestD1 } from '../db/test-d1';
+import { lobbyIn } from '../matchmaker/lobby';
 import { RatingWriter } from '../matchmaker/ratings';
 import { RoomReferee, type RoomStorage } from '../room/referee';
 import type { Bindings } from '../routes/env';
@@ -87,6 +88,7 @@ describe('manual commands in fresh POSIX shells', () => {
               waitMs: 30,
               webUrl: web,
               record: input => ratings.record(input),
+              listRoom: update => lobby.update(update),
             });
             rooms.set(id, room);
           }
@@ -94,6 +96,13 @@ describe('manual commands in fresh POSIX shells', () => {
         },
       },
     } as unknown as Bindings;
+    const lobby = lobbyIn(env, { storage: new MemoryStorage() });
+    Object.assign(env, {
+      MATCHMAKER: {
+        idFromName: (name: string) => name,
+        get: () => ({ quick: lobby.quick, rooms: lobby.list }),
+      },
+    });
     let base = '';
     const requests: string[] = [];
     const exchanges: { path: string; response: Record<string, unknown> }[] = [];
@@ -155,14 +164,18 @@ describe('manual commands in fresh POSIX shells', () => {
       expect(gameBlocks[0], 'first example downloads the official script').toBe(
         `mkdir -p .casino && curl -fsS ${base}/casino.sh -o .casino/casino.sh && sh .casino/casino.sh help`,
       );
-      const queueAt = gameBlocks.findIndex(block =>
-        /^sh \.casino\/casino\.sh (?:queue|bot|room)\b/.test(block),
+      expect(
+        gameBlocks,
+        'manual includes the automatic-seating command',
+      ).toContain('sh .casino/casino.sh play');
+      const seatAt = gameBlocks.findIndex(block =>
+        /^sh \.casino\/casino\.sh (?:play|bot|room)\b/.test(block),
       );
       expect(
-        queueAt,
+        seatAt,
         'onboarding finishes before acquiring a seat',
       ).toBeGreaterThan(2);
-      const onboarding = gameBlocks.slice(0, queueAt);
+      const onboarding = gameBlocks.slice(0, seatAt);
       expect(
         onboarding[1],
         'inspect the persistent profile before asking a name',
@@ -202,9 +215,9 @@ describe('manual commands in fresh POSIX shells', () => {
       const wait = commandBlock('wait');
       const act = commandBlock('act');
       const report = commandBlock('report');
-      // Queue and bot are alternative seat-acquisition paths. Keep the
+      // Play and bot are alternative seat-acquisition paths. Keep the
       // actual manual commands and their main-flow order unchanged.
-      expect(gameBlocks.indexOf(wait)).toBeGreaterThan(queueAt);
+      expect(gameBlocks.indexOf(wait)).toBeGreaterThan(seatAt);
       expect(gameBlocks.indexOf(act)).toBeGreaterThan(gameBlocks.indexOf(wait));
       expect(gameBlocks.indexOf(report)).toBeGreaterThan(
         gameBlocks.indexOf(act),
@@ -256,6 +269,14 @@ describe('manual commands in fresh POSIX shells', () => {
       const reported = await run(cwd, report);
       expect(reported.code, `${reported.out}\n${reported.err}`).toBe(0);
       expect(reported.out).toContain(`${web}/matches/`);
+
+      // Run the manual's public seating example in another fresh shell.
+      const played = await run(cwd, commandBlock('play'));
+      expect(played.code, `${played.out}\n${played.err}`).toBe(0);
+      expect(exchanges.at(-1)?.path).toBe('/v1/rooms/quick');
+      expect(exchanges.at(-1)?.response).toMatchObject({ is_host: true });
+      expect(await run(cwd, commandBlock('leave'))).toMatchObject({ code: 3 });
+      expect(await run(cwd, report)).toMatchObject({ code: 0 });
 
       // Reconnect and owner-requested leave apply to a live second match.
       expect(await run(cwd, bot)).toMatchObject({ code: 0 });

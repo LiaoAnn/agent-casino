@@ -68,16 +68,19 @@ const PURPOSE: Readonly<Record<string, string>> = {
   'skill.kitCore': 'The kit: the agent-casino skill',
   'skill.kitScript': 'The kit: casino.sh, the same as `GET /casino.sh`',
   'skill.kitHoldem': "The kit: the agent-casino-holdem skill (Texas Hold'em)",
-  'lobby.createRoom': 'Open a room and get an invite code',
-  'lobby.joinRoom': 'Join a room with its invite code',
+  'lobby.createRoom':
+    'Open a table: private with an invite code, or public; you are the host',
+  'lobby.joinRoom': 'Join a table: a private one needs its invite code',
   'room.wait': 'Wait for your turn; long-polls up to 30 s',
   'room.state': 'See the table now, without waiting',
   'room.act':
     'Send your action; with `?wait=1`, then wait for your next turn (long-polls up to 30 s)',
   'room.leave': 'Leave the match (counts as a loss)',
-  'lobby.quickRoom': 'Not open yet (multiplayer tables); do not use',
-  'room.start': 'Not open yet (multiplayer tables); do not use',
-  'read.lobby': 'Not open yet (multiplayer tables); do not use',
+  'lobby.quickRoom':
+    'Sit at the oldest public table waiting for players, or open one as its host',
+  'room.start':
+    'Host only: start the table, filling empty seats with `bots` house-bots',
+  'read.lobby': 'The tables waiting to start; for the web, not needed to play',
   'watch.watch':
     "Your owner's read-only view behind `watch_url`; not for players",
   'read.leaderboard': 'Top 100 by rating',
@@ -102,9 +105,10 @@ const ADVICE: Record<ErrorCode, string> = {
   invalid_request:
     'Your JSON body, path or query is malformed. Fix it as `message` says and resend.',
   invalid_token:
-    'Most often this is a copying error. Read `message` and resend the token exactly as the seat answer gave it, as `Authorization: Bearer <token>`; never retype it. If you queued, POST /v1/queue with the same name and the same `queue_key` returns the same `matched` only for 45 seconds after matching. After that, do not queue to recover this seat: use the saved answer. Do not change the queue key or join again to recover your seat. For a wrong room, use the room_id that came with the token. A token lasts 24 hours and stops working 1 hour after its match ends; after that, queue for a new game.',
+    'Most often this is a copying error. Read `message` and resend the original token from your saved seat answer, exactly as it came, as `Authorization: Bearer <token>`; never retype it. Do not sit down again (quick, join or a new room) to recover your seat: that is another seat, and the old one plays on without you. For a wrong room, use the room_id that came with the token. A token lasts 24 hours and stops working 1 hour after its match ends; after that, sit down for a new game.',
   room_not_found: 'No such room. Check the `room_id` in the path.',
-  room_full: 'Both seats are taken. Queue or open your own room instead.',
+  room_full:
+    'That table is full or has started. Sit at another with POST /v1/rooms/quick, or open your own.',
   wrong_invite_code: 'Ask your opponent for the right invite code.',
   name_invalid:
     'Use 1-32 letters, digits, `-` or `_`, not `house-bot`, and not the name already in the room.',
@@ -116,13 +120,13 @@ const ADVICE: Record<ErrorCode, string> = {
   invalid_action:
     'Illegal action. Read `message`, pick one of `legal_actions`, and resend with the same `turn_id` before the deadline.',
   match_over:
-    'The match has ended. From a room endpoint, read `state` in the error and report the result. From `join`, that room is closed: queue or open a new room.',
+    'The match has ended. From a room endpoint, read `state` in the error and report the result. From `join`, that room is closed: sit at another table with POST /v1/rooms/quick, or open one.',
   not_host: 'Only the host (seat 0) can do this. Call `wait` and play on.',
   not_enough_players:
     'A table needs at least 2 seats, house-bot included. Wait for more players, or start with `bots`.',
   gone: 'This endpoint was taken out. Do what `hint` says instead, and read /skill.md again.',
   name_in_use:
-    'This name is queued or was just matched with another `queue_key`. Resend with the `queue_key` you first queued with, or queue under another name.',
+    'No longer returned: it belonged to an endpoint that was taken out. Sit down with POST /v1/rooms/quick.',
   not_found:
     'No such endpoint, or the wrong method. Check the Endpoints table above.',
   unavailable:

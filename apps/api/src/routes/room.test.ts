@@ -819,13 +819,15 @@ describe('POST /v1/rooms/{room_id}/join', () => {
     const { env } = makeEnv();
     const room = await createRoom(env);
     await joinRoom(env, room);
-    await expectError(
+    const error = await expectError(
       await post(env, `/v1/rooms/${room.room_id}/join`, {
         name: 'carol',
         invite_code: room.invite_code,
       }),
       'room_full',
     );
+    expect(error.hint).toContain('POST /v1/rooms/quick');
+    expect(error.hint).not.toContain('POST /v1/queue');
   });
 
   it.each([
@@ -1608,6 +1610,8 @@ describe('POST /v1/rooms/{room_id}/actions: finishing a 1-hand match by a fold',
         }),
         'match_over',
       );
+      expect(error.hint).toContain('POST /v1/rooms/quick');
+      expect(error.hint).not.toContain('POST /v1/queue');
       expect(errorState(error)).toMatchObject({
         status: 'match_over',
         room_status: 'finished',
@@ -2151,7 +2155,8 @@ describe('a room that ended over an hour ago answers invalid_token (A8)', () => 
   const expectExpired = async (response: Response) => {
     const body = await expectError(response, 'invalid_token');
     expect(body.message.toLowerCase()).toContain('hour');
-    expect(body.hint).toMatch(/\/v1\/rooms|queue/i);
+    expect(body.hint).toContain('POST /v1/rooms/quick');
+    expect(body.hint).not.toMatch(/queue/i);
     return body;
   };
 
@@ -3074,7 +3079,7 @@ describe('T35 display names over room HTTP', () => {
 
 describe('T45 actionable hints at the HTTP boundary', () => {
   it.each(['malformed', 'bad_signature'] as const)(
-    '%s tokens explain copying errors and same-key recovery',
+    '%s tokens explain copying errors and saved-token recovery',
     async reason => {
       const { env } = makeEnv({ waitMs: 1 });
       const room = await createRoom(env);
@@ -3091,9 +3096,18 @@ describe('T45 actionable hints at the HTTP boundary', () => {
         'invalid_token',
       );
       expect.soft(body.hint).toMatch(/cop(?:y|ied|ying)|transcri/i);
-      expect.soft(body.hint).toMatch(/same[^.\n]*name/i);
-      expect.soft(body.hint).toMatch(/same[^.\n]*queue_key/i);
-      expect.soft(body.hint).toMatch(/same[^.\n]*matched/i);
+      expect.soft(body.hint).toMatch(/saved|original/i);
+      expect.soft(body.hint).toMatch(/token/i);
+      expect.soft(body.hint).toMatch(/unchanged|exact|as[- ]is/i);
+      expect
+        .soft(body.hint)
+        .toMatch(
+          /(?:do not|don.t|never)[^.\n]*(?:quick|join|creat|re.?seat|re.?enter)/i,
+        );
+      expect.soft(body.hint).toMatch(/(?:another|different|new)[^.\n]*seat/i);
+      expect
+        .soft(body.hint)
+        .not.toMatch(/queue_key|POST \/v1\/queue|fresh|new token/i);
     },
   );
 
@@ -3116,6 +3130,7 @@ describe('T46 first assigned turn watch link reminder over HTTP', () => {
   const expectReminder = (hint: string, watchUrl: string) => {
     expect.soft(hint).toMatch(/watch link/i);
     expect.soft(hint).toContain(watchUrl);
+    expect.soft(hint).not.toContain('POST /v1/queue');
   };
 
   it('repeats each seat’s own link on wait/state until its first action is accepted', async () => {
