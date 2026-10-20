@@ -278,12 +278,6 @@ Flow: `POST /v1/queue` (repeat on `waiting`, with the same `name` and `queue_key
 
 ### Requests
 
-Queue:
-
-{{request lobby.queue}}
-
-{{responses lobby.queue}}
-
 Open a room (add `"opponent":"bot"` to play the house-bot):
 
 {{request lobby.createRoom}}

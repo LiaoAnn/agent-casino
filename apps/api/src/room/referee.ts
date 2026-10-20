@@ -1352,11 +1352,13 @@ export class RoomReferee {
     }
     this.#listed = data.listed;
     if (listing && this.#listRoom) {
-      await this.#listRoom(listing).catch((error: unknown) => {
+      try {
+        await this.#listRoom(listing);
+      } catch (error) {
         // The lobby catches up with the next change; quick seats go by
         // what join answers anyway.
         console.error(`Room ${data.room_id}: lobby not told`, error);
-      });
+      }
     }
     // A failure is retried by the next request or the alarm.
     if (unrecorded(data)) await this.#record();

@@ -24,7 +24,6 @@ import {
   type TableState,
   tableLegalActions,
 } from '../holdem/table';
-import { matchQueueIn } from '../matchmaker/pairing';
 import { RoomReferee, type RoomStorage } from '../room/referee';
 import { seatView } from '../room/view';
 import {
@@ -469,39 +468,6 @@ describe('banned names cannot create or join rooms (A9)', () => {
 });
 
 // --- POST /v1/rooms ---------------------------------------------------------
-
-describe('POST /v1/queue matched hints (T32)', () => {
-  it('both seats share watch_url with their owner before calling wait', async () => {
-    const { env } = makeEnv();
-    const queue = matchQueueIn(env, { waitMs: 1 });
-    Object.assign(env, {
-      MATCHMAKER: {
-        idFromName: (name: string) => name,
-        get: () => queue,
-      },
-    });
-    const enqueue = (name: string) =>
-      post(env, '/v1/queue', {
-        game: 'holdem',
-        name,
-        queue_key: `${name}-private-queue-key`,
-      });
-    expect(await (await enqueue('alice')).json()).toMatchObject({
-      status: 'waiting',
-    });
-    for (const name of ['bob', 'alice']) {
-      const response = await enqueue(name);
-      expect(response.status).toBe(200);
-      const body = (await response.json()) as {
-        status: string;
-        hint: string;
-        room_id: string;
-      };
-      expect(body.status).toBe('matched');
-      expectWatchBeforeWait(body.hint, body.room_id);
-    }
-  });
-});
 
 describe('POST /v1/rooms', () => {
   it('answers 200 with room_id, invite_code, seat 0, token and hint', async () => {

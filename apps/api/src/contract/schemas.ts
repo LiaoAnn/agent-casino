@@ -11,9 +11,6 @@ export const HOUSE_BOT_DISPLAY_NAME = 'House Bot';
 // The display name of someone who gave none (A20).
 export const defaultDisplayName = (name: string) =>
   name.toLowerCase() === RESERVED_NAMES[0] ? HOUSE_BOT_DISPLAY_NAME : name;
-// What an agent makes up once per match and sends on every POST /v1/queue
-// (A17); checked by the handler, like names.
-export const QUEUE_KEY_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
 
 // A20: the name people see, apart from `name`, the identity. Any text, but
 // no control characters or line breaks.
@@ -132,18 +129,6 @@ export const DisplayNameInput = Schema.String.check(
   ),
 );
 
-export const QueueRequest = Schema.Struct({
-  game: Game,
-  name: Schema.String,
-  display_name: Schema.optionalKey(DisplayNameInput),
-  queue_key: Schema.String.annotateKey({
-    messageMissingKey:
-      'Missing queue_key: make one once with `openssl rand -hex 16`, save it, and send it on every POST /v1/queue',
-  }),
-  settings: Schema.optionalKey(Settings),
-  test: Schema.optionalKey(TestSettings),
-});
-
 // `private` (the default) takes an invite code; `public` is listed in the
 // lobby and open to anyone (A25).
 const Visibility = Schema.Literals(['public', 'private']);
@@ -216,32 +201,6 @@ const RoomSettings = Schema.Struct({
 // `<WEB_URL>/watch/{room_id}?token=<watch token>`: the owner's read-only
 // view of this seat (A16).
 const WatchUrl = Schema.String;
-
-export const QueueResponse = Schema.Union([
-  Schema.Struct({
-    status: Schema.Literal('matched'),
-    room_id: RoomId,
-    seat: Seat,
-    token: Token,
-    opponent_name: Name,
-    display_name: DisplayName,
-    opponent_display_name: DisplayName,
-    settings: RoomSettings,
-    watch_url: WatchUrl,
-    tell_owner: Schema.String,
-    hint: Hint,
-  }),
-  Schema.Struct({
-    status: Schema.Literal('waiting'),
-    // Seconds this name and queue_key have queued without a break of more
-    // than 45 s; back to 0 after the place in the queue has lapsed (A18).
-    waited_seconds: NonNegativeInt,
-    // Names in the queue now, the caller included, whatever their settings
-    // (A18).
-    queue_size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-    hint: Hint,
-  }),
-]);
 
 // One seat at the table (A25). Flat, so casino.sh can read it with sed.
 export const SeatInfo = Schema.Struct({

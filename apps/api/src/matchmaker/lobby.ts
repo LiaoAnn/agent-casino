@@ -151,7 +151,7 @@ export class RoomLobby {
   quick<T>(
     input: QuickInput,
     seating: Seating<T>,
-  ): Promise<Result<T, JoinCode>> {
+  ): Promise<Result<T, 'unavailable'>> {
     const run = this.#last.then(() => this.#quick(input, seating));
     this.#last = run.catch(() => {});
     return run;
@@ -160,7 +160,7 @@ export class RoomLobby {
   async #quick<T>(
     input: QuickInput,
     seating: Seating<T>,
-  ): Promise<Result<T, JoinCode>> {
+  ): Promise<Result<T, 'unavailable'>> {
     const wanted = canonical({ settings: input.settings, test: input.test });
     const candidates = (await this.#listed()).filter(
       room =>
@@ -174,8 +174,12 @@ export class RoomLobby {
       const { code } = joined.error;
       // Already seated there under this name: another room (A2).
       if (code === 'name_invalid') continue;
-      if (!CLOSED.includes(code)) return joined;
-      await this.#drop(room.room_id);
+      if (CLOSED.includes(code)) {
+        await this.#drop(room.room_id);
+        continue;
+      }
+      // The room couldn't be reached: retry later rather than open another.
+      return { ok: false, error: joined.error as ApiError<'unavailable'> };
     }
     return seating.open();
   }
@@ -199,7 +203,7 @@ const outcome = <T, C extends ApiError['code']>(
   );
 
 // A seat as POST /v1/rooms/quick answers it, before the hint.
-export type Seated = Effect.Success<ReturnType<typeof Rooms.joinRoom>>;
+type Seated = Effect.Success<ReturnType<typeof Rooms.joinRoom>>;
 
 // The lobby of a deployment, seating people in real rooms through the Room
 // DOs (room/client.ts).

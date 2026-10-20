@@ -21,9 +21,6 @@ import {
   NAME_PATTERN,
   Name,
   normalizeDisplayName,
-  QUEUE_KEY_PATTERN,
-  QueueRequest,
-  QueueResponse,
   RESERVED_NAMES,
   RoomId,
   RoomStatus,
@@ -234,24 +231,8 @@ describe('T43 required owner experience contract fields', () => {
     },
   );
 
-  it('requires a string tell_owner on match_over and queue matched', () => {
-    const joined = {
-      room_id: ROOM,
-      seat: 1,
-      token: 'abc.def',
-      opponent_name: 'alice',
-      display_name: 'Bob',
-      opponent_display_name: 'Alice',
-      settings,
-      watch_url: watchUrl,
-      hint: 'Call wait',
-      tell_owner: `Playing against Alice. Watch: ${watchUrl}`,
-    };
-    const matched = { ...joined, status: 'matched' };
-    for (const [schema, example] of [
-      [MatchOver, matchOver],
-      [QueueResponse, matched],
-    ] as const) {
+  it('requires a string tell_owner on match_over', () => {
+    for (const [schema, example] of [[MatchOver, matchOver]] as const) {
       expect(decodes(schema, example)).toBe(true);
       const { tell_owner: _message, ...missing } = example;
       expect.soft(decodes(schema, missing)).toBe(false);
@@ -315,13 +296,6 @@ describe('primitives', () => {
 describe('requests', () => {
   it('decodes the skill request examples', () => {
     expect(
-      decodes(QueueRequest, {
-        queue_key: 'alice-queue-key-1',
-        game: 'holdem',
-        name: 'alice',
-      }),
-    ).toBe(true);
-    expect(
       decodes(CreateRoomRequest, {
         game: 'holdem',
         name: 'alice',
@@ -360,26 +334,12 @@ describe('requests', () => {
   });
 
   it('leaves name and invite code validation to the handlers', () => {
-    expect(
-      decodes(QueueRequest, {
-        queue_key: 'alice-queue-key-1',
-        game: 'holdem',
-        name: 'a b',
-      }),
-    ).toBe(true);
     expect(decodes(JoinRequest, { name: 'bob', invite_code: 'nope' })).toBe(
       true,
     );
   });
 
   it('rejects unknown games and action types', () => {
-    expect(
-      decodes(QueueRequest, {
-        queue_key: 'alice-queue-key-1',
-        game: 'chess',
-        name: 'alice',
-      }),
-    ).toBe(false);
     expect(decodes(ActionRequest, { turn_id: 't_1', type: 'bet' })).toBe(false);
     expect(
       decodes(ActionRequest, { turn_id: 't_1', type: 'raise', amount: 8.5 }),
@@ -451,47 +411,10 @@ describe('requests', () => {
         test: { seed },
       }),
     ).toBe(false);
-    expect(
-      decodes(QueueRequest, {
-        queue_key: 'alice-queue-key-1',
-        game: 'holdem',
-        name: 'alice',
-        test: { seed },
-      }),
-    ).toBe(false);
   });
 });
 
 describe('responses', () => {
-  it('decodes queue matched and waiting', () => {
-    expect(
-      decodes(QueueResponse, {
-        status: 'matched',
-        room_id: ROOM,
-        seat: 0,
-        token: 'abc.def',
-        opponent_name: 'bob',
-        display_name: '小愛 🃏',
-        opponent_display_name: '鮑伯',
-        settings,
-        watch_url: watchUrl,
-        hint: `Matched. Next, call GET /v1/rooms/${ROOM}/wait`,
-        tell_owner: `Playing against 鮑伯. Watch: ${watchUrl}`,
-      }),
-    ).toBe(true);
-    expect(
-      decodes(QueueResponse, {
-        status: 'waiting',
-        waited_seconds: 0,
-        queue_size: 1,
-        hint: 'No opponent yet. Call POST /v1/queue again',
-      }),
-    ).toBe(true);
-    expect(decodes(QueueResponse, { status: 'matched', hint: 'x' })).toBe(
-      false,
-    );
-  });
-
   it('decodes the create room response', () => {
     expect(
       decodes(CreateRoomResponse, {
@@ -585,7 +508,7 @@ describe('responses', () => {
     }
   });
 
-  it('requires settings and watch_url in the create room response, and watch_url in queue matched', () => {
+  it('requires settings and watch_url in the create room response', () => {
     const created = {
       ...waitingFields,
       opponent_name: null,
@@ -602,24 +525,6 @@ describe('responses', () => {
     for (const key of ['settings', 'watch_url'] as const) {
       const { [key]: _removed, ...without } = created;
       expect(decodes(CreateRoomResponse, without), key).toBe(false);
-    }
-    const matched = {
-      status: 'matched',
-      room_id: ROOM,
-      seat: 0,
-      token: 'abc.def',
-      opponent_name: 'bob',
-      display_name: '小愛 🃏',
-      opponent_display_name: '鮑伯',
-      settings,
-      watch_url: watchUrl,
-      hint: 'Matched',
-      tell_owner: `Playing against 鮑伯. Watch: ${watchUrl}`,
-    };
-    expect(decodes(QueueResponse, matched)).toBe(true);
-    for (const key of ['opponent_name', 'settings', 'watch_url'] as const) {
-      const { [key]: _removed, ...without } = matched;
-      expect(decodes(QueueResponse, without), key).toBe(false);
     }
   });
 
@@ -1019,35 +924,6 @@ describe('WatchResponse', () => {
   });
 });
 
-describe('queue_key contract (A17)', () => {
-  const request = { game: 'holdem', name: 'alice' };
-  it('requires a string queue_key while leaving format validation to the handler', () => {
-    expect(decodes(QueueRequest, request)).toBe(false);
-    for (const queue_key of [null, 123, {}, []])
-      expect(decodes(QueueRequest, { ...request, queue_key })).toBe(false);
-    for (const queue_key of ['alice-queue-key-1', '', 'bad key'])
-      expect(decodes(QueueRequest, { ...request, queue_key })).toBe(true);
-  });
-
-  it.each(['A'.repeat(16), 'a'.repeat(64), 'Az09_-'.repeat(3)])(
-    'accepts valid queue key %s',
-    queue_key => {
-      expect(QUEUE_KEY_PATTERN?.test(queue_key)).toBe(true);
-    },
-  );
-
-  it.each([
-    '',
-    'a'.repeat(15),
-    'a'.repeat(65),
-    `${'a'.repeat(16)} `,
-    `${'a'.repeat(16)}.`,
-    `${'a'.repeat(16)}中`,
-  ])('rejects invalid queue key %j', queue_key => {
-    expect(QUEUE_KEY_PATTERN?.test(queue_key)).toBe(false);
-  });
-});
-
 // T28 A6/A15: exercise both envelopes so match_over cannot omit the field.
 describe('T28 S2 last_hand.stack_changes contract', () => {
   it.each(['your_turn', 'match_over'] as const)(
@@ -1078,53 +954,6 @@ describe('T28 S2 last_hand.stack_changes contract', () => {
       }),
     ).toBe(false);
   });
-});
-
-describe('T30 waiting information contract (A18)', () => {
-  const waiting = {
-    status: 'waiting',
-    waited_seconds: 0,
-    queue_size: 1,
-    hint: 'No opponent yet. Call POST /v1/queue again',
-  };
-
-  it.each(['waited_seconds', 'queue_size'] as const)(
-    'requires %s in waiting responses',
-    key => {
-      const { [key]: _removed, ...without } = waiting;
-      expect(decodes(QueueResponse, without)).toBe(false);
-    },
-  );
-
-  it.each([
-    ['waited_seconds', -1],
-    ['waited_seconds', 1.5],
-    ['waited_seconds', '30'],
-    ['waited_seconds', null],
-    ['queue_size', 0],
-    ['queue_size', -1],
-    ['queue_size', 1.5],
-    ['queue_size', '1'],
-    ['queue_size', null],
-  ])('rejects %s = %j', (key, value) => {
-    expect(decodes(QueueResponse, { ...waiting, [key]: value })).toBe(false);
-  });
-
-  it.each([
-    [0, 1],
-    [179, 2],
-    [180, 3],
-    [600, 1],
-  ])(
-    'preserves valid waited_seconds %s and queue_size %s when decoding',
-    (waited_seconds, queue_size) => {
-      const response = { ...waiting, waited_seconds, queue_size };
-      expect(decodes(QueueResponse, response)).toBe(true);
-      expect(Schema.decodeUnknownSync(QueueResponse)(response)).toEqual(
-        response,
-      );
-    },
-  );
 });
 
 describe('T50 duplicate your_turn contract', () => {
@@ -1251,11 +1080,6 @@ describe('T35 display name input', () => {
   });
 
   const requests = [
-    [
-      'queue',
-      QueueRequest,
-      { game: 'holdem', name: 'alice', queue_key: 'alice-queue-key-1' },
-    ],
     ['create', CreateRoomRequest, { game: 'holdem', name: 'alice' }],
     ['join', JoinRequest, { name: 'alice', invite_code: 'K7Q2MX' }],
   ] as const;
@@ -1382,23 +1206,6 @@ describe('T35 required display names in responses', () => {
     tell_owner: `Playing against 鮑伯. Watch: ${watchUrl}`,
   };
   const envelopes = [
-    [
-      'matched',
-      QueueResponse,
-      {
-        status: 'matched',
-        room_id: ROOM,
-        seat: 1,
-        token: 'abc.def',
-        opponent_name: 'bob',
-        settings,
-        watch_url: watchUrl,
-        hint: 'Call wait',
-        ...named,
-        tell_owner: joined.tell_owner,
-      },
-      false,
-    ],
     ['join', JoinResponse, joined, true],
     ['create', CreateRoomResponse, created, true],
     ['your_turn', RoomStatus, yourTurn, true],

@@ -224,14 +224,6 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
       path: '/skills/agent-casino-holdem/SKILL.md',
     },
     {
-      name: 'lobby.queue',
-      route: 'POST /v1/queue',
-      auth: 'none',
-      method: 'POST',
-      path: '/v1/queue',
-      body: { game: 'holdem', name: 'alice', queue_key: 'alice-queue-key-1' },
-    },
-    {
       name: 'lobby.createRoom',
       route: 'POST /v1/rooms',
       auth: 'none',
@@ -337,7 +329,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
       },
     });
     const table = ENDPOINTS.map(e => `${e.route} ${e.auth}`);
-    expect(contract).toHaveLength(22);
+    expect(contract).toHaveLength(21);
     expect([...table].sort()).toEqual([...contract].sort());
   });
 
@@ -351,8 +343,8 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
   // Real handlers now; routes/room.test.ts covers the room ones (T09),
   // skill/route.test.ts GET /skill.md (T05), routes/read.test.ts and
   // routes/admin.test.ts the read endpoints and the ban (T07),
-  // routes/queue.test.ts the queue (T12), routes/watch.test.ts the watch
-  // link (T23).
+  // routes/quick.test.ts quick seating and the lobby (T39),
+  // routes/watch.test.ts the watch link (T23).
   const IMPLEMENTED = new Set([
     'skill.skill',
     'skill.casinoSh',
@@ -361,7 +353,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     'skill.kitScript',
     'skill.kitHoldem',
 
-    'lobby.queue',
+    'lobby.quickRoom',
     'lobby.createRoom',
     'lobby.joinRoom',
     'room.wait',
@@ -371,6 +363,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     // T38: real handler; routes/start.test.ts covers it.
     'room.start',
     'watch.watch',
+    'read.lobby',
     'read.leaderboard',
     'read.matches',
     'read.match',
@@ -379,24 +372,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     'admin.abortRoom',
   ]);
 
-  const NOT_OPEN = new Set(['lobby.quickRoom', 'read.lobby']);
-  it.each(ENDPOINTS.filter(e => NOT_OPEN.has(e.name)))(
-    '$name answers 503 unavailable until multiplayer is open',
-    async ({ name: _name, route: _route, auth, ...request }) => {
-      const authorization =
-        auth === 'room' ? `Bearer ${await roomToken()}` : undefined;
-      const body = await expectError(
-        await call({ ...request, authorization }),
-        'unavailable',
-        503,
-      );
-      expect(body.retryable).toBe(false);
-    },
-  );
-
-  it.each(
-    ENDPOINTS.filter(e => !IMPLEMENTED.has(e.name) && !NOT_OPEN.has(e.name)),
-  )(
+  it.each(ENDPOINTS.filter(e => !IMPLEMENTED.has(e.name)))(
     '$name ($method $path) answers 500 internal "not implemented"',
     async ({ name: _name, route: _route, auth, ...request }) => {
       const authorization =
@@ -411,29 +387,13 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
 });
 
 describe('bad request input answers 400 invalid_request', () => {
-  const queue = (overrides: Partial<Call>) =>
-    call({ method: 'POST', path: '/v1/queue', ...overrides });
-
-  it.each([
-    { case: 'missing', fields: {} },
-    { case: 'numeric', fields: { queue_key: 123 } },
-    { case: 'invalid format', fields: { queue_key: 'bad key' } },
-  ])(
-    'T28 S4 $case queue_key teaches generation in hint',
-    async ({ fields }) => {
-      const body = await expectError(
-        await queue({
-          body: { game: 'holdem', name: 'alice', ...fields },
-        }),
-        'invalid_request',
-      );
-      expect(body.hint).toContain('openssl rand -hex 16');
-    },
-  );
+  // T39 took the queue out: these go to POST /v1/rooms instead.
+  const openRoom = (overrides: Partial<Call>) =>
+    call({ method: 'POST', path: '/v1/rooms', ...overrides });
 
   it('malformed JSON body', async () => {
     const body = await expectError(
-      await queue({ rawBody: '{bad' }),
+      await openRoom({ rawBody: '{bad' }),
       'invalid_request',
     );
     expect(body.retryable).toBe(false);
@@ -441,7 +401,7 @@ describe('bad request input answers 400 invalid_request', () => {
 
   it('valid JSON missing a required field (name)', async () => {
     const body = await expectError(
-      await queue({ body: { game: 'holdem', queue_key: 'alice-queue-key-1' } }),
+      await openRoom({ body: { game: 'holdem' } }),
       'invalid_request',
     );
     expect(body.retryable).toBe(false);
@@ -449,9 +409,7 @@ describe('bad request input answers 400 invalid_request', () => {
 
   it('a field of the wrong type, naming the field in message', async () => {
     const body = await expectError(
-      await queue({
-        body: { game: 'holdem', name: 5, queue_key: 'alice-queue-key-1' },
-      }),
+      await openRoom({ body: { game: 'holdem', name: 5 } }),
       'invalid_request',
     );
     expect(body.retryable).toBe(false);
@@ -460,12 +418,8 @@ describe('bad request input answers 400 invalid_request', () => {
 
   it('a JSON body sent as form data (curl -d) tells to set Content-Type', async () => {
     const body = await expectError(
-      await queue({
-        rawBody: JSON.stringify({
-          game: 'holdem',
-          name: 'alice',
-          queue_key: 'alice-queue-key-1',
-        }),
+      await openRoom({
+        rawBody: JSON.stringify({ game: 'holdem', name: 'alice' }),
         contentType: 'application/x-www-form-urlencoded',
       }),
       'invalid_request',
