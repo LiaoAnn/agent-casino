@@ -30,6 +30,7 @@ import {
   type TableState,
   tableLegalActions,
 } from '../holdem/table';
+import type { LobbyEntry, LobbyUpdate } from '../matchmaker/lobby';
 import {
   type LegacyHand,
   type LegacyRoom,
@@ -73,6 +74,10 @@ export interface RefereeOptions {
   // The web's address (WEB_URL): match_over's hint links the match page
   // (T32). Without it, the hint has no link.
   webUrl?: string;
+  // Tells the lobby (the Matchmaker's listRoom, casino-api A2) the room's
+  // new lobby row whenever it changes; `entry: null` once it has started or
+  // ended. A failure is logged and doesn't fail the room's own request.
+  listRoom?: (update: LobbyUpdate) => Promise<void>;
 }
 
 // `blind_every` is `null` until the table starts when none was given (A19).
@@ -192,6 +197,9 @@ interface RoomData {
   fake_waits: { turn_id: string; count: number } | null;
   // Set once a played match is stored (A10); match_over shows its ratings.
   recorded: { ratings: RecordedMatch['ratings'] } | null;
+  // The lobby row last sent to the lobby, as JSON, and its rev (A2); left
+  // out until the room is first listed.
+  listed?: { rev: number; entry: string | null };
 }
 
 // `complete`: the engine played the match out (one seat left with chips, or
@@ -333,6 +341,9 @@ export class RoomReferee {
   readonly #recordMatch: (input: TableRecordInput) => Promise<RecordedMatch>;
   readonly #random: () => number;
   readonly #webUrl: string | undefined;
+  readonly #listRoom: RefereeOptions['listRoom'];
+  // RoomData.listed as last saved.
+  #listed: RoomData['listed'];
   #data: Promise<RoomData | undefined> | undefined;
   // The write of the finished match in flight, so it runs once at a time.
   #recording: Promise<boolean> | undefined;
@@ -347,6 +358,7 @@ export class RoomReferee {
       options.record ?? (async () => ({ rated: false, ratings: null }));
     this.#random = options.random ?? Math.random;
     this.#webUrl = options.webUrl;
+    this.#listRoom = options.listRoom;
   }
 
   // Fails only when the room id is already taken.
@@ -1306,7 +1318,12 @@ export class RoomReferee {
   ): Promise<void> {
     // An absent seat may be next to act: it is played before anyone looks.
     const due = this.#due(unsettled);
-    const data = due.data;
+    // Callers may save again from data older than the last save: what was
+    // last sent is the instance's, or storage's after an eviction.
+    const { data, listing } = relisted(
+      due.data,
+      this.#listed ?? due.data.listed,
+    );
     const finishedHands = [...unsettledHands, ...due.finishedHands];
     this.#data = Promise.resolve(data);
     const listeners = [...this.#listeners];
@@ -1332,6 +1349,14 @@ export class RoomReferee {
       // Forget the unsaved change: the next request reads storage again.
       this.#data = undefined;
       throw error;
+    }
+    this.#listed = data.listed;
+    if (listing && this.#listRoom) {
+      await this.#listRoom(listing).catch((error: unknown) => {
+        // The lobby catches up with the next change; quick seats go by
+        // what join answers anyway.
+        console.error(`Room ${data.room_id}: lobby not told`, error);
+      });
     }
     // A failure is retried by the next request or the alarm.
     if (unrecorded(data)) await this.#record();
@@ -1374,6 +1399,41 @@ const updateSeat = (
 });
 
 // Before the start: the seats after `seat` close up (A25).
+// The room's row in the lobby (A2, A25 GET /v1/lobby), while it waits.
+const lobbyEntry = (data: RoomData): LobbyEntry | null =>
+  data.table || data.ended
+    ? null
+    : {
+        room_id: data.room_id,
+        visibility: data.visibility ?? 'private',
+        seats: data.seats.map(({ name, display_name }, seat) => ({
+          seat: asSeat(seat),
+          name,
+          display_name,
+        })),
+        seats_open: seatLimit(data) - data.seats.length,
+        settings: data.settings,
+        created_at: new Date(data.created_at).toISOString(),
+        test: data.test,
+      };
+
+// The room with its lobby row brought up to date, and the update to send
+// the lobby if the row changed.
+const relisted = (
+  data: RoomData,
+  last: RoomData['listed'] = { rev: 0, entry: null },
+): { data: RoomData; listing: LobbyUpdate | null } => {
+  const entry = lobbyEntry(data);
+  const json = entry && JSON.stringify(entry);
+  if (json === last.entry)
+    return { data: { ...data, listed: last }, listing: null };
+  const rev = last.rev + 1;
+  return {
+    data: { ...data, listed: { rev, entry: json } },
+    listing: { room_id: data.room_id, rev, entry },
+  };
+};
+
 const removeSeat = (data: RoomData, seat: number): RoomData => ({
   ...data,
   seats: data.seats.filter((_, i) => i !== seat),
