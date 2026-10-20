@@ -100,3 +100,39 @@ export function dealHand(seed: string, handNumber: number): Deal {
     board: [deck[4], deck[5], deck[6], deck[7], deck[8]],
   };
 }
+
+export interface TableDeal {
+  /** By position among the `players` dealt in, seat order (not by seat). */
+  holeCards: [Card, Card][];
+  /** Flop, flop, flop, turn, river. */
+  board: [Card, Card, Card, Card, Card];
+}
+
+/**
+ * The deal for `players` (2–6) still at the table: the k-th of them gets
+ * `deck[k]` and `deck[players + k]`, then the board; no burn cards.
+ */
+export function dealTable(
+  seed: string,
+  handNumber: number,
+  players: number,
+): TableDeal {
+  if (!Number.isInteger(players) || players < 2 || players > 6) {
+    throw new RangeError(`players must be an integer from 2 to 6: ${players}`);
+  }
+  const deck = shuffledDeck(seed, handNumber);
+  const p = players;
+  return {
+    holeCards: Array.from({ length: p }, (_, k): [Card, Card] => [
+      deck[k],
+      deck[p + k],
+    ]),
+    board: [
+      deck[2 * p],
+      deck[2 * p + 1],
+      deck[2 * p + 2],
+      deck[2 * p + 3],
+      deck[2 * p + 4],
+    ],
+  };
+}
