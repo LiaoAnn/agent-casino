@@ -1,6 +1,6 @@
 // How the Worker opens rooms and talks to their DOs: POST /v1/rooms and the
-// room endpoints (routes/room.ts), and the queue once it pairs two players
-// (T12: openRoom, then joinRoom with the invite code it returns).
+// room endpoints (routes/room.ts), and the lobby when it seats someone
+// (matchmaker/lobby.ts).
 import { Effect, Schema } from 'effect';
 import { type ApiError, apiError } from '../contract/errors';
 import {
@@ -74,7 +74,6 @@ const defaultTest = fromJson(
 
 // Built-in defaults < DEFAULT_SETTINGS_JSON < the request, key by key; the
 // test settings likewise, but production never reads DEFAULT_TEST_JSON.
-// The queue pairs people by these (A2).
 export const roomDefaults = (
   env: Bindings,
   input: { settings?: typeof Settings.Type; test?: typeof TestSettings.Type },
@@ -207,9 +206,32 @@ const blindEveryGiven = (
   input.settings?.blind_every !== undefined ||
   defaultSettings(vars(env).DEFAULT_SETTINGS_JSON)?.blind_every !== undefined;
 
+// What a room opened with `input` is played with: a multiplayer room with
+// no blind_every given sets it when it starts (A19).
+const openedWith = (
+  env: Bindings,
+  input: {
+    visibility?: 'public' | 'private';
+    settings?: typeof Settings.Type;
+    test?: typeof TestSettings.Type;
+    opponent?: 'bot';
+  },
+) => {
+  const defaults = roomDefaults(env, input);
+  const multiplayer = input.visibility !== undefined && !input.opponent;
+  return multiplayer && !blindEveryGiven(env, input)
+    ? { ...defaults, settings: { ...defaults.settings, blind_every: null } }
+    : defaults;
+};
+
+// The settings and test settings of a public room opened with the
+// deployment's defaults: the only rooms auto-seating fills (A2).
+export const publicDefaults = (env: Bindings) =>
+  openedWith(env, { visibility: 'public' });
+
 // Opens a room with `name` in seat 0, the host. Check the name with
 // nameError first. Without `visibility` it is a heads-up room that starts
-// when the second player sits (the queue's rooms; 房間狀態).
+// when the second player sits (房間狀態).
 export const openRoom = (
   env: Bindings,
   input: {
@@ -223,13 +245,8 @@ export const openRoom = (
   },
 ) =>
   Effect.gen(function* () {
-    const defaults = yield* Effect.sync(() => roomDefaults(env, input));
-    const { test } = defaults;
+    const { settings, test } = yield* Effect.sync(() => openedWith(env, input));
     const visibility = input.visibility ?? null;
-    const settings =
-      visibility === null || input.opponent || blindEveryGiven(env, input)
-        ? defaults.settings
-        : { ...defaults.settings, blind_every: null };
     const room_id = `r_${randomString(ROOM_ID_CHARS, 10)}`;
     const invite_code = randomString(INVITE_CHARS, 6);
     // Signed first: the room keeps the watch link for the first turn (T46).

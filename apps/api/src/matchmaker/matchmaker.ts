@@ -2,25 +2,36 @@ import { DurableObject } from 'cloudflare:workers';
 import { openDb } from '../db/client';
 import type { MatchRecordInput } from '../db/records';
 import type { Bindings } from '../routes/env';
-import { type MatchQueue, matchQueueIn, type QueueInput } from './pairing';
+import { type LobbyUpdate, lobbyIn } from './lobby';
 import { RatingWriter } from './ratings';
 
-// The single queue and Elo writer of the platform (casino-api A2, A10),
-// reached with idFromName('global'). The work lives in pairing.ts and
-// ratings.ts so it can be tested in Node.
+// The platform's one lobby and Elo writer (casino-api A2, A10), reached
+// with idFromName('global'). The work lives in lobby.ts and ratings.ts so
+// it can be tested in Node.
 export class Matchmaker extends DurableObject<Env> {
-  readonly #queue: MatchQueue;
+  readonly #lobby: ReturnType<typeof lobbyIn>;
   readonly #ratings: RatingWriter;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // The secrets (TOKEN_SECRET) are there at runtime; Env doesn't type them.
-    this.#queue = matchQueueIn(env as Bindings, { storage: ctx.storage });
+    this.#lobby = lobbyIn(env as Bindings, { storage: ctx.storage });
     this.#ratings = new RatingWriter(openDb(env.DB));
   }
 
-  queue(input: QueueInput) {
-    return this.#queue.queue(input);
+  // POST /v1/rooms/quick.
+  quick(input: { name: string; display_name: string }) {
+    return this.#lobby.quick(input);
+  }
+
+  // GET /v1/lobby.
+  rooms() {
+    return this.#lobby.list();
+  }
+
+  // From a Room DO whenever its lobby row changes.
+  listRoom(update: LobbyUpdate) {
+    return this.#lobby.update(update);
   }
 
   // For a Room DO when its match ends (T13): stores the match and, when it
