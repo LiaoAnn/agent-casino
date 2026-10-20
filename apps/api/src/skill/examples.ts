@@ -126,7 +126,7 @@ const created: typeof CreateRoomResponse.Type = {
   opponent_display_name: null,
   settings: SETTINGS,
   watch_url: WATCH_URL,
-  hint: `${SHARE_WATCH_URL}, and give room_id and invite_code to your opponent. Then call ${WAIT}. If nobody joins within 5 minutes, the room is cancelled`,
+  hint: `${SHARE_WATCH_URL}, and give room_id and invite_code to your opponent. Then call ${WAIT}. Make a request at least every 2 minutes, or the room closes`,
   ...table([seat(0, 40, 0, 'waiting')]),
 };
 
