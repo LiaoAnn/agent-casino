@@ -20,7 +20,12 @@ import { LobbyHandlers } from './routes/lobby';
 import { QUEUE_PATH, queueGone } from './routes/queue';
 import { ReadHandlers } from './routes/read';
 import { RoomHandlers } from './routes/room';
-import { SkillHandlers } from './routes/skill';
+import { publicBaseUrl, SkillHandlers } from './routes/skill';
+import {
+  CASINO_SH_VERSION,
+  isOlderCasinoSh,
+  LATEST_HEADER,
+} from './skill/casino-sh';
 
 const errorResponse = (error: ApiError) =>
   HttpServerResponse.jsonUnsafe(error, { status: ERROR_STATUS[error.code] });
@@ -147,13 +152,29 @@ const webHandler = (env: Bindings): WebHandler => {
   return handler;
 };
 
-export function handle(request: Request, env: Bindings): Promise<Response> {
+const route = (request: Request, env: Bindings): Promise<Response> => {
   const { pathname } = new URL(request.url);
   if (request.method === 'GET' && pathname === '/health') {
     return Promise.resolve(Response.json({ ok: true }));
   }
   if (request.method === 'POST' && pathname === QUEUE_PATH) {
-    return Promise.resolve(queueGone());
+    const { WEB_URL } = env as Bindings & { WEB_URL?: string };
+    const headers = Object.fromEntries(request.headers);
+    return Promise.resolve(
+      queueGone(publicBaseUrl(headers, request.url, WEB_URL)),
+    );
   }
   return webHandler(env)(request);
+};
+
+export async function handle(
+  request: Request,
+  env: Bindings,
+): Promise<Response> {
+  const response = await route(request, env);
+  // T57: tell an older casino.sh which version is the latest.
+  if (!isOlderCasinoSh(request.headers.get('user-agent'))) return response;
+  const told = new Response(response.body, response);
+  told.headers.set(LATEST_HEADER, CASINO_SH_VERSION);
+  return told;
 }
