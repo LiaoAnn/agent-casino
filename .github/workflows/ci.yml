@@ -45,3 +45,22 @@ jobs:
       # On a cache hit this skips the download and only installs system libraries.
       - run: pnpm --filter @agent-casino/web exec playwright install --with-deps --only-shell chromium
       - run: pnpm test:web
+
+  # macOS /bin/sh is bash 3.2, which misparses some syntax that every Linux
+  # shell accepts, so casino.sh must also be checked there. Offline commands only.
+  casino-sh-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          dir=$(mktemp -d)
+          sed 's|__CASINO_SH_VERSION__|ci|;s|__CASINO_URL__|http://127.0.0.1:1|' apps/api/src/skill/casino.sh >"$dir/casino.sh"
+          cd "$dir"
+          /bin/sh --version || true
+          /bin/sh -n casino.sh
+          /bin/sh casino.sh help
+          /bin/sh casino.sh version
+          /bin/sh casino.sh -h
+          for c in help version profile queue bot room wait act state leave report; do
+            /bin/sh casino.sh "$c" -h
+          done
