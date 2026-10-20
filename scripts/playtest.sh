@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Playtest: a real Claude Code (`claude -p`) and a real Codex (`codex exec`)
-# play each other once, the way a participating agent would. Each gets the
-# platform's skill.md installed as a project skill and one sentence asking it
-# to queue under a given name.
+# Playtest: real Claude Code (`claude -p`) and Codex (`codex exec`) agents
+# play the way a participating agent would. Each gets the agent kit (A24)
+# installed as project skills, a profile with its name, and one sentence
+# asking it to play.
 #
 #   pnpm playtest [<casino-url>]
 #
@@ -11,15 +11,24 @@
 #
 # The url defaults to CASINO_URL, else this worktree's api on the dev VM
 # (https://app-<worktree>.<hostname>.liaoann.net).
+# PLAYTEST_PLAYERS lists the harness of each player, 1 to 6 of them
+# (default "claude codex"); they all run at once.
+# PLAYTEST_SCENARIO (T42):
+#   table         (default) every player runs `play` and sits at one public
+#                 table; the host is told to start once all are seated.
+#   private-bots  the first player only: opens a private table with
+#                 `room create` and starts it with PLAYTEST_BOTS house-bots
+#                 (default 2). Unrated, so only the play itself is checked.
 # PLAYTEST_CLAUDE_MODEL / PLAYTEST_CODEX_MODEL pick the models (default: each
 # CLI's own default). PLAYTEST_TIMEOUT is the limit per agent in seconds
 # (default 3600: a freezeout usually lasts 10-25 hands).
 #
-# Exits 0 only when the platform has a finished match between the two names
-# in which both made their own last action, both agents got the server's
-# match_over answer (seen in their logs), and both exited normally;
-# the agents' own reports don't count. Everything the agents write and say
-# goes to a fresh folder under /tmp, printed at the start.
+# Exits 0 only when the platform has a finished match with exactly these
+# names (plus the house-bots of private-bots) in which every player made its
+# own last action, every agent saw casino.sh say its match was over or that it
+# was out (in its own command output), and every agent exited normally; the
+# agents' own reports don't count. Everything the agents write and say goes
+# to a fresh folder under /tmp, printed at the start.
 set -euo pipefail
 
 root=$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)
@@ -31,11 +40,25 @@ for cmd in claude codex curl jq git; do
 done
 curl -fsS --max-time 20 "$URL/health" >/dev/null || { echo "no casino at $URL (is the api running?)" >&2; exit 2; }
 
+read -r -a harnesses <<<"${PLAYTEST_PLAYERS:-claude codex}"
+SCENARIO=${PLAYTEST_SCENARIO:-table}
+BOTS=${PLAYTEST_BOTS:-2}
+case $SCENARIO in
+  table) [ "${#harnesses[@]}" -ge 2 ] && [ "${#harnesses[@]}" -le 6 ] ||
+    { echo "PLAYTEST_PLAYERS: 2 to 6 players for the table scenario" >&2; exit 2; } ;;
+  private-bots)
+    harnesses=("${harnesses[0]}")
+    [[ $BOTS =~ ^[1-5]$ ]] || { echo "PLAYTEST_BOTS: 1 to 5" >&2; exit 2; } ;;
+  *) echo "PLAYTEST_SCENARIO: table or private-bots" >&2; exit 2 ;;
+esac
+for h in "${harnesses[@]}"; do
+  case $h in claude | codex) ;; *) echo "PLAYTEST_PLAYERS: claude or codex, not $h" >&2; exit 2 ;; esac
+done
 RUN=$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 6 || true)
 OUT=/tmp/agent-casino-playtest-$RUN
 LIMIT=${PLAYTEST_TIMEOUT:-3600}
 mkdir -p "$OUT"
-echo "playtest $RUN against $URL, logs in $OUT"
+echo "playtest $RUN ($SCENARIO: ${harnesses[*]}) against $URL, logs in $OUT"
 
 # The agents' homes hold only links to the real logins, so they see none of
 # the rules, skills or memories of whoever runs this.
@@ -59,18 +82,24 @@ fi
 
 unset CODEX_HOME CLAUDE_CONFIG_DIR CLAUDECODE CLAUDE_CODE_ENTRYPOINT
 
-# player <claude|codex> <name>: plays in its own git folder, skill installed
-# where its CLI looks for project skills; the stream goes to <name>.jsonl.
+# player <claude|codex> <name> <prompt>: plays in its own git folder, the kit
+# installed where its CLI looks for project skills, with a profile under
+# <name> made beforehand (an agent keeps a profile it finds, A20); the stream
+# goes to <name>.jsonl.
 player() {
-  local harness=$1 name=$2 dir=$OUT/$2 log=$OUT/$2.jsonl skilldir invoke prompt
+  local harness=$1 name=$2 prompt=$3 dir=$OUT/$2 log=$OUT/$2.jsonl skills invoke file
   case $harness in
-    claude) skilldir=$dir/.claude/skills/agent-casino invoke=/agent-casino ;;
-    codex) skilldir=$dir/.agents/skills/agent-casino invoke=\$agent-casino ;;
+    claude) skills=$dir/.claude/skills invoke=/agent-casino ;;
+    codex) skills=$dir/.agents/skills invoke=\$agent-casino ;;
   esac
-  mkdir -p "$skilldir"
-  git -C "$dir" init -q
-  curl -fsS --max-time 20 "$URL/skill.md" -o "$skilldir/SKILL.md"
-  prompt="$invoke 請用名字 $name、顯示名稱「$name 試玩」去排一局德州撲克。對手是另一個 agent，會同時來排隊，等到配對成功為止，然後打完。"
+  mkdir -p "$dir" && git -C "$dir" init -q
+  for file in agent-casino/SKILL.md agent-casino/scripts/casino.sh agent-casino-holdem/SKILL.md; do
+    curl -fsS --max-time 20 --create-dirs -o "$skills/$file" "$URL/skills/$file"
+  done
+  mkdir -p "$dir/.casino"
+  jq -nc --arg name "$name" --arg shown "$name 試玩" '{name: $name, display_name: $shown}' \
+    >"$dir/.casino/profile.json"
+  prompt="$invoke $prompt"
   cd "$dir"
   case $harness in
     claude)
@@ -86,62 +115,75 @@ player() {
   esac
 }
 
-claude_name=smoke-claude-$RUN
-codex_name=smoke-codex-$RUN
-player claude "$claude_name" &
-claude_pid=$!
-player codex "$codex_name" &
-codex_pid=$!
+n=${#harnesses[@]}
+names=() pids=()
+for i in "${!harnesses[@]}"; do
+  name=pt-${harnesses[$i]}-$RUN-$i
+  names+=("$name")
+  if [[ $SCENARIO == table ]]; then
+    prompt="請玩一局德州撲克，用 play 自動入座。這次一共有 $n 個 agent 同時來；你如果是房主，等到 $n 人都入座就開始，不用再問我；不是房主就等房主開始。打完為止。"
+  else
+    prompt="請開一間私人房玩一局德州撲克（room create），不用等別人，直接用 $BOTS 個 house-bot 補空位開始，不用再問我。打完為止。"
+  fi
+  player "${harnesses[$i]}" "$name" "$prompt" &
+  pids+=($!)
+done
 # On Ctrl-C, stop the agents too (each runs under `timeout`, which passes it on).
-trap 'pkill -TERM -P "$claude_pid" || true; pkill -TERM -P "$codex_pid" || true; exit 130' INT TERM
+trap 'for p in "${pids[@]}"; do pkill -TERM -P "$p" || true; done; exit 130' INT TERM
 
-rc_claude=0 rc_codex=0
-wait "$claude_pid" || rc_claude=$?
-wait "$codex_pid" || rc_codex=$?
-echo "claude exited $rc_claude, codex exited $rc_codex (124 = timed out)"
+rcs=()
+for p in "${pids[@]}"; do
+  rc=0
+  wait "$p" || rc=$?
+  rcs+=("$rc")
+done
+for i in "${!names[@]}"; do echo "${names[$i]} exited ${rcs[$i]} (124 = timed out)"; done
 
-# The platform decides: a finished match between the two names in which each
-# player's last action was its own, not the server playing for an agent that
-# had already gone.
-match=$(curl -fsS --max-time 20 "$URL/v1/matches" | jq -r --arg a "$claude_name" --arg b "$codex_name" \
-  '[.matches[] | select((.players | index($a)) and (.players | index($b)))
-    | select(.result | test("^(seat0_win|seat1_win|draw)$"))][0].match_id // empty')
+# The platform decides: a finished match with exactly these names (and the
+# house-bots), in which each player's last action was its own, not the server
+# playing for an agent that had already gone.
+want=$(printf '%s\n' "${names[@]}" | jq -R . | jq -sc 'sort')
+match=$(curl -fsS --max-time 20 "$URL/v1/matches" | jq -r --argjson want "$want" '
+  [.matches[] | select(([.players[] | select(. != "house-bot")] | sort) == $want)
+    | select(.result | test("^(seat[0-5]_win|draw)$"))][0].match_id // empty')
 if [ -z "$match" ]; then
-  echo "not ok - no finished match between $claude_name and $codex_name on $URL" >&2
+  echo "not ok - no finished match with ${names[*]} on $URL" >&2
   exit 1
 fi
 detail=$(curl -fsS --max-time 20 "$URL/v1/matches/$match")
 jq -r '
   . as $m
-  | "match \(.match_id): \(.players[0]) vs \(.players[1]), \(.result), \(.hands | length) hands, final stacks \(.final_stacks | map(tostring) | join(":"))",
-    (range(2) as $s
+  | "match \(.match_id): \(.players | join(", ")), \(.result), \(.hands | length) hands, final stacks \(.final_stacks | map(tostring) | join(":")), places \(.places | map(tostring) | join(":"))",
+    (range(.players | length) as $s | select($m.players[$s] != "house-bot")
       | [$m.hands[].events[] | select(.seat == $s and .type != "post_blind")] as $acts
       | "  \($m.players[$s]): \($acts | length) actions, \([$acts[] | select(.timeout)] | length) timeouts, last action \(if ($acts | last | .timeout) then "by the server (timeout)" else "its own" end)")' <<<"$detail"
-present=$(jq '[range(2) as $s | [.hands[].events[] | select(.seat == $s and .type != "post_blind")]
+present=$(jq '[range(.players | length) as $s | select(.players[$s] != "house-bot")
+  | [.hands[].events[] | select(.seat == $s and .type != "post_blind")]
   | length > 0 and (last | .timeout | not)] | all' <<<"$detail")
 
-# And each agent got the server's own match_over answer: the output of one of
-# its commands (not its own messages) holds a match_over that names this run's
-# opponent, so it can't come from skill.md either.
-# got_match_over <log> <opponent>
-got_match_over() {
-  jq -e -n -R --arg opp "$2" '
+# And each agent saw its match end in casino.sh's own output (one of its
+# commands, not its own messages): "The match is over: <result>" or, out of
+# chips at a bigger table, "You are out of the match: place N".
+# saw_end <log>
+saw_end() {
+  jq -e -n -R '
     [ inputs | fromjson? | objects | (select(.type == "user") | .message.content[]? | select(.type == "tool_result")
              | .content | if type == "array" then map(.text? // "") | join("\n") else . end),
             (select(.type == "item.completed" and .item.type == "command_execution")
              | .item.aggregated_output) ]
-    | map(strings | select(test("\"status\"\\s*:\\s*\"match_over\"")
-        and test("\"opponent_name\"\\s*:\\s*\"" + $opp + "\"")))
+    | map(strings | select(test("The match is over: (win|loss|draw)|You are out of the match: place [1-6]")))
     | length > 0' "$1" >/dev/null
 }
-seen_claude=no seen_codex=no
-got_match_over "$OUT/$claude_name.jsonl" "$codex_name" && seen_claude=yes
-got_match_over "$OUT/$codex_name.jsonl" "$claude_name" && seen_codex=yes
-echo "  match_over in the server's answers: $claude_name $seen_claude, $codex_name $seen_codex"
+all_ok=$([ "$present" = true ] && echo yes || echo no)
+for i in "${!names[@]}"; do
+  seen=no
+  saw_end "$OUT/${names[$i]}.jsonl" && seen=yes
+  echo "  ${names[$i]}: casino.sh said the match ended: $seen"
+  [ "$seen" = yes ] && [ "${rcs[$i]}" -eq 0 ] || all_ok=no
+done
 
-if [ "$present" != true ] || [ "$seen_claude" != yes ] || [ "$seen_codex" != yes ] ||
-  [ "$rc_claude" -ne 0 ] || [ "$rc_codex" -ne 0 ]; then
-  echo "not ok - an agent did not play match $match to match_over (see above and the logs in $OUT)" >&2
+if [ "$all_ok" != yes ]; then
+  echo "not ok - an agent did not play match $match to its end (see above and the logs in $OUT)" >&2
   exit 1
 fi
-echo "ok - both agents played match $match to match_over"
+echo "ok - every agent played match $match to its end"
