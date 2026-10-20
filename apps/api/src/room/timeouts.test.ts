@@ -23,16 +23,15 @@ import {
 import { startTestD1, type TestD1 } from '../db/test-d1';
 import {
   type Action,
-  applyAction,
-  type HandRecord,
-  legalActions,
-  type MatchState,
-  type Seat,
-  startMatch,
-} from '../holdem/match';
-import { viewFor } from '../holdem/view';
+  applyTableAction,
+  startTable,
+  type TableHandRecord,
+  type TableState,
+  tableLegalActions,
+} from '../holdem/table';
 import type { Bindings } from '../routes/env';
 import { RoomReferee, type RoomStorage } from './referee';
+import { seatView } from './view';
 
 let testD1: TestD1;
 
@@ -47,6 +46,8 @@ beforeEach(async () => {
 afterAll(async () => {
   await testD1?.dispose();
 });
+
+type Seat = 0 | 1;
 
 const BASE = 'http://api.test';
 const SEED = '0'.repeat(64);
@@ -271,8 +272,9 @@ const seededRoom = async (t: TestEnv, settings: Record<string, unknown>) => {
 
 // --- Engine oracle ----------------------------------------------------------
 
-const engineStart = (hands: number): MatchState =>
-  startMatch({
+const engineStart = (hands: number): TableState =>
+  startTable({
+    players: 2,
     seed: SEED,
     maxHands: hands,
     blindEvery: 50,
@@ -280,24 +282,24 @@ const engineStart = (hands: number): MatchState =>
   });
 
 const applyOk = (
-  match: MatchState,
-  seat: Seat,
+  match: TableState,
+  seat: number,
   action: Action,
   options: { timeout?: boolean } = {},
-): MatchState => {
-  const result = applyAction(match, seat, action, options);
+): TableState => {
+  const result = applyTableAction(match, seat, action, options);
   if (!result.ok) throw new Error(result.message);
   return result.state;
 };
 
 // holdem-rules 超時動作: check when check is legal, else fold.
-const timeoutActionFor = (match: MatchState): Action =>
-  legalActions(match).some(action => action.type === 'check')
+const timeoutActionFor = (match: TableState): Action =>
+  tableLegalActions(match).some(action => action.type === 'check')
     ? { type: 'check' }
     : { type: 'fold' };
 
 // The engine after the seat to act times out.
-const timedOut = (match: MatchState): MatchState => {
+const timedOut = (match: TableState): TableState => {
   const seat = match.toAct;
   if (seat === null) throw new Error('nobody to act');
   return applyOk(match, seat, timeoutActionFor(match), { timeout: true });
@@ -310,13 +312,11 @@ const passive = (legal: YourTurn['legal_actions']): Action =>
     : { type: 'call' };
 
 // `status` shows the engine's position to `seat`.
-const expectPosition = (status: Status, match: MatchState, seat: Seat) => {
-  const seen = viewFor(match, seat);
-  expect(status.hand_number).toBe(seen.hand_number);
-  expect(status.to_act_seat).toBe(seen.to_act_seat);
-  expect(status.view).toEqual(
-    seen.view === null ? null : { ...seen.view, pots: [seen.view.pot] },
-  );
+const expectPosition = (status: Status, match: TableState, seat: Seat) => {
+  const seen = seatView(match, seat);
+  expect(status.hand_number).toBe(match.handNumber);
+  expect(status.to_act_seat).toBe(match.toAct);
+  expect(status.view).toEqual(seen);
 };
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -337,7 +337,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
     match = applyOk(match, 0, { type: 'call' });
     // The engine confirms check is legal for seat 1 here.
     expect(match.toAct).toBe(1);
-    expect(legalActions(match).map(a => a.type)).toContain('check');
+    expect(tableLegalActions(match).map(a => a.type)).toContain('check');
     const bob = await yourTurn(t, roomId, tokens[1]);
     const deadline = joinedAt + 1_000 + 20_000;
     expect(bob.deadline).toBe(iso(deadline));
@@ -368,7 +368,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
     });
     let match = engineStart(2);
     expect(match.toAct).toBe(0);
-    expect(legalActions(match).map(a => a.type)).not.toContain('check');
+    expect(tableLegalActions(match).map(a => a.type)).not.toContain('check');
 
     t.clock.ms = joinedAt + 20_000;
     await t.referee(roomId).alarm();
@@ -384,7 +384,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
       winner_seat: 1,
       ended_by: 'fold',
     });
-    const hand1 = await t.storage(roomId).get<HandRecord>('hand:1');
+    const hand1 = await t.storage(roomId).get<TableHandRecord>('hand:1');
     expect(hand1?.events.at(-1)).toEqual({
       seat: 0,
       street: 'preflop',
@@ -411,7 +411,7 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
     expect(bob.deadline).toBe(iso(t.storage(roomId).alarm ?? 0));
   });
 
-  it('超時 (alarm): while the room waits for an opponent the only alarm is the 5-minute dissolution, not a turn deadline', async () => {
+  it('超時 (alarm): while the room waits for an opponent the only alarm is the 2-minute host absence, not a turn deadline', async () => {
     const t = makeEnv();
     const createdAt = t.clock.ms;
     const created = await post(t.env, '/v1/rooms', {
@@ -420,9 +420,9 @@ describe('狀況處理 超時: at the deadline the server plays the timeout acti
       settings: { turn_seconds: 10 },
     });
     const room = decodeCreate(await created.json());
-    // spec requires 等人超過 5 分鐘 (slice 2): a waiting room is due to dissolve
-    // at created_at + 5 min, so that alarm is scheduled from the start.
-    expect(t.storage(room.room_id).alarm).toBe(createdAt + 300_000);
+    // A waiting room closes after the host makes no request for 2 minutes
+    // at last host request + 2 min, so that alarm is scheduled from the start.
+    expect(t.storage(room.room_id).alarm).toBe(createdAt + 120_000);
   });
 
   it('超時 (alarm): alarm() 1 ms before the deadline plays nothing; the turn and the alarm stay', async () => {
@@ -640,7 +640,7 @@ describe('A3 + 狀況處理 太晚: a timeout uses up the turn_id', () => {
     );
     const match = timedOut(engineStart(2));
     expectPosition(errorState(error), match, 0);
-    const hand1 = await t.storage(roomId).get<HandRecord>('hand:1');
+    const hand1 = await t.storage(roomId).get<TableHandRecord>('hand:1');
     expect(hand1?.events.at(-1)).toMatchObject({ type: 'fold', timeout: true });
   });
 
@@ -852,7 +852,9 @@ describe('狀況處理 連續 3 次超時 / A9: a seat with 3 consecutive timeou
       );
     }
     for (let hand = 1; hand <= HANDS; hand++) {
-      const record = await t.storage(roomId).get<HandRecord>(`hand:${hand}`);
+      const record = await t
+        .storage(roomId)
+        .get<TableHandRecord>(`hand:${hand}`);
       const played = record?.events.filter(e => e.type !== 'post_blind');
       expect(played?.length).toBeGreaterThan(0);
       expect(played?.every(e => e.timeout === true)).toBe(true);

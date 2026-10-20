@@ -16,18 +16,17 @@ import {
 } from '../contract/schemas';
 import { banName } from '../db/bans';
 import { startTestD1, type TestD1 } from '../db/test-d1';
+import { dealHand } from '../holdem/shuffle';
 import {
   type Action,
-  applyAction,
-  legalActions,
-  type MatchState,
-  type Seat,
-  startMatch,
-} from '../holdem/match';
-import { dealHand } from '../holdem/shuffle';
-import { viewFor } from '../holdem/view';
+  applyTableAction,
+  startTable,
+  type TableState,
+  tableLegalActions,
+} from '../holdem/table';
 import { matchQueueIn } from '../matchmaker/pairing';
 import { RoomReferee, type RoomStorage } from '../room/referee';
+import { seatView } from '../room/view';
 import {
   signRoomToken,
   verifyRoomToken,
@@ -48,6 +47,8 @@ beforeEach(async () => {
 afterAll(async () => {
   await testD1?.dispose();
 });
+
+type Seat = 0 | 1;
 
 const BASE = 'http://api.test';
 const TOKEN_SECRET = 'test-token-secret';
@@ -521,12 +522,13 @@ describe('POST /v1/rooms', () => {
     expect(room.hint.toLowerCase()).toContain('opponent');
   });
 
-  it('hint shares watch_url with the owner before wait and explains cancellation after 5 minutes', async () => {
+  it('hint shares watch_url with the owner before wait and explains cancellation after 2 minutes without a request', async () => {
     const { env } = makeEnv();
     const room = await createRoom(env);
     expectWatchBeforeWait(room.hint, room.room_id);
-    expect.soft(room.hint).toContain('5 minutes');
-    expect.soft(room.hint).toContain('cancelled');
+    expect.soft(room.hint).toContain('2 minutes');
+    expect.soft(room.hint).toMatch(/request/i);
+    expect.soft(room.hint).toMatch(/clos|cancel/i);
   });
 
   it('the bot room hint shares watch_url with the owner before wait', async () => {
@@ -1171,15 +1173,16 @@ const errorState = (body: ErrorBody): Status => {
 const engineAfter = (
   config: { seed: string; max_hands: number; startingStack?: number },
   actions: ReadonlyArray<readonly [Seat, Action]>,
-): MatchState => {
-  let match = startMatch({
+): TableState => {
+  let match = startTable({
+    players: 2,
     seed: config.seed,
     maxHands: config.max_hands,
     blindEvery: 50,
     startingStack: config.startingStack ?? 40,
   });
   for (const [seat, action] of actions) {
-    const result = applyAction(match, seat, action);
+    const result = applyTableAction(match, seat, action);
     if (!result.ok) throw new Error(result.message);
     match = result.state;
   }
@@ -1228,13 +1231,13 @@ describe('POST /v1/rooms/{room_id}/actions: accepted', () => {
     const bob = await yourTurn(t.env, roomId, tokens[1]);
     expect(bob.turn_id).not.toBe(first.turn_id);
     expect(bob.to_act_seat).toBe(1);
-    const expected = viewFor(
+    const expected = seatView(
       engineAfter({ seed: SEED, max_hands: 10 }, [[0, { type: 'call' }]]),
       1,
     );
     expect(bob.view).toEqual({
-      ...expected.view,
-      pots: [required(expected.view).pot],
+      ...expected,
+      pots: [required(expected).pot],
     });
     expect(bob.legal_actions).toEqual(
       expect.arrayContaining([{ type: 'check' }]),
@@ -1274,15 +1277,15 @@ describe('POST /v1/rooms/{room_id}/actions: accepted', () => {
       amount: 6,
     });
     const bob = await yourTurn(t.env, roomId, tokens[1]);
-    const expected = viewFor(
+    const expected = seatView(
       engineAfter({ seed: SEED, max_hands: 10 }, [
         [0, { type: 'raise', amount: 6 }],
       ]),
       1,
     );
     expect(bob.view).toEqual({
-      ...expected.view,
-      pots: [required(expected.view).pot],
+      ...expected,
+      pots: [required(expected).pot],
     });
     expect(bob.view?.history.at(-1)).toEqual({
       seat: 0,
@@ -1748,7 +1751,7 @@ describe('POST /v1/rooms/{room_id}/actions: the next hand', () => {
       to_act_seat: 1,
       view: { button_seat: 1, street: 'preflop' },
     });
-    const engineView = viewFor(expected, 1).view;
+    const engineView = seatView(expected, 1);
     expect(bob.view).toEqual({
       ...engineView,
       pots: [required(engineView).pot],
@@ -1772,7 +1775,7 @@ describe('POST /v1/rooms/{room_id}/actions: the next hand', () => {
       blinds: [1, 2],
       winner_seat: 1,
     });
-    expect(bob.legal_actions).toEqual(legalActions(expected));
+    expect(bob.legal_actions).toEqual(tableLegalActions(expected));
 
     const alice = await state(t.env, roomId, tokens[0]);
     expect(alice.status).toMatchObject({
@@ -2031,7 +2034,7 @@ describe('POST /v1/rooms/{room_id}/leave while waiting for an opponent', () => {
       to_act_seat: null,
       ratings: null,
       last_hand: null,
-      final_stacks: [40, 40],
+      final_stacks: [40],
     });
     expect(over.hint.length).toBeGreaterThan(0);
   });
@@ -2042,7 +2045,7 @@ describe('POST /v1/rooms/{room_id}/leave while waiting for an opponent', () => {
       settings: { blind_every: 50, starting_stack: 100 },
     });
     const over = await leave(t.env, room.room_id, room.token);
-    expect(over.final_stacks).toEqual([100, 100]);
+    expect(over.final_stacks).toEqual([100]);
   });
 
   it('afterwards state of seat 0 is the same cancelled match_over', async () => {

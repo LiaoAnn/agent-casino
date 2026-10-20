@@ -1,5 +1,4 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { Seat } from '../holdem/match';
 import type { Matchmaker } from '../matchmaker/matchmaker';
 import { type CreateInput, type RoomApi, RoomReferee } from './referee';
 
@@ -32,28 +31,36 @@ export class Room extends DurableObject<Env> implements RoomApi {
     return this.#referee.join(input);
   }
 
-  status(seat: Seat, options: { wait: boolean }) {
-    return this.#referee.status(seat, options);
+  setWatchUrl(name: string, watch_url: string) {
+    return this.#referee.setWatchUrl(name, watch_url);
+  }
+
+  start(name: string, input: Parameters<RoomReferee['start']>[1]) {
+    return this.#referee.start(name, input);
+  }
+
+  status(name: string, options: { wait: boolean }) {
+    return this.#referee.status(name, options);
   }
 
   act(
-    seat: Seat,
+    name: string,
     input: Parameters<RoomReferee['act']>[1],
     options?: Parameters<RoomReferee['act']>[2],
   ) {
-    return this.#referee.act(seat, input, options);
+    return this.#referee.act(name, input, options);
   }
 
-  leave(seat: Seat) {
-    return this.#referee.leave(seat);
+  leave(name: string) {
+    return this.#referee.leave(name);
   }
 
   abort() {
     return this.#referee.abort();
   }
 
-  watch(seat: Seat) {
-    return this.#referee.watch(seat);
+  watch(name: string) {
+    return this.#referee.watch(name);
   }
 
   override alarm() {

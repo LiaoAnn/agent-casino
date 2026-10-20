@@ -3,103 +3,107 @@
 // While the match is played it holds nothing the seat couldn't get from its
 // own `state` at the same time, except the seat's notes.
 import type { WatchResponse } from '../contract/schemas';
-import type { SeatResult } from '../db/schema';
-import type {
-  HandRecord,
-  HistoryEvent,
-  MatchState,
-  Seat,
-} from '../holdem/match';
-import { otherSeat } from '../holdem/match';
-import { dealHand } from '../holdem/shuffle';
-import { viewFor } from '../holdem/view';
-import { headsUpPots, headsUpSeats, placesOf } from './heads-up';
+import type { Card } from '../holdem/cards';
+import { dealTable } from '../holdem/shuffle';
+import type { TableEvent, TableHandRecord, TableState } from '../holdem/table';
+import { asSeat, dealtIn, potsOut, seatInfos, seatView } from './view';
 
 // The seat's notes of one hand, by the step's position in the hand's events.
 export type HandNotes = Record<number, string>;
 
+type SeatResult = Extract<WatchResponse, { match_id: string }>['result'];
+
 export interface WatchInput {
   room_id: string;
-  seat: Seat;
-  names: [string, string | null];
+  seat: number;
+  // By seat, everyone seated so far.
+  names: string[];
   // What people see of each seat (A20).
-  display_names: [string, string | null];
+  display_names: string[];
   settings: WatchResponse['settings'];
+  visibility: WatchResponse['visibility'];
+  // By seat: who left mid-match.
+  left: boolean[];
+  seats_open: number;
   seed: string;
-  // `null` until the opponent joins.
-  match: MatchState | null;
+  // `null` until the table starts.
+  table: TableState | null;
   // The hands played to the end, in order.
-  hands: HandRecord[];
+  hands: TableHandRecord[];
   // The watched seat's notes, by hand number.
   notes: Record<number, HandNotes>;
   // Epoch ms; only while it is the watched seat's turn.
   deadline: number | null;
   ended: {
     result: SeatResult;
-    final_stacks: [number, number];
+    places: number[] | null;
+    final_stacks: number[];
     ratings: Extract<WatchResponse, { match_id: string }>['ratings'];
-    // The seat that left mid-match, if one did.
-    left?: Seat;
   } | null;
 }
 
-const withNotes = (events: HistoryEvent[], notes: HandNotes = {}) =>
+const withNotes = (events: TableEvent[], notes: HandNotes = {}) =>
   events.map((event, seq) => {
     const note = notes[seq];
-    return note === undefined ? event : { ...event, note };
+    const out = { ...event, seat: asSeat(event.seat) };
+    return note === undefined ? out : { ...out, note };
   });
 
 export function watchView(input: WatchInput): WatchResponse {
-  const { match, seat, ended, notes } = input;
-  const seen = match ? viewFor(match, seat) : null;
-  const opponent = otherSeat(seat);
+  const { table, seat, ended, notes } = input;
+  const seen = table && seatView(table, seat);
+  let before: number[] = input.names.map(() => input.settings.starting_stack);
   const hands = input.hands.map(hand => {
-    const dealt = dealHand(input.seed, hand.hand_number).holeCards;
-    // The seat always saw its own cards; the opponent's only at showdown
+    // Hand n is dealt to the seats with chips when it began (holdem-rules
+    // 種子與洗牌), so its cards come from the seed as the record shows.
+    const dealt = dealtIn(before);
+    const { holeCards } = dealTable(input.seed, hand.hand_number, dealt.length);
+    before = hand.stacks;
+    // The seat always saw its own cards; the others' only at showdown
     // until the match is over and the seed is public (A13).
-    const hole_cards: [(typeof dealt)[0] | null, (typeof dealt)[1] | null] = [
-      dealt[0],
-      dealt[1],
-    ];
-    if (!ended && hand.ended_by !== 'showdown') hole_cards[opponent] = null;
+    const hole_cards = input.names.map((_, s) => {
+      const k = dealt.indexOf(s);
+      const cards =
+        k < 0 ? null : ([holeCards[k][0], holeCards[k][1]] as [Card, Card]);
+      if (ended || s === seat) return cards;
+      return hand.hole_cards?.[s] ? cards : null;
+    });
     return {
       hand_number: hand.hand_number,
       blinds: hand.blinds,
-      button_seat: hand.button_seat,
+      button_seat: asSeat(hand.button_seat),
       board: hand.board,
       hole_cards,
       events: withNotes(hand.events, notes[hand.hand_number]),
-      winner_seat: hand.winner_seat,
+      winner_seat: hand.winner_seat === null ? null : asSeat(hand.winner_seat),
       pot: hand.pot,
-      pots: headsUpPots(hand),
+      pots: potsOut(hand),
       ended_by: hand.ended_by,
       stacks: hand.stacks,
     };
   });
-  const seated = (input.names[1] === null ? [0] : [0, 1]) as Seat[];
   const common = {
     room_id: input.room_id,
-    seat,
-    players: seated.map(s => input.names[s] ?? ''),
-    display_names: seated.map(s => input.display_names[s] ?? ''),
+    seat: asSeat(seat),
+    players: input.names,
+    display_names: input.display_names,
     settings: input.settings,
-    visibility: 'private' as const,
-    seats: headsUpSeats({
+    visibility: input.visibility,
+    seats: seatInfos({
       names: input.names,
       display_names: input.display_names,
-      settings: input.settings,
-      match,
-      places: ended && placesOf(ended.result),
-      ...(ended?.left !== undefined && { left: ended.left }),
+      starting_stack: input.settings.starting_stack,
+      table,
+      ended,
+      left: input.left,
     }),
-    seats_open: match ? 0 : 2 - seated.length,
-    hand_number: seen?.hand_number ?? null,
+    seats_open: input.seats_open,
+    hand_number: table?.handNumber ?? null,
     view: seen && {
-      ...seen.view,
-      pots: [seen.view.pot],
+      ...seen,
       // A match that is over never raises the blinds again (A19).
       ...(ended && { next_blinds_at_hand: null }),
-      history: withNotes(seen.view.history, notes[seen.hand_number]),
+      history: withNotes(table.history, notes[table.handNumber]),
     },
     hands,
   };
@@ -111,18 +115,19 @@ export function watchView(input: WatchInput): WatchResponse {
       deadline: null,
       match_id: input.room_id,
       result: ended.result,
-      places: placesOf(ended.result),
+      places: ended.places,
       final_stacks: ended.final_stacks,
       ratings: ended.ratings,
-    };
+    } as WatchResponse;
   }
+  const toAct = table?.toAct ?? null;
   return {
     ...common,
-    room_status: match ? 'playing' : 'waiting',
-    to_act_seat: seen?.to_act_seat ?? null,
+    room_status: table ? 'playing' : 'waiting',
+    to_act_seat: toAct === null ? null : asSeat(toAct),
     deadline:
-      input.deadline !== null && seen?.to_act_seat === seat
+      input.deadline !== null && toAct === seat
         ? new Date(input.deadline).toISOString()
         : null,
-  };
+  } as WatchResponse;
 }

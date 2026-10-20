@@ -2,17 +2,17 @@
 // Only public referee methods and the pure holdem engine are exercised.
 import { describe, expect, it, vi } from 'vitest';
 import type { RoomStatus } from '../contract/schemas';
-import type { MatchRecordInput, RecordedMatch } from '../db/records';
 import { randomAction } from '../holdem/bot';
 import {
   type Action,
-  applyAction,
-  type HandRecord,
-  legalActions,
-  startMatch,
-} from '../holdem/match';
-import { viewFor } from '../holdem/view';
+  applyTableAction,
+  startTable,
+  type TableHandRecord,
+  tableLegalActions,
+} from '../holdem/table';
+import type { RecordedMatch, TableRecordInput } from './referee';
 import { RoomReferee, type RoomStorage } from './referee';
+import { seatView } from './view';
 
 const SETTINGS = {
   max_hands: 4,
@@ -27,6 +27,7 @@ const INPUT = {
   settings: SETTINGS,
   seed: '0'.repeat(64),
   test: null,
+  visibility: null,
 };
 
 class MemoryStorage implements RoomStorage {
@@ -60,7 +61,7 @@ function fixture(values: readonly number[] = [0.6], settings = SETTINGS) {
   const clock = { ms: Date.parse('2026-10-18T00:00:00Z') };
   const random = sequence(values);
   const recorded: RecordedMatch = { rated: false, ratings: null };
-  const record = vi.fn(async (_input: MatchRecordInput) => recorded);
+  const record = vi.fn(async (_input: TableRecordInput) => recorded);
   // Variables permit testing the proposed optional interface before S2 exists.
   const options = { now: () => clock.ms, waitMs: 1, random, record };
   const referee = new RoomReferee(storage, options);
@@ -70,10 +71,13 @@ function fixture(values: readonly number[] = [0.6], settings = SETTINGS) {
       settings,
       ...(bot ? { opponent: 'bot' as const } : {}),
     };
-    expect(await referee.create(input)).toEqual({ ok: true, value: null });
+    expect(await referee.create(input)).toEqual({
+      ok: true,
+      value: createdSeat(input),
+    });
   };
   const status = async (wait = false): Promise<typeof RoomStatus.Type> => {
-    const response = await referee.status(0, { wait });
+    const response = await referee.status(INPUT.name, { wait });
     if (!response.ok) throw new Error(JSON.stringify(response.error));
     return response.value;
   };
@@ -86,7 +90,7 @@ function fixture(values: readonly number[] = [0.6], settings = SETTINGS) {
   const act = async (action: Action) => {
     const current = await turn();
     expect(
-      await referee.act(0, { turn_id: current.turn_id, ...action }),
+      await referee.act(INPUT.name, { turn_id: current.turn_id, ...action }),
     ).toMatchObject({
       ok: true,
       value: { status: 'accepted' },
@@ -170,20 +174,21 @@ describe('T13 S2: house-bot in RoomReferee', () => {
     'matches randomAction for $label, persists legal non-timeout bot events and records house-bot',
     async ({ values }) => {
       // Running twice also pins down the same-stream/same-actions guarantee.
-      const runs: HandRecord[][] = [];
+      const runs: TableHandRecord[][] = [];
       for (let run = 0; run < 2; run++) {
         const t = fixture(values);
         const oracleRandom = sequence(values);
-        let engine = startMatch({
+        let engine = startTable({
+          players: 2,
           seed: INPUT.seed,
           maxHands: SETTINGS.max_hands,
           blindEvery: 50,
           startingStack: SETTINGS.starting_stack,
         });
-        const hands: HandRecord[] = [];
+        const hands: TableHandRecord[] = [];
         const step = (action: Action) => {
           if (engine.toAct === null) throw new Error('Expected engine turn');
-          const applied = applyAction(engine, engine.toAct, action);
+          const applied = applyTableAction(engine, engine.toAct, action);
           if (!applied.ok) throw new Error(applied.message);
           engine = applied.state;
           hands.push(...applied.finishedHands);
@@ -192,19 +197,36 @@ describe('T13 S2: house-bot in RoomReferee', () => {
         for (let n = 0; !engine.over; n++) {
           expect(n).toBeLessThan(500);
           const turn = await t.turn();
-          expect(turn).toMatchObject(viewFor(engine, 0));
-          expect(turn.legal_actions).toEqual(legalActions(engine));
-          const action: Action = legalActions(engine).some(
+          expect(turn).toMatchObject({
+            hand_number: engine.handNumber,
+            to_act_seat: engine.toAct,
+            view: seatView(engine, 0),
+            last_hand:
+              engine.lastHand === null
+                ? null
+                : {
+                    ...engine.lastHand,
+                    pots: engine.lastHand.pots.map(({ amount, winners }) => ({
+                      amount,
+                      winner_seats: winners,
+                    })),
+                  },
+          });
+          expect(turn.legal_actions).toEqual(tableLegalActions(engine));
+          const action: Action = tableLegalActions(engine).some(
             a => a.type === 'check',
           )
             ? { type: 'check' }
             : { type: 'call' };
           step(action);
           while (!engine.over && engine.toAct === 1) {
-            step(randomAction(legalActions(engine), oracleRandom));
+            step(randomAction(tableLegalActions(engine), oracleRandom));
           }
           expect(
-            await t.referee.act(0, { turn_id: turn.turn_id, ...action }),
+            await t.referee.act(INPUT.name, {
+              turn_id: turn.turn_id,
+              ...action,
+            }),
           ).toMatchObject({
             ok: true,
             value: { status: 'accepted' },
@@ -214,7 +236,21 @@ describe('T13 S2: house-bot in RoomReferee', () => {
             oracleRandom.mock.calls.length,
           );
           const actual = await t.status(true);
-          expect(actual).toMatchObject(viewFor(engine, 0));
+          expect(actual).toMatchObject({
+            hand_number: engine.handNumber,
+            to_act_seat: engine.toAct,
+            view: seatView(engine, 0),
+            last_hand:
+              engine.lastHand === null
+                ? null
+                : {
+                    ...engine.lastHand,
+                    pots: engine.lastHand.pots.map(({ amount, winners }) => ({
+                      amount,
+                      winner_seats: winners,
+                    })),
+                  },
+          });
           expect(actual.status).toBe(engine.over ? 'match_over' : 'your_turn');
         }
         expect(t.record).toHaveBeenCalledTimes(1);
@@ -241,10 +277,11 @@ describe('T13 S2: house-bot in RoomReferee', () => {
     },
   );
 
-  it('times out only the human, checks when possible, and finishes automatically after three consecutive timeouts', async () => {
+  it('times out only the human, checks when possible, and ends as bots_only after three consecutive timeouts', async () => {
     const t = fixture([0.6], { ...SETTINGS, max_hands: 10 });
     await t.create();
     let thirdDeadline = 0;
+    let secondTimeout: Awaited<ReturnType<typeof t.status>> | undefined;
     for (let n = 0; n < 3; n++) {
       const turn = await t.turn();
       expect(t.storage.alarm).toBe(Date.parse(turn.deadline));
@@ -252,22 +289,37 @@ describe('T13 S2: house-bot in RoomReferee', () => {
       thirdDeadline = t.clock.ms;
       await t.referee.alarm();
       if (n < 2) expect((await t.status()).room_status).toBe('playing');
+      if (n === 1) secondTimeout = await t.status();
     }
+    // The second timeout checked for the human (nothing to call) and the bot never timed out.
+    expect(secondTimeout?.status).toBe('your_turn');
+    if (secondTimeout?.status !== 'your_turn') throw new Error('Expected turn');
+    expect(secondTimeout.view?.history.filter(step => step.timeout)).toEqual([
+      expect.objectContaining({ seat: 0, type: 'check', timeout: true }),
+    ]);
+    // The third timeout marks the human absent; only house-bot is left, so the match ends at once.
     expect(await t.status(true)).toMatchObject({
       status: 'match_over',
       room_status: 'finished',
+      result: 'loss',
+      place: 2,
       ratings: null,
     });
     expect(t.clock.ms).toBe(thirdDeadline);
     expect(t.record).toHaveBeenCalledTimes(1);
     const input = t.record.mock.calls[0][0];
     expect(input.players).toEqual([INPUT.name, 'house-bot']);
-    const events = input.hands.flatMap(hand => hand.events);
-    const timeouts = events.filter(event => event.timeout);
-    expect(timeouts.length).toBeGreaterThan(3);
-    expect(timeouts.every(event => event.seat === 0)).toBe(true);
-    expect(timeouts[0]).toMatchObject({ type: 'fold', timeout: true });
-    expect(timeouts[1]).toMatchObject({ type: 'check', timeout: true });
+    expect(input.end_reason).toBe('bots_only');
+    expect(input.places).toEqual([2, 1]);
+    // The unfinished hand is called off and not recorded: only hand 1 (the first timeout, a fold).
+    expect(input.hands).toHaveLength(1);
+    expect(input.final_stacks.reduce((sum, stack) => sum + stack, 0)).toBe(80);
+    const timeouts = input.hands
+      .flatMap(hand => hand.events)
+      .filter(event => event.timeout);
+    expect(timeouts).toEqual([
+      expect.objectContaining({ seat: 0, type: 'fold', timeout: true }),
+    ]);
     expect(t.storage.alarm).toBeNull();
   });
 
@@ -333,3 +385,55 @@ describe('T34 freezeout against house-bot', () => {
     }
   });
 });
+
+// Transitional heads-up seat answer (A25); keep exact create assertions.
+const createdSeat = (input: {
+  room_id: string;
+  invite_code: string;
+  name: string;
+  settings: {
+    starting_stack: number;
+    max_hands: number;
+    turn_seconds: number;
+    blind_every: number | null;
+  };
+  opponent?: 'bot';
+}) => {
+  const bot = input.opponent === 'bot';
+  return {
+    room_id: input.room_id,
+    visibility: 'private',
+    invite_code: input.invite_code,
+    seat: 0,
+    is_host: true,
+    display_name: input.name,
+    opponent_name: bot ? 'house-bot' : null,
+    opponent_display_name: bot ? 'House Bot' : null,
+    seats: [
+      {
+        seat: 0,
+        name: input.name,
+        display_name: input.name,
+        stack: input.settings.starting_stack - (bot ? 1 : 0),
+        bet_this_street: bot ? 1 : 0,
+        status: bot ? 'playing' : 'waiting',
+        place: null,
+      },
+      ...(bot
+        ? [
+            {
+              seat: 1,
+              name: 'house-bot',
+              display_name: 'House Bot',
+              stack: input.settings.starting_stack - 2,
+              bet_this_street: 2,
+              status: 'playing',
+              place: null,
+            },
+          ]
+        : []),
+    ],
+    seats_open: bot ? 0 : 1,
+    settings: input.settings,
+  };
+};

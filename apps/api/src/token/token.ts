@@ -9,7 +9,8 @@ export const TOKEN_TTL_SECONDS = 86_400;
 
 export interface WatchTokenClaims {
   room_id: string;
-  seat: 0 | 1;
+  // 0–5 when signed; the Room DO goes by `name` (房間 token).
+  seat: number;
   name: string;
 }
 
@@ -102,7 +103,9 @@ const isWatchClaims = (value: unknown): value is WatchTokenClaims => {
   const { room_id, seat, name } = value as Record<string, unknown>;
   return (
     typeof room_id === 'string' &&
-    (seat === 0 || seat === 1) &&
+    Number.isInteger(seat) &&
+    (seat as number) >= 0 &&
+    (seat as number) <= 5 &&
     typeof name === 'string'
   );
 };

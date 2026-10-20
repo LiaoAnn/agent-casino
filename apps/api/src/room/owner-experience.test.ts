@@ -32,13 +32,14 @@ const fixture = async (max_hands = 5, blind_every = 50) => {
       settings: { starting_stack: 10, blind_every, max_hands, turn_seconds: 5 },
       seed: '0'.repeat(64),
       test: null,
+      visibility: null,
     }),
   ).toMatchObject({ ok: true });
   expect(await room.join({ name: 'bob', invite_code: 'ABCDEF' })).toMatchObject(
     { ok: true },
   );
   const status = async (seat: 0 | 1, wait = false) => {
-    const answer = await room.status(seat, { wait });
+    const answer = await room.status(['alice', 'bob'][seat], { wait });
     if (!answer.ok) throw new Error(JSON.stringify(answer));
     return answer.value;
   };
@@ -46,7 +47,7 @@ const fixture = async (max_hands = 5, blind_every = 50) => {
     const turn = await status(seat);
     if (turn.status !== 'your_turn') throw new Error('Expected a turn');
     const action = { turn_id: turn.turn_id, type: 'fold' as const };
-    expect(await room.act(seat, action)).toMatchObject({
+    expect(await room.act(['alice', 'bob'][seat], action)).toMatchObject({
       ok: true,
       value: { status: 'accepted' },
     });
@@ -76,13 +77,13 @@ describe('T43 completed hands since this seat last accepted an action', () => {
     const turn = await t.status(0);
     if (turn.status !== 'your_turn') throw new Error('Expected first turn');
     expect(
-      await t.room.act(0, { turn_id: turn.turn_id, type: 'call' }),
+      await t.room.act('alice', { turn_id: turn.turn_id, type: 'call' }),
     ).toMatchObject({ ok: true });
     const bb = await t.status(1);
     if (bb.status !== 'your_turn') throw new Error('Expected big blind turn');
     expectHands(bb, []);
     expect(
-      await t.room.act(1, { turn_id: bb.turn_id, type: 'check' }),
+      await t.room.act('bob', { turn_id: bb.turn_id, type: 'check' }),
     ).toMatchObject({ ok: true });
     const flop = await t.status(1);
     expect(flop).toMatchObject({ status: 'your_turn', hand_number: 1 });
@@ -110,7 +111,7 @@ describe('T43 completed hands since this seat last accepted an action', () => {
     for (const wait of [false, true])
       expectHands(await t.status(1, wait), [hand1.last_hand]);
     expect(
-      await t.room.act(1, {
+      await t.room.act('bob', {
         turn_id: hand1.turn_id,
         type: 'raise',
         amount: -1,
@@ -121,7 +122,7 @@ describe('T43 completed hands since this seat last accepted an action', () => {
     const hand2 = await t.status(0);
     if (hand2.status !== 'your_turn') throw new Error('Expected hand 3');
     expectHands(hand2, [hand1.last_hand, hand2.last_hand]);
-    expect(await t.room.act(0, firstAction)).toMatchObject({
+    expect(await t.room.act('alice', firstAction)).toMatchObject({
       ok: true,
       value: { duplicate: true },
     });
@@ -132,7 +133,7 @@ describe('T43 completed hands since this seat last accepted an action', () => {
     await t.fold(1);
     const hand4 = await t.status(0);
     if (hand4.status !== 'your_turn') throw new Error('Expected hand 5');
-    const watch = await t.room.watch(0);
+    const watch = await t.room.watch('alice');
     if (!watch.ok) throw new Error('Expected watch');
     expect(watch.value.hands).toHaveLength(4);
     const hand3 = watch.value.hands[2];
@@ -183,7 +184,7 @@ describe('T43 completed hands since this seat last accepted an action', () => {
       actedAt[seat] = turn.hand_number ?? 0;
       await t.fold(seat);
     }
-    const watch = await t.room.watch(0);
+    const watch = await t.room.watch('alice');
     if (!watch.ok) throw new Error('Expected watch');
     const hands = watch.value.hands;
     expect(watch.value).not.toHaveProperty('tell_owner');
@@ -227,7 +228,7 @@ describe('T43 unrated end messages', () => {
     async ending => {
       const t = await fixture(ending === 'draw' ? 2 : 5);
       if (ending === 'leave')
-        expect(await t.room.leave(0)).toMatchObject({ ok: true });
+        expect(await t.room.leave('alice')).toMatchObject({ ok: true });
       else if (ending === 'void')
         expect(await t.room.abort()).toMatchObject({ ok: true });
       else {
@@ -279,9 +280,10 @@ describe('T43 unrated end messages', () => {
         },
         seed: '0'.repeat(64),
         test: null,
+        visibility: null,
       }),
     ).toMatchObject({ ok: true });
-    const left = await room.leave(0);
+    const left = await room.leave('alice');
     if (!left.ok) throw new Error('Expected cancelled room');
     expect
       .soft(left.value)

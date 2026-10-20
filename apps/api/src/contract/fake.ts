@@ -15,6 +15,7 @@ import {
 } from '../holdem/match';
 import { dealHand, mulberry32 } from '../holdem/shuffle';
 import { headsUpPots, placesOf } from '../room/heads-up';
+import { upgradeHand, upgradeMatch } from '../room/legacy';
 import { type HandNotes, watchView } from '../room/watch';
 import { fakeTable } from './fake-table';
 import type {
@@ -257,10 +258,13 @@ function fakeWatch(seed: number): {
       seat: 0,
       names,
       display_names: [displayName(names[0]), displayName(names[1])],
+      left: [false, false],
       settings,
+      visibility: 'private',
+      seats_open: 0,
       seed: played.config.seed,
-      match: played.state,
-      hands: played.hands,
+      table: upgradeMatch(played.state),
+      hands: played.hands.map(upgradeHand),
       notes: played.notes,
       deadline: ended ? null : startedAt + settings.turn_seconds * 1000,
       ended,
@@ -273,6 +277,7 @@ function fakeWatch(seed: number): {
   const result = a === b ? 'draw' : a > b ? 'seat0_win' : 'seat1_win';
   const over = watched(roomId(random), finished, {
     result,
+    places: placesOf(result),
     final_stacks: [a, b],
     ratings: [
       { name: names[0], rating: 1500 + change, change },

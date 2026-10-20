@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MatchRecordInput, RecordedMatch } from '../db/records';
+import type { RecordedMatch, TableRecordInput } from './referee';
 import { RoomReferee, type RoomStorage } from './referee';
 
 const SECOND = 1_000;
@@ -35,7 +35,7 @@ class MemoryStorage implements RoomStorage {
 }
 
 async function fixture(
-  record: (input: MatchRecordInput) => Promise<RecordedMatch>,
+  record: (input: TableRecordInput) => Promise<RecordedMatch>,
 ) {
   const storage = new MemoryStorage();
   const clock = { ms: Date.parse('2026-10-18T00:00:00.000Z') };
@@ -58,15 +58,29 @@ async function fixture(
       },
       seed: '0'.repeat(64),
       test: null,
+      visibility: null,
     }),
-  ).toEqual({ ok: true, value: null });
+  ).toEqual({
+    ok: true,
+    value: createdSeat({
+      room_id: 'r_retry00001',
+      invite_code: 'ABC234',
+      name: 'Alice',
+      settings: {
+        max_hands: 2,
+        turn_seconds: 10,
+        blind_every: 50,
+        starting_stack: 40,
+      },
+    }),
+  });
   expect(
     await referee.join({ name: 'Bob', invite_code: 'ABC234' }),
   ).toMatchObject({ ok: true });
   // Finish at a distinct time so retry age must be measured from match end.
   clock.ms += 1_234;
   const endedAt = clock.ms;
-  expect(await referee.leave(0)).toMatchObject({
+  expect(await referee.leave('Alice')).toMatchObject({
     ok: false,
     error: { code: 'unavailable', retryable: true },
   });
@@ -135,7 +149,7 @@ describe('T22 S1: bounded match-record retries', () => {
     expect(times).toHaveLength(3);
     expect(t.spy).toHaveBeenCalledTimes(4);
     expect(t.storage.alarm).toBeNull();
-    expect(await t.referee.status(0, { wait: false })).toMatchObject({
+    expect(await t.referee.status('Alice', { wait: false })).toMatchObject({
       ok: true,
       value: { status: 'match_over', ratings: RECORDED.ratings },
     });
@@ -158,3 +172,55 @@ describe('T22 S1: bounded match-record retries', () => {
     expect(t.storage.alarm).toBeNull();
   });
 });
+
+// Transitional heads-up seat answer (A25); keep exact create assertions.
+const createdSeat = (input: {
+  room_id: string;
+  invite_code: string;
+  name: string;
+  settings: {
+    starting_stack: number;
+    max_hands: number;
+    turn_seconds: number;
+    blind_every: number | null;
+  };
+  opponent?: 'bot';
+}) => {
+  const bot = input.opponent === 'bot';
+  return {
+    room_id: input.room_id,
+    visibility: 'private',
+    invite_code: input.invite_code,
+    seat: 0,
+    is_host: true,
+    display_name: input.name,
+    opponent_name: bot ? 'house-bot' : null,
+    opponent_display_name: bot ? 'House Bot' : null,
+    seats: [
+      {
+        seat: 0,
+        name: input.name,
+        display_name: input.name,
+        stack: input.settings.starting_stack - (bot ? 1 : 0),
+        bet_this_street: bot ? 1 : 0,
+        status: bot ? 'playing' : 'waiting',
+        place: null,
+      },
+      ...(bot
+        ? [
+            {
+              seat: 1,
+              name: 'house-bot',
+              display_name: 'House Bot',
+              stack: input.settings.starting_stack - 2,
+              bet_this_street: 2,
+              status: 'playing',
+              place: null,
+            },
+          ]
+        : []),
+    ],
+    seats_open: bot ? 0 : 1,
+    settings: input.settings,
+  };
+};

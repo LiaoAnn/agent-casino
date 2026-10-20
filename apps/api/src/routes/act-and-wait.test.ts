@@ -154,7 +154,7 @@ describe('T47 actions?wait=1 HTTP contract', () => {
     const action = { turn_id: first.turn_id, type: 'fold' };
     const response = await t.request(0, 'actions?wait=1', action);
     expect(response.status).toBe(200);
-    expect(t.actSpy).toHaveBeenCalledWith(0, action, { wait: true });
+    expect(t.actSpy).toHaveBeenCalledWith('alice', action, { wait: true });
     const raw = await response.json();
     expect(raw).toEqual(await t.status(0, 'wait'));
     expect(Schema.decodeUnknownSync(RoomStatus)(raw)).toMatchObject({

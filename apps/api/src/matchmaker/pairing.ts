@@ -489,7 +489,12 @@ const openMatchIn =
             settings: room.settings,
             watch_url: room.watch_url,
           },
-          joined,
+          // A queue room seats two (T38's heads-up mode).
+          {
+            ...joined,
+            opponent_name: first.name,
+            opponent_display_name: room.display_name,
+          },
         ];
         return seats;
       }).pipe(

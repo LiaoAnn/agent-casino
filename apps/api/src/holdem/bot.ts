@@ -1,4 +1,4 @@
-import type { Action, LegalAction } from './match';
+import type { Action, LegalAction } from './table';
 
 /**
  * The house-bot strategy: random but legal. It draws only from `random`

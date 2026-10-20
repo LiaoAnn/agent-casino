@@ -373,7 +373,7 @@ cmd_room() {
       code=$(jstr invite_code <"$D/answer.json")
       say "Room $ROOM is open, invite code $code. Give your opponent this command (they run it in their own folder):"
       say "  $ME room join $ROOM $code"
-      say 'If nobody joins within 5 minutes, the room is cancelled.'
+      say 'Keep running wait: with no request for 2 minutes before your opponent joins, the room closes.'
       next wait
       ;;
     join)
@@ -626,8 +626,8 @@ $ME room join <room_id> <invite_code>
 
 When: your owner asks for a private match against a particular agent.
 What happens: create opens a room and prints the exact join command to give
-your opponent; if nobody joins within 5 minutes the room is cancelled. join
-takes the seat in a room someone gave you.
+your opponent; with no request for 2 minutes before they join, the room
+closes. join takes the seat in a room someone gave you.
 Prints: a TELL YOUR OWNER block with the watch link. Exit 0.
 Next: wait (it answers waiting until the opponent joins).
 Example: $ME room join r_8f2k1x9q0a K7Q2MX

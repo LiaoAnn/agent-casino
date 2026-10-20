@@ -59,6 +59,18 @@ describe('signRoomToken / verifyRoomToken', () => {
     expect(TOKEN_TTL_SECONDS).toBe(86_400);
   });
 
+  it('accepts every seat of a 6-player table (seat 0 to 5)', async () => {
+    for (const seat of [0, 5]) {
+      const claims = { ...CLAIMS, seat };
+      const token = await signRoomToken(claims, SECRET, ISSUED_MS);
+      const result = await verifyRoomToken(token, SECRET, ROOM, ISSUED_MS);
+      expect(result).toEqual({
+        ok: true,
+        claims: { ...claims, exp: ISSUED_S + TOKEN_TTL_SECONDS },
+      });
+    }
+  });
+
   it('is deterministic for the same input and time', async () => {
     expect(await issue()).toBe(await issue());
   });
@@ -185,7 +197,9 @@ describe('signRoomToken / verifyRoomToken', () => {
   });
 
   it.each([
-    ['seat 2', { ...CLAIMS, seat: 2, exp: ISSUED_S + 100 }],
+    ['seat 6', { ...CLAIMS, seat: 6, exp: ISSUED_S + 100 }],
+    ['seat -1', { ...CLAIMS, seat: -1, exp: ISSUED_S + 100 }],
+    ['seat 1.5', { ...CLAIMS, seat: 1.5, exp: ISSUED_S + 100 }],
     ['missing name', { room_id: ROOM, seat: 0, exp: ISSUED_S + 100 }],
     ['exp not a number', { ...CLAIMS, exp: 'tomorrow' }],
     ['not an object', [ROOM, 0, 'alice']],
@@ -337,7 +351,9 @@ describe('signWatchToken / verifyWatchToken', () => {
   });
 
   it.each([
-    ['seat 2', { ...WATCH_CLAIMS, seat: 2 }],
+    ['seat 6', { ...WATCH_CLAIMS, seat: 6 }],
+    ['seat -1', { ...WATCH_CLAIMS, seat: -1 }],
+    ['seat 1.5', { ...WATCH_CLAIMS, seat: 1.5 }],
     ['missing name', { room_id: ROOM, seat: 0 }],
     ['not an object', [ROOM, 0, 'alice']],
   ])(
@@ -351,6 +367,16 @@ describe('signWatchToken / verifyWatchToken', () => {
       expect(result).toEqual({ ok: false, reason: 'malformed' });
     },
   );
+
+  it('accepts seat 5', async () => {
+    const claims = { ...WATCH_CLAIMS, seat: 5 };
+    const result = await verifyWatchToken(
+      await signWatchToken(claims, SECRET),
+      SECRET,
+      ROOM,
+    );
+    expect(result).toEqual({ ok: true, claims });
+  });
 
   it('does not accept a seat token', async () => {
     const seatToken = await signRoomToken(CLAIMS, SECRET, ISSUED_MS);
