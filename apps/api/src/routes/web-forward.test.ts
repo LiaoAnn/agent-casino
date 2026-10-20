@@ -20,7 +20,7 @@ const errorScenarios: {
   code: string;
 }[] = [
   {
-    path: '/v1/queue',
+    path: '/v1/rooms/quick',
     init: {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

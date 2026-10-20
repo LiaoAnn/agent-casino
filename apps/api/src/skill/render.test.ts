@@ -273,8 +273,9 @@ describe('renderSkill: contract-generated HTTP appendix', () => {
     expect(responses.some(body => typeof body.deadline === 'string')).toBe(
       true,
     );
+    // Open a room and join: T39 took the queue's `matched` out.
     const seats = responses.filter(body => typeof body.token === 'string');
-    expect(seats).toHaveLength(3);
+    expect(seats).toHaveLength(2);
     for (const seat of seats)
       expect(String(seat.hint)).toMatch(
         /watch_url[\s\S]*owner[\s\S]*GET \/v1\/rooms\/r_8f2k1x9q0a\/wait/i,
@@ -303,7 +304,6 @@ describe('EXAMPLES', () => {
     const keys = Object.keys(EXAMPLES);
     expect(keys).toEqual(
       expect.arrayContaining([
-        'lobby.queue',
         'lobby.createRoom',
         'lobby.joinRoom',
         'room.wait',
@@ -352,15 +352,6 @@ describe('EXAMPLES', () => {
       requestDecodes('room.act', { turn_id: 't_1', type: 'bet', amount: 8 }),
     ).toBe(false);
     expect(
-      responseDecodes('lobby.queue', 200, {
-        status: 'matched',
-        room_id: 'R_NOT_A14',
-        seat: 0,
-        token: 'x',
-        hint: 'h',
-      }),
-    ).toBe(false);
-    expect(
       responseDecodes('room.act', 400, { ...errorBody('stale_turn') }),
     ).toBe(false);
   });
@@ -370,9 +361,6 @@ describe('EXAMPLES', () => {
       (EXAMPLES[key]?.responses ?? [])
         .filter(r => r.status === 200)
         .map(r => statusOf(r.body));
-    expect(statuses('lobby.queue')).toEqual(
-      expect.arrayContaining(['matched', 'waiting']),
-    );
     expect(statuses('room.wait')).toEqual(
       expect.arrayContaining(['your_turn', 'waiting', 'match_over']),
     );

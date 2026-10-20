@@ -17,6 +17,7 @@ import { type ApiError, apiError, ERROR_STATUS } from './contract/errors';
 import { AdminHandlers } from './routes/admin';
 import { type Bindings, WorkerEnv } from './routes/env';
 import { LobbyHandlers } from './routes/lobby';
+import { QUEUE_PATH, queueGone } from './routes/queue';
 import { ReadHandlers } from './routes/read';
 import { RoomHandlers } from './routes/room';
 import { SkillHandlers } from './routes/skill';
@@ -25,10 +26,6 @@ const errorResponse = (error: ApiError) =>
   HttpServerResponse.jsonUnsafe(error, { status: ERROR_STATUS[error.code] });
 
 const READ_THE_SKILL = 'Read GET /skill.md for the endpoints and examples';
-
-// A17: a queue_key that is missing or not a string.
-const QUEUE_KEY_HINT =
-  'Make one queue_key once with `openssl rand -hex 16`, save it, and send the same one on every POST /v1/queue';
 
 // A19: `settings.hands` from before the freezeout format.
 const HANDS_HINT =
@@ -74,13 +71,11 @@ const contractError = (cause: Cause.Cause<unknown>, route: string) => {
       apiError(
         'invalid_request',
         `Invalid ${kind} for ${route}: ${lines.join('; ')}`,
-        issues.some(({ path }) => path?.[0] === 'queue_key')
-          ? QUEUE_KEY_HINT
-          : issues.some(
-                ({ path }) => path?.[0] === 'settings' && path[1] === 'hands',
-              )
-            ? HANDS_HINT
-            : `Fix the ${kind} and resend. ${READ_THE_SKILL}`,
+        issues.some(
+          ({ path }) => path?.[0] === 'settings' && path[1] === 'hands',
+        )
+          ? HANDS_HINT
+          : `Fix the ${kind} and resend. ${READ_THE_SKILL}`,
       ),
     );
   }
@@ -156,6 +151,9 @@ export function handle(request: Request, env: Bindings): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (request.method === 'GET' && pathname === '/health') {
     return Promise.resolve(Response.json({ ok: true }));
+  }
+  if (request.method === 'POST' && pathname === QUEUE_PATH) {
+    return Promise.resolve(queueGone());
   }
   return webHandler(env)(request);
 }

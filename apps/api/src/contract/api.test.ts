@@ -74,11 +74,6 @@ const EXPECTED: Record<
     auth: 'none',
     codes: [],
   },
-  'lobby.queue': {
-    route: 'POST /v1/queue',
-    auth: 'none',
-    codes: [...NAME_CODES, 'name_in_use', 'gone'],
-  },
   'lobby.quickRoom': {
     route: 'POST /v1/rooms/quick',
     auth: 'none',
@@ -348,7 +343,6 @@ const SkillHandlers = HttpApiBuilder.group(CasinoApi, 'skill', handlers =>
 
 const LobbyHandlers = HttpApiBuilder.group(CasinoApi, 'lobby', handlers =>
   handlers.handleAll({
-    queue: notServed,
     quickRoom: notServed,
     createRoom: notServed,
     joinRoom: notServed,

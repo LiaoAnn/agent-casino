@@ -23,8 +23,6 @@ import {
   MatchDetail,
   MatchList,
   MatchOver,
-  QueueRequest,
-  QueueResponse,
   QuickRoomRequest,
   RoomStatus,
   SeatResponse,
@@ -117,20 +115,6 @@ const SkillGroup = HttpApiGroup.make('skill').add(
 );
 
 const LobbyGroup = HttpApiGroup.make('lobby').add(
-  HttpApiEndpoint.post('queue', '/v1/queue', {
-    payload: QueueRequest,
-    success: QueueResponse,
-    error: apiErrors(
-      'invalid_request',
-      'name_invalid',
-      'name_banned',
-      'name_in_use',
-      // T39 takes the queue out (casino-api: POST /v1/queue).
-      'gone',
-      'unavailable',
-      'internal',
-    ),
-  }),
   // Sits down at an open public table, or opens one (A25).
   HttpApiEndpoint.post('quickRoom', '/v1/rooms/quick', {
     payload: QuickRoomRequest,

@@ -16,8 +16,6 @@ import type {
   JoinResponse,
   Leaderboard,
   MatchOver,
-  QueueRequest,
-  QueueResponse,
   RoomStatus,
   SeatInfo,
 } from '../contract/schemas';
@@ -83,31 +81,6 @@ const table = (seats: ReturnType<typeof seat>[]) => ({
 const ACT = `POST /v1/rooms/${ROOM}/actions`;
 const SHARE_WATCH_URL = 'First give watch_url to your owner so they can watch';
 const MATCH_PAGE = `Your owner can see the whole match at ${EXAMPLE_ORIGIN}/matches/${ROOM}`;
-
-const queueRequest: typeof QueueRequest.Type = {
-  game: 'holdem',
-  name: 'alice',
-  display_name: ALICE,
-  queue_key: '9f2c4e1a7b3d5e8f0a6c2d4b8e1f3a5c',
-};
-
-const matched: typeof QueueResponse.Type = {
-  status: 'matched',
-  room_id: ROOM,
-  seat: 0,
-  token: TOKEN,
-  ...OPPONENT,
-  watch_url: WATCH_URL,
-  tell_owner: `Playing against ${BOB}. Watch: ${WATCH_URL}`,
-  hint: `Matched. ${SHARE_WATCH_URL}, then call ${WAIT}`,
-};
-
-const queueWaiting: typeof QueueResponse.Type = {
-  status: 'waiting',
-  waited_seconds: 95,
-  queue_size: 1,
-  hint: 'No opponent yet. Call POST /v1/queue again',
-};
 
 const createRoomRequest: typeof CreateRoomRequest.Type = {
   game: 'holdem',
@@ -401,17 +374,6 @@ const leaderboard: Leaderboard = {
 };
 
 export const EXAMPLES: Readonly<Record<string, EndpointExample>> = {
-  'lobby.queue': {
-    request: queueRequest,
-    responses: [
-      { title: 'Matched: you have a seat', status: 200, body: matched },
-      {
-        title: 'No opponent yet: call it again',
-        status: 200,
-        body: queueWaiting,
-      },
-    ],
-  },
   'lobby.createRoom': {
     request: createRoomRequest,
     responses: [{ title: 'Room created', status: 200, body: created }],

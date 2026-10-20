@@ -66,7 +66,8 @@ const joinedRoom = async (webUrl?: string) => {
     ],
   };
   const recordMatch = vi.fn(async (_input: MatchRecordInput) => recorded);
-  const stub = { recordMatch };
+  // Rooms also tell the Matchmaker, the lobby, their lobby row (T39).
+  const stub = { recordMatch, listRoom: vi.fn(async () => {}) };
   const id = { name: 'global' };
   const matchmaker = {
     idFromName: vi.fn((_name: string) => id),
@@ -176,7 +177,8 @@ describe('Room Durable Object wrapper', () => {
 
   it('records a finished room through the global Matchmaker and returns its ratings', async () => {
     const { room, matchmaker, id, recordMatch, recorded } = await joinedRoom();
-    expect(matchmaker.get).not.toHaveBeenCalled();
+    // Only the lobby has heard from the room so far (T39).
+    expect(recordMatch).not.toHaveBeenCalled();
     const turn = await room.status('alice', { wait: false });
     if (!turn.ok || turn.value.status !== 'your_turn') {
       throw new Error('Expected the first turn');
@@ -818,7 +820,10 @@ describe('Room DO hands an N-seat table to the Matchmaker (A10)', () => {
     const id = { name: 'global' };
     const matchmaker = {
       idFromName: vi.fn((_name: string) => id),
-      get: vi.fn((_id: unknown) => ({ recordMatch })),
+      get: vi.fn((_id: unknown) => ({
+        recordMatch,
+        listRoom: async () => {},
+      })),
     };
     const room = new Room(
       { storage: new MemoryStorage() } as unknown as DurableObjectState,

@@ -68,7 +68,6 @@ const PURPOSE: Readonly<Record<string, string>> = {
   'skill.kitCore': 'The kit: the agent-casino skill',
   'skill.kitScript': 'The kit: casino.sh, the same as `GET /casino.sh`',
   'skill.kitHoldem': "The kit: the agent-casino-holdem skill (Texas Hold'em)",
-  'lobby.queue': 'Queue for a game; long-polls up to 30 s',
   'lobby.createRoom': 'Open a room and get an invite code',
   'lobby.joinRoom': 'Join a room with its invite code',
   'room.wait': 'Wait for your turn; long-polls up to 30 s',

@@ -677,6 +677,7 @@
   - 出局時的 `match_over`；
   - 每步 30 秒。
 - 只改：`apps/api/src/skill/`（含 `casino.sh` 和 kit）、`docs/cost.md`、`AGENTS.md`、`scripts/`（e2e 和 playtest 改成多人）。
+- 把 `apps/api/src/skill/casino-sh.test.ts` 裡標 `it.fails`（註明 `T42: casino.sh queue → quick`）的 queue 測試改寫成 quick 版本（T39 拿掉 queue 時留下的）。
 - 決定單挑舊模式（T38）要不要刪。正式環境上已裝舊版 kit 的主人，會用不帶 `visibility` 的 `room create`／`room join`；刪之前要確認 kit 的版本提醒能讓他們更新，或保留舊模式。
 - 驗證：`pnpm test:skill`（用 `casino.sh` 3 人桌打完）、`pnpm e2e --target=local`（3 人桌從頭打到尾）、CI 的 macOS `casino.sh` 檢查。
 - 試玩：arena 開一桌 3–6 個 agent 自動入座，再加一個「私人房加 bot」的情境，報告寫進 `docs/playtests/`。

@@ -5,10 +5,26 @@
 import { Effect, Layer } from 'effect';
 import { HttpApiBuilder } from 'effect/http-api';
 import { CasinoApi, RoomSession, WatchSession } from '../contract/api';
+import { apiError } from '../contract/errors';
+import { isBanned } from '../db/bans';
+import { withDb } from '../db/client';
 import * as Rooms from '../room/client';
 import type { RoomApi } from '../room/referee';
-import { WorkerEnv } from './env';
-import { refuseBanned } from './queue';
+import { type Bindings, WorkerEnv } from './env';
+
+// Banned names can't open, join or quick-seat a room (A9). `retry` names
+// the request that was refused.
+export const refuseBanned = (env: Bindings, name: string, retry: string) =>
+  Effect.gen(function* () {
+    if (!(yield* withDb(env.DB, db => isBanned(db, name)))) return;
+    return yield* Effect.fail(
+      apiError(
+        'name_banned',
+        `The name ${name} is banned on this platform and can't play`,
+        `Do not resend ${retry}; tell your owner the name ${name} is banned`,
+      ),
+    );
+  });
 
 // A16, T32: the owner gets the watch link before the agent starts playing.
 const SHARE_WATCH_URL = 'First give watch_url to your owner so they can watch';
@@ -19,6 +35,50 @@ const KEEP_CALLING =
 type Seats = readonly { display_name: string; status: string }[];
 const started = (seats: Seats) => seats.some(seat => seat.status !== 'waiting');
 const shown = (seats: Seats) => seats.map(seat => seat.display_name).join(', ');
+
+type Seated = Effect.Success<ReturnType<typeof Rooms.joinRoom>>;
+
+// The answer to the host of a room just opened, as asked for by `request`
+// (POST /v1/rooms, or POST /v1/rooms/quick opening a public table).
+export const hostAnswer = (
+  room: Seated,
+  request: { visibility?: 'public' | 'private'; opponent?: 'bot' },
+) => {
+  const wait = `GET /v1/rooms/${room.room_id}/wait`;
+  const share =
+    room.visibility === 'public'
+      ? 'tell the players you invite the room_id; anyone can also join this public table'
+      : 'give room_id and invite_code to the players you invite';
+  return {
+    ...room,
+    ...(room.opponent_display_name === null
+      ? {}
+      : {
+          tell_owner: `Playing against ${room.opponent_display_name}. Watch: ${room.watch_url}`,
+        }),
+    hint:
+      request.opponent === 'bot'
+        ? `You play house-bot and the match has started. ${SHARE_WATCH_URL}, then call ${wait} for your first turn`
+        : request.visibility === undefined
+          ? `${SHARE_WATCH_URL}, and give room_id and invite_code to your opponent. Then call ${wait}. ${KEEP_CALLING}`
+          : `${SHARE_WATCH_URL}, and ${share}. Then call ${wait}: it answers whenever someone joins, and you start the table with POST /v1/rooms/${room.room_id}/start when your owner says so. ${KEEP_CALLING}`,
+  };
+};
+
+// The answer to someone who sat down in a room (join, or quick).
+export const joinAnswer = (seated: Seated) => {
+  const wait = `GET /v1/rooms/${seated.room_id}/wait`;
+  const playing = started(seated.seats);
+  return {
+    ...seated,
+    tell_owner: playing
+      ? `Playing against ${seated.opponent_display_name ?? shown(seated.seats.filter((_, i) => i !== seated.seat))}. Watch: ${seated.watch_url}`
+      : `Joined the table of ${seated.seats[0]?.display_name}; seated: ${shown(seated.seats)}. Watch: ${seated.watch_url}`,
+    hint: playing
+      ? `Joined. ${SHARE_WATCH_URL}, then call ${wait} for your first turn`
+      : `Joined. ${SHARE_WATCH_URL}. The host's owner decides when the table starts: call ${wait} until it does. Make a request at least every 2 minutes, or you lose your seat`,
+  };
+};
 
 export const createRoom = HttpApiBuilder.handler(
   CasinoApi,
@@ -34,25 +94,7 @@ export const createRoom = HttpApiBuilder.handler(
         ...payload,
         display_name: Rooms.displayNameOf(payload),
       });
-      const wait = `GET /v1/rooms/${room.room_id}/wait`;
-      const share =
-        room.visibility === 'public'
-          ? 'tell the players you invite the room_id; anyone can also join this public table'
-          : 'give room_id and invite_code to the players you invite';
-      return {
-        ...room,
-        ...(room.opponent_display_name === null
-          ? {}
-          : {
-              tell_owner: `Playing against ${room.opponent_display_name}. Watch: ${room.watch_url}`,
-            }),
-        hint:
-          payload.opponent === 'bot'
-            ? `You play house-bot and the match has started. ${SHARE_WATCH_URL}, then call ${wait} for your first turn`
-            : payload.visibility === undefined
-              ? `${SHARE_WATCH_URL}, and give room_id and invite_code to your opponent. Then call ${wait}. ${KEEP_CALLING}`
-              : `${SHARE_WATCH_URL}, and ${share}. Then call ${wait}: it answers whenever someone joins, and you start the table with POST /v1/rooms/${room.room_id}/start when your owner says so. ${KEEP_CALLING}`,
-      };
+      return hostAnswer(room, payload);
     }),
 );
 
@@ -74,17 +116,7 @@ export const joinRoom = HttpApiBuilder.handler(
         ...payload,
         display_name: Rooms.displayNameOf(payload),
       });
-      const wait = `GET /v1/rooms/${roomId}/wait`;
-      const playing = started(seated.seats);
-      return {
-        ...seated,
-        tell_owner: playing
-          ? `Playing against ${seated.opponent_display_name ?? shown(seated.seats.filter((_, i) => i !== seated.seat))}. Watch: ${seated.watch_url}`
-          : `Joined the table of ${seated.seats[0]?.display_name}; seated: ${shown(seated.seats)}. Watch: ${seated.watch_url}`,
-        hint: playing
-          ? `Joined. ${SHARE_WATCH_URL}, then call ${wait} for your first turn`
-          : `Joined. ${SHARE_WATCH_URL}. The host's owner decides when the table starts: call ${wait} until it does. Make a request at least every 2 minutes, or you lose your seat`,
-      };
+      return joinAnswer(seated);
     }),
 );
 
