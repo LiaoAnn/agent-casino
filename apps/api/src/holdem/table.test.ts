@@ -6,7 +6,7 @@ import {
   type Seat,
   startMatch,
 } from './match';
-import { shuffledDeck } from './shuffle';
+import { dealTable, shuffledDeck } from './shuffle';
 import {
   applyTableAction,
   leaveTable,
@@ -183,6 +183,28 @@ describe('table positions and betting rounds', () => {
       [deck[1], deck[4]],
       [deck[2], deck[5]],
     ]);
+  });
+
+  it('compresses the board deal to three players after an elimination', () => {
+    let { state, hands } = play(
+      startTable(config({ players: 4, startingStack: 10, blindEvery: 50 })),
+      [raise(3, 10), call(0), fold(1), fold(2)],
+    );
+    expect(hands[0].stacks).toEqual([0, 9, 8, 23]);
+    expect(state.places).toEqual([4, null, null, null]);
+    expect(state.handNumber).toBe(2);
+    expect(state.button).toBe(1);
+    expect(state.toAct).toBe(1);
+    expect(state.history.slice(0, 2).map(e => e.seat)).toEqual([2, 3]);
+
+    // Three remaining players use deck[6..8], rather than deck[8..10].
+    const flop = ['Kd', '6s', '7h'];
+    expect(shuffledDeck(SEED, 2).slice(6, 9)).toEqual(flop);
+    expect(dealTable(SEED, 2, 3).board.slice(0, 3)).toEqual(flop);
+    state = play(state, [call(1), call(2), check(3)]).state;
+    expect(state.street).toBe('flop');
+    expect(state.toAct).toBe(2);
+    expect(state.board).toEqual(flop);
   });
 
   it('switches to heads-up positions when three players become two', () => {

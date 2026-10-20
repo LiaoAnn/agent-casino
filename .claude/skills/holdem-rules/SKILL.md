@@ -103,7 +103,7 @@ description: 德州撲克 2–6 人錦標賽的完整規則、洗牌種子與邊
 - **亂數流**：第 n 手（從 1 開始）用 HMAC-SHA256 產生。區塊 k（從 0 開始）= `HMAC-SHA256(key = 種子的 32 個位元組, message = UTF-8 字串 "agent-casino/deck/v1:" + n + ":" + k)`，n、k 用十進位、不補零。每個 32 位元組區塊依序切成 8 個 big-endian 的 uint32，區塊用完就算下一個 k。
 - **洗牌**：對標準 52 張（順序：點數 2→A，每個點數內 s、h、d、c）做 Durstenfeld 版 Fisher–Yates，從尾端開始：`for i = 51 down to 1`，從亂數流取 `j ∈ [0, i]`，交換 `deck[i]` 和 `deck[j]`。
 - **取 j（不偏）**：`m = i + 1`，`limit = 2^32 - (2^32 mod m)`；從亂數流取下一個 uint32 `x`，`x >= limit` 就丟掉再取，直到 `x < limit`，`j = x mod m`。
-- 洗完的 `deck[0]` 是第一張發出的牌。**發牌順序**（2026-10-20 T36 推廣到 N 人）：只發給這手開始時還在桌上的 A 個人（A = 2–6），照座位號由小到大排，排第 k 位（從 0 數）的人拿 `deck[k]` 和 `deck[A+k]`；接著 flop 3 張（`deck[2A..2A+2]`）、turn 1 張（`deck[2A+3]`）、river 1 張（`deck[2A+4]`），不燒牌。出局的座位不發牌，也不佔位置。
+- 洗完的 `deck[0]` 是第一張發出的牌。**發牌順序**（2026-10-20 T36 推廣到 N 人）：只發給這手開始時還在桌上的 A 個人（A = 2–6），照座位號由小到大排，排第 k 位（從 0 數）的人拿 `deck[k]` 和 `deck[A+k]`；接著 flop 3 張（`deck[2A..2A+2]`）、turn 1 張（`deck[2A+3]`）、river 1 張（`deck[2A+4]`），不燒牌。出局的座位不發牌，也不佔位置。A 是這手**開始時**的人數：這手中途離開的人這手仍算發過牌（底牌留在局面裡，公牌位置不變），下一手起才不發。
   - A = 2 時就是原本的單挑順序：座位 0 `deck[0]`、`deck[2]`，座位 1 `deck[1]`、`deck[3]`，公牌 `deck[4..8]`。舊種子重播的結果不變（規則 6）。
   - 6 人桌打到剩 2 人時，發牌公式跟單挑一模一樣（A = 2）。
 - 引擎是同步的純函式（`startTable`、`applyTableAction`），所以 HMAC-SHA256 要用同步的實作，而且要在 Node（Vitest）、workerd（api Worker）和網頁的 server function 都能跑。
