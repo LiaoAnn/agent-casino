@@ -617,8 +617,9 @@
   - 出局的人下一次 wait 就收到 `match_over`，帶 `place`；
   - 中途 `leave`；
   - 只剩 house-bot 就結束；
-  - 保留 `opponent: bot` 的舊用法。
-- 只改：`apps/api/src/room/`、`routes/room.ts`、casino-api skill。
+  - 保留 `opponent: bot` 的舊用法；
+  - 把 room 換到 T36 的 table API（`holdem/table.ts`），刪掉 `holdem/match.ts` 的單挑轉接層（`replay.ts`、`view.ts` 的單挑版一起換掉）。
+- 只改：`apps/api/src/room/`、`routes/room.ts`、`holdem/` 的單挑轉接層、casino-api skill。
 - 驗證：`pnpm test:api`，狀況處理表每一列一個測試。
 
 ### T39 大廳與自動入座（約 500 行）· Blocked by：T38
