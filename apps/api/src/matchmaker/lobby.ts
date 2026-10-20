@@ -66,7 +66,7 @@ const FORGET_MS = 60 * 60 * 1000;
 const KEY = 'lobby';
 
 // Per room: its latest rev, and its row, or when it was taken out.
-type Rooms = Record<
+type Listing = Record<
   string,
   { rev: number; entry: LobbyEntry } | { rev: number; removed_at: number }
 >;
@@ -100,8 +100,8 @@ export class RoomLobby {
     this.#now = options.now ?? Date.now;
   }
 
-  async #rooms(): Promise<Rooms> {
-    return (await this.#storage.get<Rooms>(KEY)) ?? {};
+  async #rooms(): Promise<Listing> {
+    return (await this.#storage.get<Listing>(KEY)) ?? {};
   }
 
   // Takes a Room DO's update unless one with the same or a later rev of
