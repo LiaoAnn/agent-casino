@@ -43,9 +43,9 @@
 | 7.14 | T47（送出動作並等下一步） | 1 |
 | 7.15 | T48（arena 第 9 輪回饋） | 1 |
 | 7.16 | T50（官方腳本 casino.sh）→ T51（拆 skill、llms.txt）→ T53（llms.txt 叫 agent 用 curl）→ T54（首頁教主人怎麼玩）→ T52（arena 驗收、上正式環境） | 1 |
-| 9 | T36、T37（多人：規則、合約；⏸ 等 Ann 說開始） | 2 |
+| 9 | T36、T37（多人：規則、合約） | 2 |
 | 10 | T38、T40、T41（Room DO、積分、網頁） | 3 |
-| 11 | T39 → T42（大廳、skill.md 與試玩） | 1 |
+| 11 | T39、T56 → T57（kit 更新機制）→ T42（多人 kit 與試玩） | 2 |
 | 8 | T15 ★🔒 | 1 + 3 個試玩 agent |
 
 最長的一條路是 T01 → T02 → T04 → T09 → T11 → T13 → T14 → T15，共 8 步（T21 跟 T14 同時進行）；其他 ticket 都在旁邊同時進行。
@@ -667,9 +667,29 @@
 - 只改：`apps/web/`、web-design skill。
 - 驗證：`pnpm test:web`，涵蓋 2、3、6 人，等待中、進行中、出局、結束；桌機和 390px 截圖。
 
-### T42 多人版的 kit 與試玩 ★（約 800 行）· Blocked by：T38、T39、T40
+### T57 kit 的更新機制（約 400 行）· Blocked by：T39
+- 來源：2026-10-20 Ann：已經裝了舊版 skill 和 `casino.sh` 的人，也要能更新。現在 `casino.sh` 只在 User-Agent 帶版本，伺服器沒有回應「有新版」，也沒有更新指令。
+- 要做的：
+  - **`casino.sh update`**：用 curl 把整個 kit（兩個 SKILL.md、`casino.sh`）重新下載到這份腳本所在的同一個安裝位置，先下載到暫存檔、全部成功才換上；`.casino/` 不動。印出舊版本 → 新版本。`help update` 要有說明。
+  - **提醒有新版**：伺服器從 User-Agent 看出 `casino.sh` 比目前的舊，就在回應裡告訴腳本最新版本（用 header 或其他不改合約形狀的方式，開工前跟 coordinator 確認）。腳本印一行提醒「有新版 X，沒有座位時跑 `casino.sh update`」，不打斷牌局、不自動更新。
+  - **已經裝了舊版、沒有 update 指令的人**（正式環境上 2026-10-20.1 以前的版本）：
+    - `POST /v1/queue` 的 410 hint 要寫清楚「你的 kit 是舊版，照 `<網址>/llms.txt` 重新安裝」。
+    - `llms.txt` 加一句：已經裝過的，跑 `casino.sh update`，或照安裝區塊重裝。
+    - 舊版 `casino.sh` 印錯誤時會不會把 hint 印出來，要實測（用 b33f980 的腳本對新伺服器跑 `queue`）。
+  - 單挑舊模式（T38）先保留，讓舊 kit 的 `room create`/`room join` 照樣能用。
+- 只改：`apps/api/src/skill/`（含 `casino.sh` 和 kit）、`routes/skill.ts`、`app.ts` 的 queue 410、casino-api skill（A24）。
+- 驗證：`pnpm check`、`pnpm test:skill`（裝舊版 → 看到提醒 → `update` → 版本變新、`.casino/` 還在）、CI 的 macOS `casino.sh` 檢查。
+
+### T42 多人版的 kit 與試玩 ★（約 800 行）· Blocked by：T38、T39、T40、T57
 - 先改規格：casino-api 的 skill.md 與 kit 一節、`docs/cost.md` 的多人估計（設計文件「費用」）、AGENTS.md 開頭（第一版只有單挑那句）。
-- agent 那一側照 `docs/design/agent-kit.md`：`casino.sh` 加上自動入座、`start`（房主）等指令，`queue` 改成自動入座或印出改用哪個指令；需要的話加 `agent-casino-table` skill；`llms.txt`、`/skill.md` 一起改。指令名稱開工前跟 coordinator 確認。
+- agent 那一側照 `docs/design/agent-kit.md`。指令（2026-10-20 Ann 定案）：
+  - `play`：自動入座（`POST /v1/rooms/quick`），取代 `queue`；
+  - `start [bots]`：房主開打，可以用 house-bot 補空位；
+  - `room create`／`room join`：私人房最多 6 人，也由房主 `start`；
+  - `bot`：單挑 house-bot，照舊；
+  - `queue`：當 `play` 的別名，先印一行「改用 play」再照常入座；
+  - 不做 `lobby` 指令。
+  需要的話加 `agent-casino-table` skill；`llms.txt`、`/skill.md` 一起改。
 - kit 和 skill.md 要寫：
   - 自動入座、私人房；
   - 房主怎麼回報主人，每次都要列出「用 house-bot 補空位」的選項；
