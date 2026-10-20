@@ -32,32 +32,47 @@ it('T40 migration 0005 preserves every old result, seat, rating, hand and event 
       max_hands: 2,
       turn_seconds: 30,
     };
-    const scenarios = [
+    interface Scenario {
+      result: MatchDetail['result'];
+      places: MatchDetail['places'];
+      stacks: number[];
+      before: number[] | null;
+      after: number[] | null;
+      end: MatchDetail['end_reason'];
+      players?: string[];
+      displays?: (string | null)[];
+    }
+    // Seat ratings differ on purpose, so a seat-1 read of `$[0]` cannot pass.
+    const scenarios: Scenario[] = [
       {
         result: 'seat0_win',
         places: [1, 2],
         stacks: [400, 0],
-        after: [1516, 1484],
+        before: [1500, 1480],
+        after: [1516, 1464],
         end: 'bust',
       },
       {
         result: 'seat1_win',
         places: [2, 1],
         stacks: [0, 400],
-        after: [1484, 1516],
+        before: [1490, 1510],
+        after: [1473, 1527],
         end: 'leave',
       },
       {
         result: 'draw',
         places: [1, 1],
         stacks: [200, 200],
-        after: [1500, 1500],
+        before: [1520, 1470],
+        after: [1518, 1472],
         end: 'max_hands',
       },
       {
         result: 'void',
         places: null,
         stacks: [200, 200],
+        before: null,
         after: null,
         end: null,
       },
@@ -65,21 +80,36 @@ it('T40 migration 0005 preserves every old result, seat, rating, hand and event 
         result: 'cancelled',
         places: null,
         stacks: [200, 200],
+        before: null,
         after: null,
         end: 'cancelled',
       },
-    ] as const;
+      // Decided but never rated (a house-bot game): places still come from result.
+      {
+        result: 'seat1_win',
+        places: [2, 1],
+        stacks: [0, 400],
+        before: null,
+        after: null,
+        end: 'bust',
+        players: ['AlIce', 'house-bot'],
+        // Stored names, so the test does not pin an unspecified NULL fallback for house-bot.
+        displays: ['小愛', 'House Bot'],
+      },
+    ];
     const expected: MatchDetail[] = [];
     for (const [index, scenario] of scenarios.entries()) {
       const id = `r_${String(index + 1).padStart(10, '0')}`;
       const endedAt = new Date(Date.UTC(2026, 9, 18, 10, index)).toISOString();
-      const players = ['AlIce', 'bOB'];
-      const displays = index % 2 === 0 ? [null, null] : ['小愛', '小包'];
+      const players = scenario.players ?? ['AlIce', 'bOB'];
+      const displays =
+        scenario.displays ??
+        (index % 2 === 0 ? [null, null] : ['小愛', '小包']);
       // Rating spelling deliberately differs from the match spelling.
       const changes =
         scenario.after?.map((after, seat) => ({
           name: seat === 0 ? 'Alice' : 'Bob',
-          before: 1500,
+          before: scenario.before?.[seat] ?? 0,
           after,
         })) ?? null;
       await d1
@@ -222,7 +252,7 @@ it('T40 migration 0005 preserves every old result, seat, rating, hand and event 
     ).toEqual(oldRatings);
     expect(
       await d1.prepare('SELECT count(*) AS n FROM match_seats').first(),
-    ).toEqual({ n: 10 });
+    ).toEqual({ n: 12 });
     const columns = (
       await d1.prepare('PRAGMA table_info(matches)').all<{ name: string }>()
     ).results.map(column => column.name);
@@ -247,7 +277,7 @@ it('T40 migration 0005 preserves every old result, seat, rating, hand and event 
           .prepare('SELECT note FROM match_events WHERE note IS NOT NULL')
           .all()
       ).results,
-    ).toEqual(Array.from({ length: 8 }, () => ({ note: 'old private note' })));
+    ).toEqual(Array.from({ length: 10 }, () => ({ note: 'old private note' })));
     const get = async (path: string) => {
       const response = await handle(new Request(`http://api.test${path}`), {
         DB: d1,
