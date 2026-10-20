@@ -141,6 +141,18 @@ export function blindsAt(
   return [small, 2 * small];
 }
 
+/**
+ * The `blind_every` a room uses when none is given, by player count
+ * (holdem-rules 人數 → blind_every 預設; `blind-every.test.ts` simulates it).
+ */
+export const DEFAULT_BLIND_EVERY: Readonly<Record<number, number>> = {
+  2: 5,
+  3: 5,
+  4: 4,
+  5: 3,
+  6: 3,
+};
+
 const bigBlind = (state: TableState) =>
   blindsAt(state.handNumber, state.config.blindEvery)[1];
 
