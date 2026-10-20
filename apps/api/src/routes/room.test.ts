@@ -301,6 +301,65 @@ const joinRoom = async (
   return decodeJoin(await response.json());
 };
 
+describe('T37 heads-up seat responses include posted blinds (A25)', () => {
+  it.each([40, 100])(
+    'keeps the waiting host stack intact, then reports first-hand blinds on join (stack %i)',
+    async starting_stack => {
+      const { env } = makeEnv();
+      const room = await createRoom(env, { settings: { starting_stack } });
+      expect(room.seats).toHaveLength(1);
+      expect(room.seats[0]).toMatchObject({
+        seat: 0,
+        stack: starting_stack,
+        bet_this_street: 0,
+        status: 'waiting',
+      });
+      const joined = await joinRoom(env, room);
+      expect(joined.seats).toHaveLength(2);
+      expect(joined.seats).toMatchObject([
+        {
+          seat: 0,
+          stack: starting_stack - 1,
+          bet_this_street: 1,
+          status: 'playing',
+        },
+        {
+          seat: 1,
+          stack: starting_stack - 2,
+          bet_this_street: 2,
+          status: 'playing',
+        },
+      ]);
+    },
+  );
+
+  it.each([40, 100])(
+    'reports first-hand blinds immediately when opening a bot room (stack %i)',
+    async starting_stack => {
+      const { env } = makeEnv();
+      const room = await createRoom(env, {
+        opponent: 'bot',
+        settings: { starting_stack },
+      });
+      expect(room.seats).toHaveLength(2);
+      expect(room.seats).toMatchObject([
+        {
+          seat: 0,
+          stack: starting_stack - 1,
+          bet_this_street: 1,
+          status: 'playing',
+        },
+        {
+          seat: 1,
+          stack: starting_stack - 2,
+          bet_this_street: 2,
+          status: 'playing',
+        },
+      ]);
+    },
+  );
+});
+
 interface StatusResult {
   status: Status;
   raw: string;

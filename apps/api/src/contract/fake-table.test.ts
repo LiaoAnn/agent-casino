@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { dealTable } from '../holdem/shuffle';
 import { replayTable, type TableEvent } from '../holdem/table';
 import { makeFakeData } from './fake';
+import { fakeTable } from './fake-table';
 import {
   Lobby,
   MatchDetail,
@@ -57,6 +58,51 @@ function replay(record: MatchDetail, events = eventsOf(record)) {
 describe('T37 engine-backed six-seat public table fake data (A13/A15/A16/A25)', () => {
   const data = makeFakeData();
   const table = () => tableOf(data);
+
+  it.each(Array.from({ length: 40 }, (_, i) => i + 1))(
+    'preserves schemas, dealt cards and last-hand deltas across automatic all-in hands (seed %i)',
+    seed => {
+      const t = fakeTable(seed);
+      const decode = (schema: Schema.Top, value: unknown) =>
+        Schema.decodeUnknownSync(schema as unknown as Schema.Codec<unknown>)(
+          value,
+        );
+      expect(decode(Lobby, t.lobby)).toEqual(t.lobby);
+      for (const room of Object.values(t.room))
+        expect(decode(RoomStatus, room)).toEqual(room);
+      for (const watch of Object.values(t.watch))
+        expect(decode(WatchResponse, watch)).toEqual(watch);
+      expect(decode(MatchDetail, t.record)).toEqual(t.record);
+      expect(decode(MatchSummary, t.summary)).toEqual(t.summary);
+
+      let before = Array<number>(6).fill(t.record.settings.starting_stack);
+      for (const hand of t.record.hands) {
+        const active = before.flatMap((stack, seat) =>
+          stack > 0 ? [seat] : [],
+        );
+        const deal = dealTable(t.record.seed, hand.hand_number, active.length);
+        expect(hand.hole_cards).toHaveLength(6);
+        expect(hand.hole_cards).toEqual(
+          Array.from({ length: 6 }, (_, seat) => {
+            const index = active.indexOf(seat);
+            return index < 0 ? null : deal.holeCards[index];
+          }),
+        );
+        for (const status of Object.values(t.room)) {
+          if (status.status === 'waiting') continue;
+          for (const seen of [
+            ...status.hands_since_your_turn,
+            ...(status.last_hand ? [status.last_hand] : []),
+          ].filter(seen => seen.hand_number === hand.hand_number)) {
+            expect(seen.stack_changes).toEqual(
+              hand.stacks.map((stack, seat) => stack - before[seat]),
+            );
+          }
+        }
+        before = [...hand.stacks];
+      }
+    },
+  );
 
   it('decodes every lobby, room, watch, record and summary without dropping fields', () => {
     const t = table();
@@ -249,6 +295,36 @@ describe('T37 engine-backed six-seat public table fake data (A13/A15/A16/A25)', 
     expect(state.bets).toEqual(room.playing.seats.map(s => s.bet_this_street));
     expect(state.places).toEqual(room.playing.seats.map(s => s.place));
     expect(view.pot).toBe(sum(state.contributed));
+    // A25: only live all-ins cap a layer; folded/out seats still fund it.
+    const caps = [
+      ...new Set(
+        state.contributed.filter(
+          (amount, seat) =>
+            amount > 0 &&
+            state.stacks[seat] === 0 &&
+            !state.folded[seat] &&
+            state.places[seat] === null,
+        ),
+      ),
+    ].sort((a, b) => a - b);
+    const expectedPots: number[] = [];
+    let lower = 0;
+    for (const upper of caps) {
+      expectedPots.push(
+        sum(
+          state.contributed.map(amount =>
+            Math.max(0, Math.min(amount, upper) - lower),
+          ),
+        ),
+      );
+      lower = upper;
+    }
+    const remaining = sum(
+      state.contributed.map(amount => Math.max(0, amount - lower)),
+    );
+    if (remaining > 0) expectedPots.push(remaining);
+    expect(expectedPots.length).toBeGreaterThanOrEqual(2);
+    expect(view.pots).toEqual(expectedPots);
     expect(view.my_cards).toEqual(state.holeCards[0]);
     expect(view.board).toEqual(state.board);
     const total = 6 * record.settings.starting_stack;

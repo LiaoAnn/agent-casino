@@ -38,6 +38,8 @@ export interface WatchInput {
     result: SeatResult;
     final_stacks: [number, number];
     ratings: Extract<WatchResponse, { match_id: string }>['ratings'];
+    // The seat that left mid-match, if one did.
+    left?: Seat;
   } | null;
 }
 
@@ -88,6 +90,7 @@ export function watchView(input: WatchInput): WatchResponse {
       settings: input.settings,
       match,
       places: ended && placesOf(ended.result),
+      ...(ended?.left !== undefined && { left: ended.left }),
     }),
     seats_open: match ? 0 : 2 - seated.length,
     hand_number: seen?.hand_number ?? null,

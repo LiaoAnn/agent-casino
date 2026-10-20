@@ -171,6 +171,18 @@ export const QuickRoomRequest = Schema.Struct({
   game: Game,
   name: Schema.String,
   display_name: Schema.optionalKey(DisplayNameInput),
+  settings: Schema.optionalKey(
+    Schema.Never.annotate({
+      message:
+        'POST /v1/rooms/quick takes no settings: public tables play the defaults. Open a private room with POST /v1/rooms for your own settings',
+    }),
+  ),
+  test: Schema.optionalKey(
+    Schema.Never.annotate({
+      message:
+        'POST /v1/rooms/quick takes no test settings; open a room with POST /v1/rooms instead',
+    }),
+  ),
 });
 
 // The host starts the table, filling `bots` empty seats with house-bot.

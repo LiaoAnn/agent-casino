@@ -326,21 +326,24 @@ describe('T37 admission and start requests', () => {
       expect(decode(QuickRoomRequest, body)).toEqual(body);
     }
   });
-  it('documents the existing default excess-key policy without requiring rejection', () => {
+  it('keeps the default excess-key policy for other create-room keys', () => {
     const body = { game: 'holdem', name: 'alice' };
     expect(decode(CreateRoomRequest, { ...body, unknown_key: true })).toEqual(
       body,
     );
-    // Effect Struct strips unknown keys by default. Handler validation must
-    // reject settings/test on quick; the contract must not preserve either.
-    expect(
-      decode(QuickRoomRequest, {
-        ...body,
-        settings,
-        test: { seed: 'a'.repeat(64) },
-      }),
-    ).toEqual(body);
   });
+  it.each([{ settings }, { test: { seed: 'a'.repeat(64) } }])(
+    'rejects quick admission with %j instead of silently dropping it (A25)',
+    extra => {
+      expect(
+        decodes(QuickRoomRequest, {
+          game: 'holdem',
+          name: 'alice',
+          ...extra,
+        }),
+      ).toBe(false);
+    },
+  );
   it.each([undefined, 'public', 'private'])(
     'accepts room visibility %j',
     visibility => {

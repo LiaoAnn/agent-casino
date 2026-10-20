@@ -40,7 +40,8 @@ export function headsUpSeats(input: {
   places: Places;
   // The seat that left mid-match.
   left?: Seat;
-  // Playing though no match state is at hand, as when opening a bot room.
+  // Playing though no match state is at hand, as when opening a bot room:
+  // hand 1 has begun, seat 0 (the button) posted 1 and seat 1 posted 2.
   started?: boolean;
 }): (typeof SeatInfo.Type)[] {
   const { match, places } = input;
@@ -48,13 +49,16 @@ export function headsUpSeats(input: {
   for (const seat of [0, 1] as const) {
     const name = input.names[seat];
     if (name === null) continue;
-    const stack = match ? match.stacks[seat] : input.settings.starting_stack;
+    const blind = !match && input.started ? seat + 1 : 0;
+    const stack = match
+      ? match.stacks[seat]
+      : input.settings.starting_stack - blind;
     seats.push({
       seat,
       name,
       display_name: input.display_names[seat] ?? name,
       stack,
-      bet_this_street: match && !places ? match.bets[seat] : 0,
+      bet_this_street: match && !places ? match.bets[seat] : blind,
       status: !match
         ? input.started
           ? 'playing'

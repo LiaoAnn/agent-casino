@@ -573,6 +573,49 @@ const playOut = async (rig: Rig, choose: Choose = foldFirst) => {
 
 // --- Tokens -------------------------------------------------------------------
 
+describe('T37 watch preserves a departed heads-up seat (A25)', () => {
+  it.each([0, 1] as const)(
+    'shows seat %i as left from both watch links, state and wait',
+    async left => {
+      const rig = await openRig();
+      const response = await post(
+        rig.t.env,
+        `/v1/rooms/${rig.roomId}/leave`,
+        {},
+        rig.tokens[left],
+      );
+      expect(response.status).toBe(200);
+      for (const seat of [0, 1] as const) {
+        const { watch } = await watchOf(
+          rig.t.env,
+          rig.roomId,
+          rig.watchTokens[seat],
+        );
+        expect(watch.room_status).toBe('finished');
+        expect(watch.seats[left]).toMatchObject({
+          seat: left,
+          status: 'left',
+          place: 2,
+        });
+        for (const read of [state, wait]) {
+          const { status } = await read(
+            rig.t.env,
+            rig.roomId,
+            rig.tokens[seat],
+          );
+          expect(status.status).toBe('match_over');
+          expect(status.seats[left]).toMatchObject({
+            seat: left,
+            status: 'left',
+            place: 2,
+          });
+          expect(watch.seats).toEqual(status.seats);
+        }
+      }
+    },
+  );
+});
+
 describe('watch_url on room creation and join (A16)', () => {
   it('is WEB_URL/watch/<room_id>?token=<watch token> for the seat and name', async () => {
     const { env } = makeEnv();

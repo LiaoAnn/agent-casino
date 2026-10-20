@@ -3,7 +3,7 @@
 // so every answer agrees with the others and with a replay of its record.
 // It covers the four states a table goes through: waiting to start, in
 // play, a seat knocked out while the others play on, and finished.
-import { mulberry32 } from '../holdem/shuffle';
+import { dealTable, mulberry32 } from '../holdem/shuffle';
 import {
   applyTableAction,
   blindsAt,
@@ -73,14 +73,6 @@ const hexSeed = (n: number) =>
     ((n * 0x9e3779b1 + i * 0x85ebca6b) >>> 0).toString(16).padStart(8, '0'),
   ).join('');
 
-// What a hand looks like from the moment it is dealt.
-interface Dealt {
-  hand_number: number;
-  // Each seat's stack before the blinds.
-  before: number[];
-  hole_cards: (readonly [Card, Card] | null)[];
-}
-
 interface Snapshot {
   state: TableState;
   // The hands finished so far.
@@ -91,7 +83,6 @@ interface Snapshot {
 
 interface Played {
   seed: string;
-  dealt: Dealt[];
   hands: TableHandRecord[];
   // Seat 0's note on each of its steps, by hand and position in its events.
   notes: Record<number, Record<number, string>>;
@@ -100,11 +91,24 @@ interface Played {
   final: Snapshot;
 }
 
-const dealtOf = (state: TableState): Dealt => ({
-  hand_number: state.handNumber,
-  before: state.stacks.map((stack, seat) => stack + state.contributed[seat]),
-  hole_cards: state.holeCards.map(cards => cards && [cards[0], cards[1]]),
-});
+// Each seat's stack before hand `n`'s blinds: what the hand before left.
+const stacksBefore = (hands: TableHandRecord[], n: number): number[] =>
+  hands.find(hand => hand.hand_number === n - 1)?.stacks ??
+  Array(PLAYERS).fill(SETTINGS.starting_stack);
+
+// Hand `n`'s hole cards by seat: the seats with chips are dealt in seat
+// order (holdem-rules 種子與洗牌); `null` for a seat already out. Worked
+// out from the records, as hands played out on all-ins have no turn.
+function holeCardsOf(played: Played, n: number): ([Card, Card] | null)[] {
+  const active = stacksBefore(played.hands, n).flatMap((stack, seat) =>
+    stack > 0 ? [seat] : [],
+  );
+  const { holeCards } = dealTable(played.seed, n, active.length);
+  return Array.from({ length: PLAYERS }, (_, seat) => {
+    const cards = holeCards[active.indexOf(seat)];
+    return cards ? [cards[0], cards[1]] : null;
+  });
+}
 
 // A loose table: short stacks move in, so busts and side pots come soon.
 function play(seed: string): Played | null {
@@ -116,7 +120,6 @@ function play(seed: string): Played | null {
     blindEvery: SETTINGS.blind_every,
     maxHands: SETTINGS.max_hands,
   });
-  const dealt = [dealtOf(state)];
   const hands: TableHandRecord[] = [];
   const notes: Played['notes'] = {};
   const actedAfter = Array<number>(PLAYERS).fill(0);
@@ -131,7 +134,10 @@ function play(seed: string): Played | null {
     if (step > 5000) return null;
     const seat = state.toAct;
     const someoneOut = state.places.some(place => place !== null);
-    if (seat === HOST && someoneOut && !playing && hands.length >= 2) {
+    const liveAllIn = state.stacks.some(
+      (stack, s) => stack === 0 && state.contributed[s] > 0 && !state.folded[s],
+    );
+    if (seat === HOST && someoneOut && liveAllIn && !playing) {
       playing = snap();
     }
     let result: TableApplyResult;
@@ -165,9 +171,6 @@ function play(seed: string): Played | null {
     hands.push(...result.finishedHands);
     const before = state;
     state = result.state;
-    if (state.handNumber !== before.handNumber && !state.over) {
-      dealt.push(dealtOf(state));
-    }
     if (!out) {
       const first = state.places.findIndex(
         (place, s) => place !== null && before.places[s] === null,
@@ -189,7 +192,7 @@ function play(seed: string): Played | null {
     final.state.places.filter(place => place === 1).length === 1 &&
     hands.at(-1)?.stacks.filter(stack => stack > 0).length === 1;
   if (!ok || !playing || !out) return null;
-  return { seed, dealt, hands, notes, playing, out, final };
+  return { seed, hands, notes, playing, out, final };
 }
 
 // The first seed whose match shows everything the fixtures need.
@@ -297,8 +300,7 @@ function viewOf(state: TableState, seat: TableSeat) {
 }
 
 function lastHandOf(played: Played, hand: TableHandRecord): LastHandBody {
-  const dealt = played.dealt.find(d => d.hand_number === hand.hand_number);
-  const before = dealt?.before ?? Array(PLAYERS).fill(SETTINGS.starting_stack);
+  const before = stacksBefore(played.hands, hand.hand_number);
   return {
     hand_number: hand.hand_number,
     blinds: hand.blinds,
@@ -350,13 +352,12 @@ function ratingsOf(places: number[]) {
 }
 
 function publicHand(played: Played, hand: TableHandRecord): HandBody {
-  const dealt = played.dealt.find(d => d.hand_number === hand.hand_number);
   return {
     hand_number: hand.hand_number,
     blinds: hand.blinds,
     button_seat: asSeat(hand.button_seat),
     board: hand.board,
-    hole_cards: dealt?.hole_cards.map(c => c && [c[0], c[1]]) ?? [],
+    hole_cards: holeCardsOf(played, hand.hand_number),
     events: hand.events.map(event => ({ ...event, seat: asSeat(event.seat) })),
     winner_seat: hand.winner_seat === null ? null : asSeat(hand.winner_seat),
     pot: hand.pot,

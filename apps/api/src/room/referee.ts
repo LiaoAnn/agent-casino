@@ -657,6 +657,7 @@ export class RoomReferee {
           result: seatResult(ended),
           final_stacks: ended.final_stacks,
           ratings: data.recorded?.ratings ?? null,
+          ...(ended.reason === 'left' && { left: ended.loser }),
         },
       }),
     );
