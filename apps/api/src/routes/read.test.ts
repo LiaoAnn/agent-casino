@@ -694,29 +694,20 @@ describe('T34 freezeout match records', () => {
   });
 
   it('decodes an old D1 record with hands settings as fixed 1/2 blinds', async () => {
-    // Persist the same tables/hand rows as production, then replace the match
-    // row directly through D1 so the writer cannot normalize the old JSON.
+    // Update only the old settings JSON, keeping all child seat/hand rows.
     const match = await record({
       hands: [hand(1), hand(2), hand(3), hand(4), hand(5), hand(6)],
     });
-    const stored = await testD1.d1
-      .prepare('SELECT * FROM matches')
-      .first<Record<string, unknown>>();
-    if (stored === null) throw new Error('Expected a stored match row');
-    const legacy = {
-      ...stored,
-      settings: JSON.stringify({
-        hands: 6,
-        turn_seconds: 30,
-        starting_stack: 200,
-      }),
-    };
-    const columns = Object.keys(legacy);
     await testD1.d1
-      .prepare(
-        `INSERT OR REPLACE INTO matches (${columns.map(c => `"${c}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+      .prepare('UPDATE matches SET settings = ? WHERE match_id = ?')
+      .bind(
+        JSON.stringify({
+          hands: 6,
+          turn_seconds: 30,
+          starting_stack: 200,
+        }),
+        match.match_id,
       )
-      .bind(...columns.map(c => legacy[c as keyof typeof legacy]))
       .run();
     const response = await get(`/v1/matches/${match.match_id}`);
     expect(response.status).toBe(200);
@@ -816,9 +807,7 @@ describe('T35 recorded display names', () => {
       players: ['AlIce', 'bOB'],
       display_names: ['新名字', '另一個名字'],
     });
-    await testD1.d1
-      .prepare('UPDATE matches SET display0 = NULL, display1 = NULL')
-      .run();
+    await testD1.d1.prepare('UPDATE match_seats SET display_name = NULL').run();
     await testD1.d1.prepare('UPDATE ratings SET display_name = NULL').run();
     expect((await matchDetail(match.match_id)).display_names).toEqual([
       'AlIce',

@@ -1,5 +1,6 @@
 // D1 tables (casino-api skill: 資料與積分). Change this file, then run
-// `pnpm db:generate` to write the migration; never edit migrations by hand.
+// `pnpm db:generate` to write the migration; edit a generated migration only
+// to add a data backfill the generator can't express (0005).
 import { sql } from 'drizzle-orm';
 import {
   index,
@@ -12,9 +13,14 @@ import {
 import { MATCH_END_REASONS } from '../contract/schemas';
 import type { Card } from '../holdem/cards';
 
+// The seat in first place alone; `draw` when first place is shared.
 export const SEAT_RESULTS = [
   'seat0_win',
   'seat1_win',
+  'seat2_win',
+  'seat3_win',
+  'seat4_win',
+  'seat5_win',
   'draw',
   'void',
   'cancelled',
@@ -35,11 +41,12 @@ export interface LegacySettings {
   starting_stack: number;
 }
 
-/** Whole-number ratings, as the match record shows them (A15). */
-export type RatingChanges = [
-  { name: string; before: number; after: number },
-  { name: string; before: number; after: number },
-];
+/** One pot of a hand as the match record shows it (A25). */
+export interface StoredPot {
+  amount: number;
+  /** Ascending. */
+  winner_seats: number[];
+}
 
 // Only finished matches are written, so `result` is also the room's status:
 // void and cancelled are the two that end without a winner.
@@ -48,13 +55,6 @@ export const matches = sqliteTable(
   {
     // match_id = room_id (A14).
     matchId: text('match_id').primaryKey(),
-    // Spelled as the players typed them in this room.
-    player0: text('player0').notNull(),
-    player1: text('player1').notNull(),
-    // What each seat was shown as (A20); null in rows from before T35, which
-    // show the name instead.
-    display0: text('display0'),
-    display1: text('display1'),
     settings: text('settings', { mode: 'json' })
       .$type<RoomSettings | LegacySettings>()
       .notNull(),
@@ -63,15 +63,35 @@ export const matches = sqliteTable(
     result: text('result', { enum: SEAT_RESULTS }).notNull(),
     endReason: text('end_reason', { enum: MATCH_END_REASONS }),
     rated: integer('rated', { mode: 'boolean' }).notNull(),
-    finalStacks: text('final_stacks', { mode: 'json' })
-      .$type<[number, number]>()
-      .notNull(),
-    ratingChanges: text('rating_changes', {
-      mode: 'json',
-    }).$type<RatingChanges>(),
     endedAt: integer('ended_at', { mode: 'timestamp_ms' }).notNull(),
   },
   t => [index('matches_ended_at_idx').on(t.endedAt, t.matchId)],
+);
+
+// One row per seat of a finished match (T40); migration 0005 moved the two
+// seats of every earlier match here.
+export const matchSeats = sqliteTable(
+  'match_seats',
+  {
+    matchId: text('match_id')
+      .notNull()
+      .references(() => matches.matchId),
+    seat: integer('seat').notNull(),
+    // Spelled as the player typed it in this room.
+    name: text('name').notNull(),
+    // What the seat was shown as (A20); null in rows from before T35, which
+    // show the name instead.
+    displayName: text('display_name'),
+    finalStack: integer('final_stack').notNull(),
+    // null when the match is void or cancelled.
+    place: integer('place'),
+    // Whole-number Elo around a rated match (A15), under the leaderboard's
+    // spelling of the name; null when unrated.
+    ratingName: text('rating_name'),
+    ratingBefore: integer('rating_before'),
+    ratingAfter: integer('rating_after'),
+  },
+  t => [primaryKey({ columns: [t.matchId, t.seat] })],
 );
 
 // One row per finished hand: what the match record shows besides the events.
@@ -82,19 +102,20 @@ export const matchHands = sqliteTable(
       .notNull()
       .references(() => matches.matchId),
     handNumber: integer('hand_number').notNull(),
-    buttonSeat: integer('button_seat').$type<0 | 1>().notNull(),
+    buttonSeat: integer('button_seat').notNull(),
     board: text('board', { mode: 'json' }).$type<Card[]>().notNull(),
-    // Only for hands that went to showdown; folded hands never store them.
+    // Only for hands that went to showdown, by seat; a seat that folded or
+    // was out is null. Folded hands store none.
     holeCards: text('hole_cards', { mode: 'json' }).$type<
-      [[Card, Card], [Card, Card]]
+      ([Card, Card] | null)[]
     >(),
-    // null is a split pot.
-    winnerSeat: integer('winner_seat').$type<0 | 1>(),
+    // The seat that won every pot alone; null otherwise.
+    winnerSeat: integer('winner_seat'),
     pot: integer('pot').notNull(),
+    // null in rows from before T40: one pot, to winner_seat or split.
+    pots: text('pots', { mode: 'json' }).$type<StoredPot[]>(),
     endedBy: text('ended_by', { enum: ['fold', 'showdown'] }).notNull(),
-    stacks: text('stacks', { mode: 'json' })
-      .$type<[number, number]>()
-      .notNull(),
+    stacks: text('stacks', { mode: 'json' }).$type<number[]>().notNull(),
   },
   t => [primaryKey({ columns: [t.matchId, t.handNumber] })],
 );
@@ -110,12 +131,12 @@ export const matchEvents = sqliteTable(
     handNumber: integer('hand_number').notNull(),
     // Position within the hand, from 0.
     seq: integer('seq').notNull(),
-    seat: integer('seat').$type<0 | 1>().notNull(),
+    seat: integer('seat').notNull(),
     street: text('street', {
       enum: ['preflop', 'flop', 'turn', 'river'],
     }).notNull(),
     type: text('type', {
-      enum: ['post_blind', 'fold', 'check', 'call', 'raise'],
+      enum: ['post_blind', 'fold', 'check', 'call', 'raise', 'leave'],
     }).notNull(),
     amount: integer('amount'),
     timeout: integer('timeout', { mode: 'boolean' }).notNull(),

@@ -4,7 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { migrate } from 'drizzle-orm/d1/migrator';
 import { getPlatformProxy } from 'wrangler';
 import { type Db, openDb } from './client';
-import { bans, matchEvents, matches, matchHands, ratings } from './schema';
+import {
+  bans,
+  matchEvents,
+  matches,
+  matchHands,
+  matchSeats,
+  ratings,
+} from './schema';
 
 export interface TestD1 {
   d1: D1Database;
@@ -35,6 +42,7 @@ export async function startTestD1(): Promise<TestD1> {
       await db.batch([
         db.delete(matchEvents),
         db.delete(matchHands),
+        db.delete(matchSeats),
         db.delete(matches),
         db.delete(ratings),
         db.delete(bans),

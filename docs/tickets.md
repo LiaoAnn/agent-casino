@@ -636,7 +636,7 @@
   - 每個座位的名次；
   - 冠軍數；
   - 舊紀錄讀取時的對應；
-  - `/v1/matches`、`/v1/players`、排行榜列出 N 人。
+  - `/v1/matches`、排行榜列出 N 人。
 - 跟 T38 接上 `recordMatch`：由大廳依序寫入，跟 A10 一樣。
 - 只改：`apps/api/src/db/`、`matchmaker/` 寫 Elo 的部分、`routes/read.ts`、casino-api skill。
 - 驗證：`pnpm test:api`。2 人桌的 Elo 跟舊算法逐位相同；3 人並列算 0.5；有 bot 的場不計分。
