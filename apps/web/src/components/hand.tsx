@@ -1,12 +1,9 @@
-import type {
-  MatchDetail,
-  WatchResponse,
-} from '@agent-casino/api/src/contract/schemas';
+import type { WatchResponse } from '@agent-casino/api/src/contract/schemas';
 import { ActionLogEntry } from '@/components/action-log-entry';
 import { BySeat, type Pair, Pairs } from '@/components/pairs';
 import { Panel } from '@/components/panel';
 import { Cards } from '@/components/playing-card';
-import { blindsLabel } from '@/lib/format';
+import { blindsLabel, handResult } from '@/lib/format';
 
 // A finished hand of a watch link: the opponent's cards may be unknown and
 // the watched seat's steps carry notes. A match record's hand has the same
@@ -22,7 +19,7 @@ export function Hand({
   enter = false,
 }: {
   hand: HandRecord;
-  players: MatchDetail['players'];
+  players: readonly string[];
   enter?: boolean;
 }) {
   const title = `第 ${hand.hand_number} 手`;
@@ -34,25 +31,25 @@ export function Hand({
     items.push(['公共牌', <Cards key="b" cards={hand.board} />]);
   }
   // While the match is on, only the cards the seat has seen; once it is
-  // over, both (the seed is public then).
+  // over, every seat's (the seed is public then). At a bigger table, only
+  // the seats dealt in: the ones with a step in the hand.
+  const dealt = hand.hole_cards
+    .map((cards, seat) => ({ cards, seat }))
+    .filter(
+      ({ seat }) =>
+        players.length <= 2 || hand.events.some(e => e.seat === seat),
+    );
   items.push([
     '底牌',
     <BySeat
       key="h"
-      players={players}
-      values={[
-        <Cards key={0} cards={hand.hole_cards[0]} />,
-        <Cards key={1} cards={hand.hole_cards[1]} />,
-      ]}
+      players={dealt.map(({ seat }) => players[seat] ?? '')}
+      values={dealt.map(({ cards, seat }) => (
+        <Cards key={seat} cards={cards} />
+      ))}
     />,
   ]);
-  items.push([
-    '結果',
-    hand.winner_seat === null
-      ? `平分底池 ${hand.pot}`
-      : `${players[hand.winner_seat]} 贏得 ${hand.pot}（${hand.ended_by === 'showdown' ? '攤牌' : '對手棄牌'}）`,
-    'text-gold-200',
-  ]);
+  items.push(['結果', handResult(hand, players), 'text-gold-200']);
   items.push([
     '籌碼',
     <BySeat key="s" players={players} values={hand.stacks} />,
@@ -74,7 +71,7 @@ export function Steps({
 }: {
   title: string;
   events: HandRecord['events'];
-  players: MatchDetail['players'];
+  players: readonly string[];
 }) {
   return (
     <ol

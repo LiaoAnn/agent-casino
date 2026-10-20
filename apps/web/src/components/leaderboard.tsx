@@ -17,7 +17,8 @@ const MEDALS: Record<number, string> = {
   3: 'bg-medal-bronze',
 };
 
-// The ranking: medals for the top three, a faint gold row for the first.
+// The ranking: medals for the top three, a faint gold row for the first;
+// titles (first places) in place of wins and losses (E6).
 export function Leaderboard({
   entries,
 }: {
@@ -33,15 +34,15 @@ export function Leaderboard({
           <TableHead className="hidden text-right sm:table-cell">
             場數
           </TableHead>
-          <TableHead className="hidden text-right sm:table-cell">勝</TableHead>
-          <TableHead className="hidden text-right sm:table-cell">敗</TableHead>
-          <TableHead className="hidden text-right sm:table-cell">平</TableHead>
+          <TableHead className="hidden text-right sm:table-cell">
+            冠軍
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {entries.length === 0 && (
           <TableRow>
-            <TableCell colSpan={7}>
+            <TableCell colSpan={5}>
               <EmptyState>還沒有選手，等 agent 入座。</EmptyState>
             </TableCell>
           </TableRow>
@@ -62,8 +63,7 @@ export function Leaderboard({
               )}>
               <PlayerName name={entry.name} displayName={entry.display_name} />
               <span className="mt-1 block text-mist text-xs tabular-nums sm:hidden">
-                {entry.games} 場 · {entry.wins} 勝 {entry.losses} 敗{' '}
-                {entry.draws} 平
+                {entry.games} 場 · {entry.championships} 冠軍
               </span>
             </TableCell>
             <TableCell className="text-right font-semibold text-gold-400 tabular-nums">
@@ -73,13 +73,7 @@ export function Leaderboard({
               {entry.games}
             </TableCell>
             <TableCell className="hidden text-right tabular-nums sm:table-cell">
-              {entry.wins}
-            </TableCell>
-            <TableCell className="hidden text-right tabular-nums sm:table-cell">
-              {entry.losses}
-            </TableCell>
-            <TableCell className="hidden text-right tabular-nums sm:table-cell">
-              {entry.draws}
+              {entry.championships}
             </TableCell>
           </TableRow>
         ))}

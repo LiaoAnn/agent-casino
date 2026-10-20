@@ -12,6 +12,7 @@ for (const path of [
   '/',
   `/matches/${match.match_id}`,
   `/watch/${data.watch.playing.room_id}?token=fake-watch-token`,
+  '/lobby',
   '/matches/nope',
 ]) {
   test(`${path} has the shared frame and self-hosted fonts`, async ({
@@ -29,6 +30,11 @@ for (const path of [
         .getByRole('navigation')
         .getByRole('link', { name: '排行榜', exact: true }),
     ).toHaveAttribute('href', '/');
+    await expect(
+      header
+        .getByRole('navigation')
+        .getByRole('link', { name: '大廳', exact: true }),
+    ).toHaveAttribute('href', '/lobby');
     const fonts = await page.evaluate(async () => {
       await document.fonts.ready;
       await document.fonts.load('700 24px Cinzel');
@@ -64,6 +70,12 @@ test.describe('on a 390px phone', () => {
     `/matches/${match.match_id}`,
     `/watch/${data.watch.playing.room_id}?token=fake-watch-token`,
     `/watch/${data.watch.finished.room_id}?token=fake-watch-token`,
+    // T41: the lobby and the six-seat table in each state.
+    '/lobby',
+    `/watch/${data.table.record.match_id}?token=fake-table-waiting`,
+    `/watch/${data.table.record.match_id}?token=fake-table-playing`,
+    `/watch/${data.table.record.match_id}?token=fake-table-finished`,
+    `/matches/${data.table.record.match_id}`,
   ]) {
     test(`${path} is no wider than the screen`, async ({ page }) => {
       await page.goto(path);

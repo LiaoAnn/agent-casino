@@ -1,8 +1,5 @@
-import type {
-  MatchDetail,
-  WatchResponse,
-} from '@agent-casino/api/src/contract/schemas';
-import { CurrentHand } from '@/components/current-hand';
+import type { WatchResponse } from '@agent-casino/api/src/contract/schemas';
+import { CurrentHand, WaitingTable } from '@/components/current-hand';
 import { EmptyState } from '@/components/empty-state';
 import { Hand, Steps } from '@/components/hand';
 import { HandTable } from '@/components/match-hand';
@@ -11,10 +8,11 @@ import { type Pair, Pairs } from '@/components/pairs';
 import { PageTitle, Panel } from '@/components/panel';
 import { PlayerName } from '@/components/player-name';
 import { WatchResult } from '@/components/watch-result';
-import { formatClock, settingsLabel } from '@/lib/format';
+import { formatClock, outLabel, settingsLabel } from '@/lib/format';
+import { outAfter } from '@/lib/seats';
 
 const STATUS = {
-  waiting: '等待對手',
+  waiting: '等待開打',
   playing: '進行中',
   finished: '已結束',
   void: '作廢',
@@ -36,44 +34,53 @@ export function WatchView({
   updatedAt: number | null;
   ratings: ReadonlyMap<string, number>;
 }) {
-  const { settings, view, hand_number } = watch;
-  const players: MatchDetail['players'] = [
-    watch.players[0],
-    watch.players[1] ?? '（等待對手）',
-  ];
+  const { settings, view, hand_number, players } = watch;
   // What the table, the timeline and the result show (A20).
-  const shown: MatchDetail['display_names'] = [
-    watch.display_names[0],
-    watch.display_names[1] ?? '（等待對手）',
-  ];
+  const shown = watch.display_names;
+  const waiting = watch.room_status === 'waiting';
   const info: Pair[] = [
     [
       '觀看',
       <PlayerName
         key="w"
-        name={players[watch.seat]}
-        displayName={shown[watch.seat]}
+        name={players[watch.seat] ?? ''}
+        displayName={shown[watch.seat] ?? ''}
       />,
       'text-gold-200',
     ],
     ['狀態', STATUS[watch.room_status]],
-    ['設定', settingsLabel(settings)],
+    ['設定', settingsLabel(settings, { started: !waiting })],
     ['最後更新', updatedAt === null ? '' : formatClock(updatedAt)],
   ];
-  const seatRatings = [
-    ratings.get(players[0].toLowerCase()),
-    ratings.get(players[1].toLowerCase()),
-  ] as const;
+  const seatRatings = players.map(name => ratings.get(name.toLowerCase()));
+  const places =
+    'places' in watch ? watch.places : watch.seats.map(seat => seat.place);
   const last = watch.hands.at(-1);
   const inPlay =
     watch.room_status === 'playing' && view !== null && hand_number !== null;
+  // The watched seat is out while the others play on.
+  const mine = watch.seats[watch.seat];
+  const outEarly =
+    watch.room_status === 'playing' &&
+    mine !== undefined &&
+    (mine.status === 'out' || mine.status === 'left');
+  const title = waiting
+    ? '等待開打'
+    : players.length <= 2
+      ? // A room cancelled before anyone joined the host has one seat.
+        `${shown[0]} vs ${shown[1] ?? '（等待對手）'}`
+      : `${players.length} 人桌`;
   return (
     <div className="space-y-6">
-      <PageTitle>
-        {shown[0]} vs {shown[1]}
-      </PageTitle>
+      <PageTitle>{title}</PageTitle>
       <Panel>
         <Pairs items={info} label="觀戰資訊" />
+        {outEarly && (
+          <p role="status" className="text-ivory text-sm">
+            {outLabel({ place: mine.place, left: mine.status === 'left' })}
+            。牌桌還在進行，積分在整桌結束後才算。
+          </p>
+        )}
         {offline && (
           <p role="status" className="text-red-400 text-sm">
             <span aria-hidden="true" className="mr-2 before:content-['⚠']" />
@@ -83,8 +90,8 @@ export function WatchView({
       </Panel>
       <div className="grid gap-6 lg:grid-cols-3 lg:items-start">
         <div className="min-w-0 space-y-6 lg:col-span-2">
-          {watch.room_status === 'waiting' && (
-            <EmptyState>等待對手加入…</EmptyState>
+          {waiting && (
+            <WaitingTable watch={watch} players={shown} ratings={seatRatings} />
           )}
           {inPlay && (
             <CurrentHand
@@ -108,8 +115,8 @@ export function WatchView({
                 hand={last}
                 players={shown}
                 ratings={seatRatings}
-                // Heads-up until T41.
-                bottom={watch.seat as 0 | 1}
+                bottom={watch.seat}
+                outs={outAfter(watch.hands, watch.hands.length - 1, places)}
               />
             </section>
           )}
