@@ -21,11 +21,11 @@ import {
 import { startTestD1, type TestD1 } from '../db/test-d1';
 import {
   type Action,
-  applyAction,
-  type MatchState,
-  type Seat,
-  startMatch,
-} from '../holdem/match';
+  applyTableAction,
+  startTable,
+  type TableSeat,
+  type TableState,
+} from '../holdem/table';
 import type { Bindings } from '../routes/env';
 import { RoomReferee, type RoomStorage } from './referee';
 
@@ -277,21 +277,22 @@ const seededRoom = async (t: TestEnv, settings: Record<string, unknown>) => {
 
 // --- Engine oracle ----------------------------------------------------------
 
-const engineStart = (hands: number): MatchState =>
-  startMatch({
+const engineStart = (hands: number): TableState =>
+  startTable({
     seed: SEED,
     maxHands: hands,
     blindEvery: 50,
     startingStack: STACK,
+    players: 2,
   });
 
 const applyOk = (
-  match: MatchState,
-  seat: Seat,
+  match: TableState,
+  seat: TableSeat,
   action: Action,
   options: { timeout?: boolean } = {},
-): MatchState => {
-  const result = applyAction(match, seat, action, options);
+): TableState => {
+  const result = applyTableAction(match, seat, action, options);
   if (!result.ok) throw new Error(result.message);
   return result.state;
 };
@@ -522,13 +523,13 @@ describe('狀況處理 平台出錯', () => {
       const storage = t.storage(roomId);
       const stored = await storage.get<
         Record<string, unknown> & {
-          turn: { seat: Seat };
+          turn: { seat: TableSeat };
         }
       >('room');
       if (stored === undefined) throw new Error('expected stored room');
       // Persistence may name its engine field differently after migration.
       const table = Object.values(stored).find(
-        (value): value is { toAct: Seat; config: unknown } =>
+        (value): value is { toAct: TableSeat; config: unknown } =>
           typeof value === 'object' &&
           value !== null &&
           'toAct' in value &&

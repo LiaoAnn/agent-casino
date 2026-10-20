@@ -12,7 +12,7 @@ import { registerHooks } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { getPlatformProxy } from 'wrangler';
-import type { HandRecord, MatchState } from '../src/holdem/match';
+import type { TableHandRecord, TableState } from '../src/holdem/table';
 
 // src uses extensionless imports, which Node's own TypeScript support can't
 // resolve; add `.ts` before loading them.
@@ -24,8 +24,8 @@ registerHooks({
     return nextResolve(specifier, context);
   },
 });
-const { applyAction, legalActions, startMatch } = await import(
-  '../src/holdem/match'
+const { applyTableAction, startTable, tableLegalActions } = await import(
+  '../src/holdem/table'
 );
 const { randomAction } = await import('../src/holdem/bot');
 const { mulberry32 } = await import('../src/holdem/shuffle');
@@ -52,24 +52,25 @@ const roomId = () =>
   `r_${Array.from({ length: 10 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(random() * 36)]).join('')}`;
 
 function play(seed: string) {
-  let state: MatchState = startMatch({
+  let state: TableState = startTable({
     seed,
+    players: 2,
     startingStack: settings.starting_stack,
     blindEvery: settings.blind_every,
     maxHands: settings.max_hands,
   });
-  const hands: HandRecord[] = [];
+  const hands: TableHandRecord[] = [];
   while (!state.over) {
-    const result = applyAction(
+    const result = applyTableAction(
       state,
       state.toAct ?? 0,
-      randomAction(legalActions(state), random),
+      randomAction(tableLegalActions(state), random),
     );
     if (!result.ok) throw new Error(result.message);
     state = result.state;
     hands.push(...result.finishedHands);
   }
-  return { hands, stacks: state.stacks };
+  return { hands, stacks: state.stacks, places: state.places as number[] };
 }
 
 const proxy = await getPlatformProxy<{ DB: D1Database }>({
@@ -87,7 +88,7 @@ try {
   ].entries()) {
     // Match seeds are 64 hex characters (holdem-rules 種子與洗牌).
     const seed = createHash('sha256').update(`${firstSeed}:${i}`).digest('hex');
-    const { hands, stacks } = play(seed);
+    const { hands, stacks, places } = play(seed);
     const input = {
       match_id: roomId(),
       players: [players[0] ?? p0, players[1] ?? p1] as [string, string],
@@ -99,6 +100,7 @@ try {
           : stacks[1] > stacks[0]
             ? ('seat1_win' as const)
             : ('draw' as const),
+      places,
       ended_at: new Date(Date.now() + i).toISOString(),
       final_stacks: [stacks[0], stacks[1]] as [number, number],
       hands,

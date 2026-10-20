@@ -2,21 +2,23 @@
 import { describe, expect, it } from 'vitest';
 import { randomAction } from './bot';
 import { checkHand, checkState } from './invariants';
+import { mulberry32 } from './shuffle';
 import {
   type Action,
-  applyAction,
-  type HandRecord,
-  type HistoryEvent,
+  applyTableAction,
   type LegalAction,
-  legalActions,
-  type MatchConfig,
-  type MatchState,
-  otherSeat,
-  type Seat,
-  startMatch,
-} from './match';
-import { replay } from './replay';
-import { mulberry32 } from './shuffle';
+  replayTable,
+  startTable,
+  type TableConfig,
+  type TableEvent,
+  type TableHandRecord,
+  type TableSeat,
+  type TableState,
+  tableLegalActions,
+} from './table';
+
+// The heads-up config: a 2-seat table without `players`.
+type HeadsUpConfig = Omit<TableConfig, 'players'>;
 
 // The random-bot fuzz run (T08). `pnpm test:fuzz` sets FUZZ_HANDS=10000; the
 // default keeps `pnpm check` fast. Any violation names the match config and
@@ -42,7 +44,7 @@ const randomInt = (random: () => number, min: number, max: number) =>
   min + Math.floor(random() * (max - min + 1));
 
 /** All-zero and all-f seeds first; stacks mostly small so blinds go all-in. */
-function pickConfig(random: () => number, matchIndex: number): MatchConfig {
+function pickConfig(random: () => number, matchIndex: number): HeadsUpConfig {
   const seed =
     matchIndex === 0
       ? '0'.repeat(64)
@@ -118,7 +120,7 @@ function invalidAction(
 /** The pot went the wrong way: `start` is the stacks before the blinds. */
 function payoutProblem(
   start: [number, number],
-  hand: HandRecord,
+  hand: TableHandRecord,
 ): string | null {
   const { winner_seat: winner, stacks } = hand;
   const shown = `from ${start} to ${stacks} (winner ${winner})`;
@@ -127,7 +129,7 @@ function payoutProblem(
       ? null
       : `split pot changed the stacks ${shown}`;
   }
-  const loser = otherSeat(winner);
+  const loser = 1 - winner;
   if (stacks[winner] < start[winner]) return `winner lost chips ${shown}`;
   if (stacks[loser] > start[loser]) return `loser gained chips ${shown}`;
   return null;
@@ -146,17 +148,17 @@ describe('fuzz: random legal play', () => {
       while (handsPlayed < FUZZ_HANDS) {
         const config = pickConfig(random, matchIndex);
         matchIndex++;
-        const tag = (state: MatchState) =>
+        const tag = (state: TableState) =>
           `[FUZZ_SEED=${FUZZ_SEED} match=${matchIndex} config=${JSON.stringify(config)} hand=${state.handNumber}]`;
-        const report = (state: MatchState, message: string) => {
+        const report = (state: TableState, message: string) => {
           violationCount++;
           if (violations.length < MAX_REPORTED) {
             violations.push(`${tag(state)} ${message}`);
           }
         };
 
-        let state = startMatch(config);
-        const events: HistoryEvent[] = [];
+        let state = startTable({ ...config, players: 2 });
+        const events: TableEvent[] = [];
         const allHands: string[] = [];
         let expectedHand = 1;
         /** Stacks at the start of the hand being played (before blinds). */
@@ -175,26 +177,26 @@ describe('fuzz: random legal play', () => {
             broken = true;
             break;
           }
-          const seat = state.toAct as Seat;
+          const seat = state.toAct as TableSeat;
           const before = JSON.stringify(state);
 
-          const wrongSeat = applyAction(
+          const wrongSeat = applyTableAction(
             state,
-            otherSeat(seat),
+            1 - seat,
             anyAction(random),
           );
           if (wrongSeat.ok || wrongSeat.code !== 'not_your_turn') {
             report(
               state,
-              `seat ${otherSeat(seat)} acting out of turn was not rejected with not_your_turn`,
+              `seat ${1 - seat} acting out of turn was not rejected with not_your_turn`,
             );
           }
 
-          const legal = legalActions(state);
+          const legal = tableLegalActions(state);
           if (random() < 0.2) {
             const bad = invalidAction(legal, random);
             if (bad) {
-              const result = applyAction(state, seat, bad);
+              const result = applyTableAction(state, seat, bad);
               if (result.ok || result.code !== 'invalid_action') {
                 report(
                   state,
@@ -205,7 +207,7 @@ describe('fuzz: random legal play', () => {
           }
 
           const action = randomAction(legal, random);
-          const result = applyAction(state, seat, action, {
+          const result = applyTableAction(state, seat, action, {
             timeout: random() < 0.1,
           });
           if (JSON.stringify(state) !== before) {
@@ -261,7 +263,7 @@ describe('fuzz: random legal play', () => {
         }
 
         if (!broken && state.over) {
-          const replayed = replay(config, events);
+          const replayed = replayTable({ ...config, players: 2 }, events);
           if (!replayed.ok) {
             report(
               state,

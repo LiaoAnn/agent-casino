@@ -1,24 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomAction } from './bot';
+import { mulberry32 } from './shuffle';
 import {
   type Action,
-  applyAction,
+  applyTableAction,
   type LegalAction,
-  legalActions,
-  type MatchConfig,
-  type MatchState,
-  type Seat,
-  startMatch,
-} from './match';
-import { mulberry32 } from './shuffle';
+  startTable,
+  type TableConfig,
+  type TableSeat,
+  type TableState,
+  tableLegalActions,
+} from './table';
 
-type Step = [Seat, Action];
+// The heads-up config: a 2-seat table without `players`.
+type HeadsUpConfig = Omit<TableConfig, 'players'>;
+
+type Step = [TableSeat, Action];
 
 const CHECK: Action = { type: 'check' };
 const CALL: Action = { type: 'call' };
 const raise = (amount: number): Action => ({ type: 'raise', amount });
 
-const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
+const config = (overrides: Partial<HeadsUpConfig> = {}): HeadsUpConfig => ({
   seed: '0000000000000000000000000000000000000000000000000000000000000005',
   maxHands: 10,
   blindEvery: 50,
@@ -26,10 +29,13 @@ const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
   ...overrides,
 });
 
-function playFrom(overrides: Partial<MatchConfig>, steps: Step[]): MatchState {
-  let state = startMatch(config(overrides));
+function playFrom(
+  overrides: Partial<HeadsUpConfig>,
+  steps: Step[],
+): TableState {
+  let state = startTable({ ...config(overrides), players: 2 });
   for (const [seat, action] of steps) {
-    const result = applyAction(state, seat, action);
+    const result = applyTableAction(state, seat, action);
     if (!result.ok) {
       throw new Error(`${JSON.stringify(action)} rejected: ${result.message}`);
     }
@@ -39,9 +45,9 @@ function playFrom(overrides: Partial<MatchConfig>, steps: Step[]): MatchState {
 }
 
 // Real decision points and the legal lists the engine offers there.
-const SITUATIONS: [string, () => MatchState][] = [
+const SITUATIONS: [string, () => TableState][] = [
   // fold, call 1, raise 4..40
-  ['button at the start', () => startMatch(config())],
+  ['button at the start', () => startTable({ ...config(), players: 2 })],
   // fold, check, raise 4..40
   ['big blind option after a limp', () => playFrom({}, [[0, CALL]])],
   // fold, check, raise 2..38
@@ -117,11 +123,11 @@ describe('randomAction', () => {
     '%s: always picks an action the engine accepts',
     (_name, makeState) => {
       const state = makeState();
-      const legal = legalActions(state);
-      const seat = state.toAct as Seat;
+      const legal = tableLegalActions(state);
+      const seat = state.toAct as TableSeat;
       for (const action of drawMany(legal, 2000)) {
         expect(problems(action, legal)).toEqual([]);
-        const result = applyAction(state, seat, action);
+        const result = applyTableAction(state, seat, action);
         expect(result.ok).toBe(true);
       }
     },
@@ -147,7 +153,7 @@ describe('randomAction', () => {
 
   it('stays legal at the edges of the random stream (0 and just below 1)', () => {
     for (const [, makeState] of SITUATIONS) {
-      const legal = legalActions(makeState());
+      const legal = tableLegalActions(makeState());
       for (const value of [0, 0.5, 1 - Number.EPSILON]) {
         const action = randomAction(legal, () => value);
         expect(problems(action, legal)).toEqual([]);
@@ -156,7 +162,7 @@ describe('randomAction', () => {
   });
 
   it('never folds when check is offered', () => {
-    const legal = legalActions(playFrom({}, [[0, CALL]]));
+    const legal = tableLegalActions(playFrom({}, [[0, CALL]]));
     expect(legal.some(option => option.type === 'check')).toBe(true);
     const seen = counts(drawMany(legal, 3000));
     expect(seen.fold).toBe(0);
@@ -165,7 +171,7 @@ describe('randomAction', () => {
   });
 
   it('facing a bet it sometimes folds, calls and raises', () => {
-    const legal = legalActions(startMatch(config()));
+    const legal = tableLegalActions(startTable({ ...config(), players: 2 }));
     const seen = counts(drawMany(legal, 3000));
     expect(seen.fold).toBeGreaterThan(0);
     expect(seen.call).toBeGreaterThan(0);
@@ -174,7 +180,7 @@ describe('randomAction', () => {
   });
 
   it('facing an all-in it sometimes folds and sometimes calls', () => {
-    const legal = legalActions(playFrom({}, [[0, raise(40)]]));
+    const legal = tableLegalActions(playFrom({}, [[0, raise(40)]]));
     const seen = counts(drawMany(legal, 3000));
     expect(seen.fold).toBeGreaterThan(0);
     expect(seen.call).toBeGreaterThan(0);
@@ -183,8 +189,8 @@ describe('randomAction', () => {
 
   it('raises exactly min, exactly max (all-in) and strictly in between', () => {
     for (const legal of [
-      legalActions(startMatch(config())), // 4..40
-      legalActions(playFrom({ startingStack: 1000 }, [[0, raise(6)]])), // 10..1000
+      tableLegalActions(startTable({ ...config(), players: 2 })), // 4..40
+      tableLegalActions(playFrom({ startingStack: 1000 }, [[0, raise(6)]])), // 10..1000
       [
         { type: 'fold' },
         { type: 'check' },
@@ -207,7 +213,9 @@ describe('randomAction', () => {
   });
 
   it('is deterministic: the same stream gives the same actions', () => {
-    const lists = SITUATIONS.map(([, makeState]) => legalActions(makeState()));
+    const lists = SITUATIONS.map(([, makeState]) =>
+      tableLegalActions(makeState()),
+    );
     const run = () => {
       const random = mulberry32(12345);
       return Array.from({ length: 300 }, (_, i) =>
@@ -223,14 +231,14 @@ describe('randomAction', () => {
     });
     const random = mulberry32(3);
     for (const [, makeState] of SITUATIONS) {
-      const legal = legalActions(makeState());
+      const legal = tableLegalActions(makeState());
       for (let i = 0; i < 50; i++) randomAction(legal, random);
     }
     expect(Math.random).not.toHaveBeenCalled();
   });
 
   it('does not change the legal list', () => {
-    const legal = legalActions(startMatch(config()));
+    const legal = tableLegalActions(startTable({ ...config(), players: 2 }));
     const copy = structuredClone(legal);
     drawMany(legal, 200);
     expect(legal).toEqual(copy);
@@ -251,14 +259,14 @@ describe('randomAction', () => {
       },
       { seed: 'f'.repeat(64), maxHands: 20, startingStack: 2000 },
     ]) {
-      let state = startMatch(config(overrides));
+      let state = startTable({ ...config(overrides), players: 2 });
       let steps = 0;
       while (!state.over) {
-        const seat = state.toAct as Seat;
-        const result = applyAction(
+        const seat = state.toAct as TableSeat;
+        const result = applyTableAction(
           state,
           seat,
-          randomAction(legalActions(state), random),
+          randomAction(tableLegalActions(state), random),
         );
         if (!result.ok) throw new Error(result.message);
         state = result.state;

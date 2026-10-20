@@ -117,7 +117,7 @@ const initial = (seat: 0 | 1): Mutable<View> => ({
   history: [blind(0, 1), blind(1, 2)],
 });
 
-describe('seatView (heads-up cases ported from holdem/view.test.ts)', () => {
+describe('seatView (heads-up cases)', () => {
   it('start of hand 1 from seat 0 (button, small blind)', () => {
     expect(seatView(startTable(config()), 0)).toEqual(initial(0));
   });

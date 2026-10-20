@@ -1,32 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import { checkHand, checkState } from './invariants';
+import { dealHand, mulberry32 } from './shuffle';
 import {
   type Action,
-  applyAction,
-  type HandRecord,
-  type HistoryEvent,
+  applyTableAction,
   type LegalAction,
-  legalActions,
-  type MatchConfig,
-  type MatchState,
-  type Seat,
-  startMatch,
-} from './match';
-import { dealHand, mulberry32 } from './shuffle';
+  startTable,
+  type TableConfig,
+  type TableEvent,
+  type TableHandRecord,
+  type TableSeat,
+  type TableState,
+  tableLegalActions,
+} from './table';
+
+// The heads-up config: a 2-seat table without `players`.
+type HeadsUpConfig = Omit<TableConfig, 'players'>;
 
 // Independent reference fixtures (seat 0 | seat 1 | board), see match.test.ts:
 // ...0005 hand 1: 9c Ks | Jh 9d | Jc Qh 3d 7c 3c   seat 1 wins
 // ...0016 hand 1: 7s 3d | 3s 4d | 3c 2s Qd 5s 2h   tie
 // ...001a hand 1: 7h Jd | Js 2s | Ks Ad 3h 8d 9h   tie
 
-type Step = [Seat, Action, { timeout?: boolean }?];
+type Step = [TableSeat, Action, { timeout?: boolean }?];
 
 const FOLD: Action = { type: 'fold' };
 const CHECK: Action = { type: 'check' };
 const CALL: Action = { type: 'call' };
 const raise = (amount: number): Action => ({ type: 'raise', amount });
 
-const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
+const config = (overrides: Partial<HeadsUpConfig> = {}): HeadsUpConfig => ({
   seed: '0000000000000000000000000000000000000000000000000000000000000005',
   maxHands: 10,
   blindEvery: 50,
@@ -36,14 +39,14 @@ const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
 
 /** Every state along a script (the start included) and the finished hands. */
 function trace(
-  overrides: Partial<MatchConfig>,
+  overrides: Partial<HeadsUpConfig>,
   steps: Step[],
-): { states: MatchState[]; hands: HandRecord[] } {
-  let state = startMatch(config(overrides));
+): { states: TableState[]; hands: TableHandRecord[] } {
+  let state = startTable({ ...config(overrides), players: 2 });
   const states = [state];
-  const hands: HandRecord[] = [];
+  const hands: TableHandRecord[] = [];
   for (const [seat, action, options] of steps) {
-    const result = applyAction(state, seat, action, options);
+    const result = applyTableAction(state, seat, action, options);
     if (!result.ok) {
       throw new Error(
         `seat ${seat} ${JSON.stringify(action)} rejected: ${result.message}`,
@@ -57,12 +60,12 @@ function trace(
 }
 
 const last = <T>(items: T[]): T => items[items.length - 1];
-const stateAfter = (overrides: Partial<MatchConfig>, steps: Step[]) =>
+const stateAfter = (overrides: Partial<HeadsUpConfig>, steps: Step[]) =>
   last(trace(overrides, steps).states);
 
 /** Checks every postflop street; `first` is the non-button seat. */
-const checkPostflop = (first: Seat): Step[] => {
-  const second: Seat = first === 0 ? 1 : 0;
+const checkPostflop = (first: TableSeat): Step[] => {
+  const second: TableSeat = first === 0 ? 1 : 0;
   return [
     [first, CHECK],
     [second, CHECK],
@@ -89,7 +92,7 @@ const BLIND_ALL_IN_SCRIPT: Step[] = [
   [1, CALL],
 ];
 
-const SCENARIOS: [string, Partial<MatchConfig>, Step[]][] = [
+const SCENARIOS: [string, Partial<HeadsUpConfig>, Step[]][] = [
   ['check-down, seat 1 wins', {}, CHECK_DOWN_HAND_1],
   [
     'raises on every street and a split pot (seed ...001a)',
@@ -184,16 +187,16 @@ function pick(legal: LegalAction[], random: () => number): Action {
   return { type: option.type };
 }
 
-function randomMatch(overrides: Partial<MatchConfig>, botSeed: number) {
+function randomMatch(overrides: Partial<HeadsUpConfig>, botSeed: number) {
   const random = mulberry32(botSeed);
-  let state = startMatch(config(overrides));
+  let state = startTable({ ...config(overrides), players: 2 });
   const states = [state];
-  const hands: HandRecord[] = [];
+  const hands: TableHandRecord[] = [];
   while (!state.over) {
-    const result = applyAction(
+    const result = applyTableAction(
       state,
-      state.toAct as Seat,
-      pick(legalActions(state), random),
+      state.toAct as TableSeat,
+      pick(tableLegalActions(state), random),
       { timeout: random() < 0.1 },
     );
     if (!result.ok) throw new Error(result.message);
@@ -204,7 +207,7 @@ function randomMatch(overrides: Partial<MatchConfig>, botSeed: number) {
   return { states, hands };
 }
 
-const RANDOM_MATCHES: [Partial<MatchConfig>, number][] = [
+const RANDOM_MATCHES: [Partial<HeadsUpConfig>, number][] = [
   [{ seed: '0'.repeat(64), maxHands: 30, startingStack: 10 }, 1],
   [{ seed: 'f'.repeat(64), maxHands: 30, startingStack: 10 }, 2],
   [
@@ -251,7 +254,7 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-const blind = (seat: Seat, amount: number): HistoryEvent => ({
+const blind = (seat: TableSeat, amount: number): TableEvent => ({
   seat,
   street: 'preflop',
   type: 'post_blind',
@@ -265,7 +268,9 @@ describe('checkState on legal play', () => {
       { seed: '0'.repeat(64), maxHands: 1, startingStack: 10 },
       { seed: 'f'.repeat(64), maxHands: 100, startingStack: 2000 },
     ]) {
-      expect(checkState(startMatch(config(overrides)))).toEqual([]);
+      expect(
+        checkState(startTable({ ...config(overrides), players: 2 })),
+      ).toEqual([]);
     }
   });
 
@@ -314,7 +319,7 @@ describe('checkState on legal play', () => {
         expect(state).toEqual(copy);
       }
     }
-    const broken = structuredClone(startMatch(config()));
+    const broken = structuredClone(startTable({ ...config(), players: 2 }));
     broken.stacks[0] += 5;
     const copy = structuredClone(broken);
     deepFreeze(broken);
@@ -374,7 +379,7 @@ describe('checkState reports broken states', () => {
     expect(overByBust()).toMatchObject({ over: true, stacks: [0, 80] });
   });
 
-  const cases: [string, () => MatchState, (s: MatchState) => void][] = [
+  const cases: [string, () => TableState, (s: TableState) => void][] = [
     // 1. chip total
     [
       'a chip appears from nowhere',
@@ -770,7 +775,7 @@ describe('checkHand reports broken records', () => {
   const runout = () =>
     trace({ startingStack: 10 }, BLIND_ALL_IN_SCRIPT).hands.find(
       h => h.hand_number === 3,
-    ) as HandRecord;
+    ) as TableHandRecord;
   // Hand 2 of 2 (seat 1 button): seat 1 folds its small blind.
   const hand2Fold = () =>
     trace({ maxHands: 2 }, [
@@ -803,9 +808,9 @@ describe('checkHand reports broken records', () => {
 
   const cases: [
     string,
-    () => HandRecord,
-    MatchConfig,
-    (h: HandRecord) => void,
+    () => TableHandRecord,
+    HeadsUpConfig,
+    (h: TableHandRecord) => void,
   ][] = [
     // 1. stacks
     [
@@ -1128,7 +1133,7 @@ describe('checkHand: pot matches the events', () => {
   const blindRunout = () =>
     trace({ startingStack: 10 }, BLIND_ALL_IN_SCRIPT).hands.find(
       h => h.hand_number === 3,
-    ) as HandRecord;
+    ) as TableHandRecord;
   // Raises on two streets, then a split (seed ...001a): pot 28.
   const multiStreet = () =>
     trace(
@@ -1138,7 +1143,13 @@ describe('checkHand: pot matches the events', () => {
       SCENARIOS[1][2],
     ).hands[0];
 
-  const bases: [string, () => HandRecord, MatchConfig, number, number][] = [
+  const bases: [
+    string,
+    () => TableHandRecord,
+    HeadsUpConfig,
+    number,
+    number,
+  ][] = [
     ['check-down', showdown, config(), 4, 4],
     ['fold to a flop bet', flopFold, config(), 4, 10],
     ['fold to a preflop shove', shoveFold, config(), 4, 42],
@@ -1199,11 +1210,11 @@ describe('checkHand: pot matches the events', () => {
 describe('order rules on their own', () => {
   // Each corruption breaks exactly one rule: chips, cards, turn order and
   // who acts next stay right, so only that rule's check can report it.
-  const preflopBlindsSwapped = (events: HistoryEvent[]) => {
+  const preflopBlindsSwapped = (events: TableEvent[]) => {
     events.splice(0, 2, events[1], events[0]);
   };
   // A post_blind for 0 chips among the preflop actions.
-  const extraZeroBlind = (events: HistoryEvent[]) => {
+  const extraZeroBlind = (events: TableEvent[]) => {
     const seat = events[3].seat;
     events.splice(3, 0, {
       seat,
@@ -1214,7 +1225,7 @@ describe('order rules on their own', () => {
   };
   // Flop events relabelled turn and turn events flop: turn comes before the
   // flop, but each street still starts with the non-button and alternates.
-  const turnBeforeFlop = (events: HistoryEvent[]) => {
+  const turnBeforeFlop = (events: TableEvent[]) => {
     for (const event of events) {
       if (event.street === 'flop') event.street = 'turn';
       else if (event.street === 'turn') event.street = 'flop';
@@ -1261,7 +1272,7 @@ describe('bad numbers are reported, not thrown', () => {
     ]);
   const showdown = () => trace({}, CHECK_DOWN_HAND_1).hands[0];
 
-  it.each<[string, (s: MatchState) => void]>([
+  it.each<[string, (s: TableState) => void]>([
     [
       'handNumber 0',
       s => {
@@ -1326,7 +1337,7 @@ describe('bad numbers are reported, not thrown', () => {
     expectViolations(found);
   });
 
-  it.each<[string, (h: HandRecord) => void, MatchConfig]>([
+  it.each<[string, (h: TableHandRecord) => void, HeadsUpConfig]>([
     [
       'hand_number 0',
       h => {
@@ -1384,7 +1395,7 @@ describe('blind invariants', () => {
       [0, FOLD],
     ]);
     for (const state of states) expect(checkState(state)).toEqual([]);
-    let before: [number, number] = [10, 10];
+    let before = [10, 10];
     expect(hands).toHaveLength(4);
     for (const hand of hands) {
       const original = structuredClone(before);
@@ -1413,7 +1424,7 @@ describe('blind invariants', () => {
     expect(checkHand(hand, config(), [40, 40])).toContain(
       `Seat ${index} blind must be ${expected}`,
     );
-    const state = structuredClone(startMatch(config()));
+    const state = structuredClone(startTable({ ...config(), players: 2 }));
     state.history[index].amount = expected + 1;
     expect(checkState(state)).toContain(
       `Seat ${index} blind must be ${expected}`,

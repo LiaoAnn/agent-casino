@@ -26,20 +26,15 @@ export interface MatchRecordInput {
   seed: string;
   /** From the seats' point of view; must agree with `places`. */
   result: SeatResult;
-  /**
-   * Each seat's place (1224 ties), `null` for void and cancelled. Heads-up
-   * callers may leave it out: it follows from `result`.
-   */
-  places?: number[] | null;
+  /** Each seat's place (1224 ties), `null` for void and cancelled. */
+  places: number[] | null;
   /** Absent for callers predating T44; never infer a historical reason. */
   end_reason?: MatchDetail['end_reason'];
   /** ISO-8601 UTC. */
   ended_at: string;
   final_stacks: number[];
-  /** The engine's finished hands, in order; heads-up ones may lack `pots`. */
-  hands: (Omit<TableHandRecord, 'pots'> & {
-    pots?: TableHandRecord['pots'];
-  })[];
+  /** The engine's finished hands, in order. */
+  hands: TableHandRecord[];
   /** Each seat's notes (A16); `seq` is the step's position in the hand's events. */
   notes?: { hand_number: number; seq: number; note: string }[];
 }
@@ -84,25 +79,10 @@ const firstPlaceOf = (result: SeatResult) =>
       ? 'shared'
       : Number(result.slice(4, 5));
 
-// Heads-up callers send only the result (T40 keeps them working).
-const headsUpPlaces = (result: SeatResult): number[] | null => {
-  const first = firstPlaceOf(result);
-  return first === null
-    ? null
-    : first === 'shared'
-      ? [1, 1]
-      : first === 0
-        ? [1, 2]
-        : [2, 1];
-};
-
 function checkInput(input: MatchRecordInput): number[] | null {
   const n = input.players.length;
   if (n < 2 || n > 6) throw new RangeError(`${n} seats; a match has 2 to 6`);
-  const places =
-    input.places === undefined && n === 2
-      ? headsUpPlaces(input.result)
-      : input.places;
+  const { places } = input;
   if (places === undefined) throw new RangeError('places is missing');
   for (const [field, list] of [
     ['display_names', input.display_names],
@@ -241,11 +221,10 @@ export async function recordMatch(
     holeCards: hand.ended_by === 'showdown' ? hand.hole_cards : null,
     winnerSeat: hand.winner_seat,
     pot: hand.pot,
-    pots:
-      hand.pots?.map(pot => ({
-        amount: pot.amount,
-        winner_seats: pot.winners,
-      })) ?? null,
+    pots: hand.pots.map(pot => ({
+      amount: pot.amount,
+      winner_seats: pot.winners,
+    })),
     endedBy: hand.ended_by,
     stacks: hand.stacks,
   }));

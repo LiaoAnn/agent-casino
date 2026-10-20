@@ -6,21 +6,52 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 import { handle } from '../app';
 import { randomAction } from '../holdem/bot';
-import {
-  applyAction,
-  type HandRecord,
-  type HistoryEvent,
-  legalActions,
-  type MatchState,
-  startMatch,
-} from '../holdem/match';
 import { dealHand, mulberry32 } from '../holdem/shuffle';
+import {
+  applyTableAction,
+  startTable,
+  type TableEvent,
+  type TableHandRecord,
+  type TableState,
+  tableLegalActions,
+} from '../holdem/table';
 import type { Bindings } from '../routes/env';
 import { openDb } from './client';
 import { getMatch } from './queries';
 import { type MatchRecordInput, recordMatch } from './records';
 import { matchEvents } from './schema';
 import { startTestD1, type TestD1 } from './test-d1';
+
+// Heads-up fixtures leave out what recordMatch takes since T56: each hand's
+// pots (one: the winner's, or both seats' when split) and the places, which
+// follow from the result.
+type HeadsUpHand = Omit<TableHandRecord, 'pots'> & {
+  pots?: TableHandRecord['pots'];
+};
+type HeadsUpRecord = Omit<MatchRecordInput, 'hands' | 'places'> & {
+  hands: HeadsUpHand[];
+  places?: MatchRecordInput['places'];
+};
+type HeadsUpInput = Partial<HeadsUpRecord>;
+
+const withPot = (hand: HeadsUpHand): TableHandRecord => ({
+  ...hand,
+  pots: hand.pots ?? [
+    {
+      amount: hand.pot,
+      winners: hand.winner_seat === null ? [0, 1] : [hand.winner_seat],
+    },
+  ],
+});
+
+const placesOf = (result: MatchRecordInput['result']) =>
+  result === 'seat0_win'
+    ? [1, 2]
+    : result === 'seat1_win'
+      ? [2, 1]
+      : result === 'draw'
+        ? [1, 1]
+        : null;
 
 let testD1: TestD1;
 
@@ -45,9 +76,9 @@ function elo(a: number, b: number, scoreA: number): [number, number] {
 let matchCounter = 0;
 const nextMatchId = () => `r_${String(++matchCounter).padStart(10, '0')}`;
 
-function hand(handNumber: number, eventCount = 8): HandRecord {
+function hand(handNumber: number, eventCount = 8): HeadsUpHand {
   const small = 2 ** Math.floor((handNumber - 1) / 50);
-  const events: HistoryEvent[] = [
+  const events: TableEvent[] = [
     { seat: 0, street: 'preflop', type: 'post_blind', amount: small },
     { seat: 1, street: 'preflop', type: 'post_blind', amount: small * 2 },
   ];
@@ -75,8 +106,8 @@ function hand(handNumber: number, eventCount = 8): HandRecord {
   };
 }
 
-function input(overrides: Partial<MatchRecordInput> = {}): MatchRecordInput {
-  return {
+function input(overrides: HeadsUpInput = {}): MatchRecordInput {
+  const match: HeadsUpRecord = {
     match_id: nextMatchId(),
     players: ['Alice', 'Bob'],
     settings: {
@@ -92,26 +123,32 @@ function input(overrides: Partial<MatchRecordInput> = {}): MatchRecordInput {
     hands: [hand(1), hand(2), hand(3)],
     ...overrides,
   };
+  return {
+    places: placesOf(match.result),
+    ...match,
+    hands: match.hands.map(withPot),
+  };
 }
 
 /** A whole match played by the engine with random legal actions. */
 function playedHands(seed: number, hands: number): MatchRecordInput {
   const random = mulberry32(seed + 1);
   const hexed = createHash('sha256').update(`played-${seed}`).digest('hex');
-  let state: MatchState = startMatch({
+  let state: TableState = startTable({
     seed: hexed,
     maxHands: hands,
     blindEvery: 50,
     startingStack: 200,
+    players: 2,
   });
-  const finished: HandRecord[] = [];
+  const finished: TableHandRecord[] = [];
   while (!state.over) {
     const seat = state.toAct;
     if (seat === null) throw new Error('nobody to act');
-    const result = applyAction(
+    const result = applyTableAction(
       state,
       seat,
-      randomAction(legalActions(state), random),
+      randomAction(tableLegalActions(state), random),
     );
     if (!result.ok) throw new Error(result.message);
     finished.push(...result.finishedHands);
@@ -418,17 +455,19 @@ describe('recordMatch: long matches', () => {
     expect(match.hands.some(h => h.ended_by === 'fold')).toBe(true);
     expect(match.hands.some(h => h.ended_by === 'showdown')).toBe(true);
     expect(detail?.hands).toStrictEqual(
-      (JSON.parse(JSON.stringify(match.hands)) as HandRecord[]).map(hand => ({
-        ...hand,
-        pots: [
-          {
-            amount: hand.pot,
-            winner_seats:
-              hand.winner_seat === null ? [0, 1] : [hand.winner_seat],
-          },
-        ],
-        hole_cards: dealHand(match.seed, hand.hand_number).holeCards,
-      })),
+      (JSON.parse(JSON.stringify(match.hands)) as TableHandRecord[]).map(
+        hand => ({
+          ...hand,
+          pots: [
+            {
+              amount: hand.pot,
+              winner_seats:
+                hand.winner_seat === null ? [0, 1] : [hand.winner_seat],
+            },
+          ],
+          hole_cards: dealHand(match.seed, hand.hand_number).holeCards,
+        }),
+      ),
     );
   }, 30_000);
 });

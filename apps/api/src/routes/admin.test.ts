@@ -108,6 +108,7 @@ const record = async (
     },
     seed: '2a'.repeat(32),
     result: 'seat0_win',
+    places: [1, 2],
     ended_at: '2026-10-18T10:00:00.000Z',
     final_stacks: [210, 190],
     hands: [
@@ -117,6 +118,7 @@ const record = async (
         blinds: [1, 2],
         winner_seat: 0,
         pot: 20,
+        pots: [{ amount: 20, winners: [0] }],
         ended_by: 'showdown',
         board: ['As', 'Kd', '7h', '2c', '9s'],
         hole_cards: [

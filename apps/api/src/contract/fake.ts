@@ -3,19 +3,18 @@
 // played by the holdem engine from the match seed, and the leaderboard is the
 // Elo result of the rated matches.
 import { compareHands, evaluateHand } from '../holdem/hand';
+import { dealHand, mulberry32 } from '../holdem/shuffle';
 import {
   type Action,
-  applyAction,
-  type HandRecord,
-  legalActions,
-  type MatchConfig,
-  type MatchState,
+  applyTableAction,
   type Street,
-  startMatch,
-} from '../holdem/match';
-import { dealHand, mulberry32 } from '../holdem/shuffle';
-import { headsUpPots, placesOf } from '../room/heads-up';
-import { upgradeHand, upgradeMatch } from '../room/legacy';
+  startTable,
+  type TableConfig,
+  type TableHandRecord,
+  type TableState,
+  tableLegalActions,
+} from '../holdem/table';
+import { asSeat, potsOut } from '../room/view';
 import { type HandNotes, watchView } from '../room/watch';
 import { fakeTable } from './fake-table';
 import type {
@@ -27,6 +26,9 @@ import type {
   WatchResponse,
 } from './schemas';
 import { SETTINGS_DEFAULTS } from './schemas';
+
+// The heads-up config: a 2-seat table without `players`.
+type HeadsUpConfig = Omit<TableConfig, 'players'>;
 
 const PAGE_SIZE = 20;
 const PLAYERS = ['alice', 'Bob', 'carol', 'dave-7', 'eve_x', 'Frank', 'grace'];
@@ -94,11 +96,11 @@ function pickPlan(random: Random): Plan {
 // The next move of the seat to act. A timeout makes the engine's timeout
 // move (check if possible, else fold), so only those are marked as one.
 function nextMove(
-  state: MatchState,
+  state: TableState,
   plan: Plan,
   random: Random,
 ): { action: Action; timeout: boolean } {
-  const legal = legalActions(state);
+  const legal = tableLegalActions(state);
   const raise = legal.find(action => action.type === 'raise');
   const facingBet = !legal.some(action => action.type === 'check');
   const passive: Action = facingBet ? { type: 'call' } : { type: 'check' };
@@ -146,37 +148,53 @@ function nextMove(
   }
 }
 
+// A finished hand as the public record shows it: both players' cards (A13).
+const recordHand = (seed: string, hand: TableHandRecord): MatchHand => ({
+  ...hand,
+  button_seat: asSeat(hand.button_seat),
+  winner_seat: hand.winner_seat === null ? null : asSeat(hand.winner_seat),
+  hole_cards: dealHand(seed, hand.hand_number).holeCards,
+  events: hand.events.map(event => ({ ...event, seat: asSeat(event.seat) })),
+  pots: potsOut(hand),
+});
+
 // Plays a whole match with the engine; it stops when the hands run out or a
 // player is busted. A quiet match only has button folds; a split match
 // shows the first hand down.
 function playMatch(
   random: Random,
-  config: MatchConfig,
+  config: HeadsUpConfig,
   style: 'quiet' | 'split' | 'mixed',
 ): MatchHand[] {
-  let state = startMatch(config);
+  let state = startTable({ ...config, players: 2 });
   const hands: MatchHand[] = [];
   const nextPlan = (): Plan =>
     style === 'quiet' ? { kind: 'fold' } : pickPlan(random);
   let plan: Plan = style === 'split' ? { kind: 'show' } : nextPlan();
   while (!state.over && state.toAct !== null) {
     const { action, timeout } = nextMove(state, plan, random);
-    const result = applyAction(state, state.toAct, action, { timeout });
+    const result = applyTableAction(state, state.toAct, action, { timeout });
     if (!result.ok)
       throw new Error(`Fake data broke a rule: ${result.message}`);
     if (result.state.handNumber !== state.handNumber) plan = nextPlan();
     // Every hand shows both players' cards, as the public record does (A13).
     for (const hand of result.finishedHands) {
-      hands.push({
-        ...hand,
-        hole_cards: dealHand(config.seed, hand.hand_number).holeCards,
-        pots: headsUpPots(hand),
-      });
+      hands.push(recordHand(config.seed, hand));
     }
     state = result.state;
   }
   return hands;
 }
+
+// Each seat's place from a heads-up result; `null` when nobody placed.
+const placesOf = (result: MatchDetail['result']): [number, number] | null =>
+  result === 'seat0_win'
+    ? [1, 2]
+    : result === 'seat1_win'
+      ? [2, 1]
+      : result === 'draw'
+        ? [1, 1]
+        : null;
 
 function roomId(random: Random): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -215,8 +233,8 @@ function fakeWatch(seed: number): {
         blindEvery: settings.blind_every,
         maxHands: settings.max_hands,
       };
-      let state = startMatch(config);
-      const hands: HandRecord[] = [];
+      let state = startTable({ ...config, players: 2 });
+      const hands: TableHandRecord[] = [];
       const notes: Record<number, HandNotes> = {};
       let plan = pickPlan(random);
       while (!state.over && state.toAct !== null) {
@@ -235,7 +253,7 @@ function fakeWatch(seed: number): {
             [state.history.length]: NOTES[action.type],
           };
         }
-        const result = applyAction(state, seat, action, { timeout });
+        const result = applyTableAction(state, seat, action, { timeout });
         if (!result.ok) {
           throw new Error(`Fake data broke a rule: ${result.message}`);
         }
@@ -263,8 +281,8 @@ function fakeWatch(seed: number): {
       visibility: 'private',
       seats_open: 0,
       seed: played.config.seed,
-      table: upgradeMatch(played.state),
-      hands: played.hands.map(upgradeHand),
+      table: played.state,
+      hands: played.hands,
       notes: played.notes,
       deadline: ended ? null : startedAt + settings.turn_seconds * 1000,
       ended,
@@ -303,11 +321,7 @@ function fakeWatch(seed: number): {
         { name: names[1], before: 1500, after: 1500 - change },
       ],
       places: placesOf(result),
-      hands: finished.hands.map(hand => ({
-        ...hand,
-        hole_cards: dealHand(finished.config.seed, hand.hand_number).holeCards,
-        pots: headsUpPots(hand),
-      })),
+      hands: finished.hands.map(hand => recordHand(finished.config.seed, hand)),
     },
   };
 }

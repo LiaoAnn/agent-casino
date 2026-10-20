@@ -2,25 +2,24 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import { describe, expect, it } from 'vitest';
+import { seatView } from '../room/view';
 import { randomAction } from './bot';
+import { mulberry32 } from './shuffle';
 import {
   type Action,
-  applyAction,
-  type HistoryEvent,
-  legalActions,
-  type MatchConfig,
-  otherSeat,
-  type Seat,
-  startMatch,
-} from './match';
-import { replay } from './replay';
-import { mulberry32 } from './shuffle';
-import { viewFor } from './view';
+  applyTableAction,
+  replayTable,
+  startTable,
+  type TableConfig,
+  type TableEvent,
+  type TableState,
+  tableLegalActions,
+} from './table';
 
 // Heads-up regression (T36, rule 6): every state, legal action list, seat
-// view, hand record, rejection message and replay of these random matches
-// must stay exactly what the heads-up engine produced before the table
-// engine existed. The digests were recorded from that engine (main at
+// view, hand record, rejection message and replay of these random 2-seat
+// tables must stay exactly what the heads-up engine produced before the
+// table engine existed. The digests were recorded from that engine (main at
 // 9180b42); `GOLDEN_PRINT=1` prints the current ones.
 
 const MATCHES = 120;
@@ -28,7 +27,7 @@ const MATCHES = 120;
 const randomInt = (random: () => number, min: number, max: number) =>
   min + Math.floor(random() * (max - min + 1));
 
-function pickConfig(random: () => number): MatchConfig {
+function pickConfig(random: () => number): Omit<TableConfig, 'players'> {
   const seed = Array.from({ length: 8 }, () =>
     Math.floor(random() * 2 ** 32)
       .toString(16)
@@ -58,40 +57,54 @@ function badAction(random: () => number): Action {
   return choices[Math.floor(random() * choices.length)];
 }
 
+// What the table engine added for 2–6 seats; the heads-up engine had none
+// of these, so they are left out of the digest (table.test.ts covers them).
+const TABLE_ONLY = new Set(['players', 'folded', 'places', 'taken', 'pots']);
+
 /** Plain JSON with sorted keys: key order is not behavior. */
 const canonical = (value: unknown): string =>
   JSON.stringify(value, (_key, inner) =>
     inner && typeof inner === 'object' && !Array.isArray(inner)
       ? Object.fromEntries(
-          Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : 1)),
+          Object.entries(inner)
+            .filter(([key]) => !TABLE_ONLY.has(key))
+            .sort(([a], [b]) => (a < b ? -1 : 1)),
         )
       : inner,
   );
+
+// A seat's answer as the heads-up engine shaped it (casino-api A6).
+const viewFor = (table: TableState, seat: number) => ({
+  hand_number: table.handNumber,
+  to_act_seat: table.toAct,
+  view: seatView(table, seat),
+  last_hand: table.lastHand,
+});
 
 /** Everything observable about one random match, hashed. */
 function traceDigest(matchIndex: number): string {
   const random = mulberry32(20261020 + matchIndex);
   const config = pickConfig(random);
   const trace: unknown[] = [config];
-  let state = startMatch(config);
-  const events: HistoryEvent[] = [];
+  let state = startTable({ ...config, players: 2 });
+  const events: TableEvent[] = [];
   for (let step = 0; step < 100_000; step++) {
     trace.push(
       state,
-      legalActions(state),
+      tableLegalActions(state),
       viewFor(state, 0),
       viewFor(state, 1),
     );
     if (state.over) {
-      trace.push(applyAction(state, 0, { type: 'fold' }));
+      trace.push(applyTableAction(state, 0, { type: 'fold' }));
       break;
     }
-    const seat = state.toAct as Seat;
-    trace.push(applyAction(state, otherSeat(seat), { type: 'fold' }));
+    const seat = state.toAct as number;
+    trace.push(applyTableAction(state, 1 - seat, { type: 'fold' }));
     if (random() < 0.15)
-      trace.push(applyAction(state, seat, badAction(random)));
-    const action = randomAction(legalActions(state), random);
-    const result = applyAction(state, seat, action, {
+      trace.push(applyTableAction(state, seat, badAction(random)));
+    const action = randomAction(tableLegalActions(state), random);
+    const result = applyTableAction(state, seat, action, {
       timeout: random() < 0.1,
     });
     trace.push(action, result);
@@ -99,7 +112,7 @@ function traceDigest(matchIndex: number): string {
     for (const hand of result.finishedHands) events.push(...hand.events);
     state = result.state;
   }
-  trace.push(replay(config, events));
+  trace.push(replayTable({ ...config, players: 2 }, events));
   return bytesToHex(sha256(utf8ToBytes(canonical(trace)))).slice(0, 16);
 }
 
@@ -226,7 +239,7 @@ const GOLDEN: string[] = [
   'c7972cf943ce0a59',
 ];
 
-describe('heads-up regression against the pre-table engine', () => {
+describe('2-seat tables against the pre-table heads-up engine', () => {
   it('replays every recorded match exactly', () => {
     const digests = Array.from({ length: MATCHES }, (_, i) => traceDigest(i));
     if (process.env.GOLDEN_PRINT) console.log(JSON.stringify(digests));

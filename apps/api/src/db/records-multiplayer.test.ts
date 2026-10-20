@@ -312,38 +312,35 @@ describe('T40 rejects invalid records before writing anything', () => {
 });
 
 describe('T40 two-seat Elo compatibility', () => {
-  it.each([false, true])(
-    'is exactly the K=32 formula with explicit places=%s',
-    async explicit => {
-      let expected = [1500, 1500];
-      for (const [result, places, score] of [
-        ['seat0_win', [1, 2], 1],
-        ['seat1_win', [2, 1], 0],
-        ['draw', [1, 1], 0.5],
-      ] as const) {
-        const delta =
-          32 * (score - 1 / (1 + 10 ** ((expected[1] - expected[0]) / 400)));
-        const next = [expected[0] + delta, expected[1] - delta];
-        const match = input({
-          players: ['Alice', 'Bob'],
-          final_stacks: [200, 200],
-          result,
-          places: explicit ? [...places] : undefined,
-        });
-        const answer = await recordMatch(store.db, match);
-        expect((await rawRatings()).map(row => row.rating)).toEqual(next);
-        expect(answer.ratings).toEqual(
-          match.players.map((name, i) => ({
-            name,
-            rating: Math.round(next[i]),
-            change: Math.round(next[i]) - Math.round(expected[i]),
-          })),
-        );
-        expect((await detail(match.match_id)).places).toEqual(places);
-        expected = next;
-      }
-    },
-  );
+  it('is exactly the K=32 formula with heads-up places', async () => {
+    let expected = [1500, 1500];
+    for (const [result, places, score] of [
+      ['seat0_win', [1, 2], 1],
+      ['seat1_win', [2, 1], 0],
+      ['draw', [1, 1], 0.5],
+    ] as const) {
+      const delta =
+        32 * (score - 1 / (1 + 10 ** ((expected[1] - expected[0]) / 400)));
+      const next = [expected[0] + delta, expected[1] - delta];
+      const match = input({
+        players: ['Alice', 'Bob'],
+        final_stacks: [200, 200],
+        result,
+        places: [...places],
+      });
+      const answer = await recordMatch(store.db, match);
+      expect((await rawRatings()).map(row => row.rating)).toEqual(next);
+      expect(answer.ratings).toEqual(
+        match.players.map((name, i) => ({
+          name,
+          rating: Math.round(next[i]),
+          change: Math.round(next[i]) - Math.round(expected[i]),
+        })),
+      );
+      expect((await detail(match.match_id)).places).toEqual(places);
+      expected = next;
+    }
+  });
 });
 
 describe('T40 multiplayer read contracts', () => {
