@@ -92,6 +92,7 @@ async function fixture() {
   let base = '';
   let old = true;
   let failPath = '';
+  const customContent = new Map<string, string>();
   let last: Record<string, unknown> = {};
   let lastStatus = 0;
   const errors: unknown[] = [];
@@ -117,11 +118,12 @@ async function fixture() {
       if (path === '/casino.sh' || path.startsWith('/skills/')) {
         downloads.push(path);
         const content =
-          path === '/casino.sh'
+          customContent.get(path) ??
+          (path === '/casino.sh'
             ? script()
             : Object.entries(files()).find(
                 ([name]) => path === `/skills/${name}`,
-              )?.[1];
+              )?.[1]);
         if (path === failPath || content === undefined) {
           outgoing.writeHead(404).end();
           return;
@@ -207,6 +209,9 @@ async function fixture() {
     fail(path: string) {
       failPath = path;
     },
+    respond(path: string, content: string) {
+      customContent.set(path, content);
+    },
     command(path: string, args: string) {
       return run(`dash ${path} ${args}`);
     },
@@ -246,7 +251,10 @@ function reminderLines(out: string) {
     .trimEnd()
     .split('\n')
     .filter(
-      line => line.includes(CASINO_SH_VERSION) && /\bupdate\b/.test(line),
+      line =>
+        !line.startsWith('Updated casino.sh ') &&
+        line.includes(CASINO_SH_VERSION) &&
+        /\bupdate\b/.test(line),
     );
 }
 
@@ -293,6 +301,7 @@ describe('T57 installed casino.sh updates', () => {
         expect(updated.code, `${updated.out}\n${updated.err}`).toBe(0);
         expect(updated.out).toContain(OLD_VERSION);
         expect(updated.out).toContain(CASINO_SH_VERSION);
+        expect(reminderLines(updated.out)).toEqual([]);
         expect(updated.out.trimEnd().split('\n').at(-1)).toMatch(
           new RegExp(
             `^Next: sh ${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} .+`,
@@ -348,6 +357,7 @@ describe('T57 installed casino.sh updates', () => {
       expect(result.code, `${result.out}\n${result.err}`).toBe(0);
       expect(result.out).toContain(OLD_VERSION);
       expect(result.out).toContain(CASINO_SH_VERSION);
+      expect(reminderLines(result.out)).toEqual([]);
       expect(result.out.trimEnd().split('\n').at(-1)).toMatch(
         /^Next: sh \.casino\/casino\.sh .+/,
       );
@@ -383,6 +393,42 @@ describe('T57 installed casino.sh updates', () => {
       await f.close();
     }
   }, 180_000);
+
+  it.each([
+    {
+      name: 'HTML instead of a skill with YAML frontmatter',
+      download: '/skills/agent-casino-holdem/SKILL.md',
+      content: '<!doctype html><html><body>Wi-Fi login</body></html>\n',
+    },
+    {
+      name: 'a script without a CASINO_SH_VERSION line',
+      download: '/skills/agent-casino/scripts/casino.sh',
+      content: '#!/bin/sh\nprintf "Not casino.sh\\n"\n',
+    },
+  ])(
+    'rejects HTTP 200 containing $name without changing installed files or leaving temporary downloads',
+    async ({ download, content }) => {
+      const f = await fixture();
+      try {
+        const path = await f.install('.casino/kit');
+        expect((await f.command(path, 'profile "Kit Player" codex')).code).toBe(
+          0,
+        );
+        const before = snapshot(f.cwd);
+        f.current();
+        f.downloads.length = 0;
+        f.respond(download, content);
+        const result = await f.command(path, 'update');
+        expect.soft(result.code, `${result.out}\n${result.err}`).toBe(1);
+        expect.soft(f.downloads).toContain(download);
+        expect.soft(snapshot(f.cwd)).toEqual(before);
+        expect((await f.command(path, 'version')).out).toContain(OLD_VERSION);
+      } finally {
+        await f.close();
+      }
+    },
+    180_000,
+  );
 
   it('suppresses reminders while seated and prints one after report without updating files', async () => {
     const f = await fixture();

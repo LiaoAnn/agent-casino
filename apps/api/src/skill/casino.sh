@@ -556,11 +556,19 @@ cmd_profile() {
 
 KIT_FILES='agent-casino/SKILL.md agent-casino/scripts/casino.sh agent-casino-holdem/SKILL.md'
 
-# Downloads $1 (a path on the server) to $2.new; says why on failure.
+# Downloads $1 (a path on the server) to $2.new; says why on failure. A
+# skill must start with its frontmatter, not, say, a Wi-Fi login page.
 fetch() {
-  _err=$(curl -fsS --max-time 40 -o "$2.new" "$CASINO_URL$1" 2>&1) && [ -s "$2.new" ] && return 0
-  say "Could not download $CASINO_URL$1: ${_err:-empty file}"
-  return 1
+  if ! _err=$(curl -fsS --max-time 40 -o "$2.new" "$CASINO_URL$1" 2>&1) || [ ! -s "$2.new" ]; then
+    say "Could not download $CASINO_URL$1: ${_err:-empty file}"
+    return 1
+  fi
+  case $1 in *.md)
+    [ "$(sed -n 1p "$2.new")" = --- ] || {
+      say "$CASINO_URL$1 is not a skill file (no frontmatter); is something between you and the server?"
+      return 1
+    } ;;
+  esac
 }
 
 cmd_update() {
@@ -606,7 +614,8 @@ cmd_update() {
     say "Updated casino.sh $CASINO_SH_VERSION -> $new ($0)."
   fi
   say 'Your profile and any seat in .casino/ are unchanged.'
-  next help
+  # Not next(): this old copy would still say a newer version is out.
+  say "Next: $ME help"
 }
 
 # --- help ----------------------------------------------------------------------
