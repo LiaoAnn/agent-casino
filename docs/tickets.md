@@ -42,7 +42,7 @@
 | 7.13 | T46（arena 第 7 輪回饋） | 1 |
 | 7.14 | T47（送出動作並等下一步） | 1 |
 | 7.15 | T48（arena 第 9 輪回饋） | 1 |
-| 7.16 | T50（官方腳本 casino.sh）→ T51（拆 skill、llms.txt）→ T52（arena 驗收、上正式環境） | 1 |
+| 7.16 | T50（官方腳本 casino.sh）→ T51（拆 skill、llms.txt）→ T53（llms.txt 叫 agent 用 curl）→ T54（首頁教主人怎麼玩）→ T52（arena 驗收、上正式環境） | 1 |
 | 9 | T36、T37（多人：規則、合約；⏸ 等 Ann 說開始） | 2 |
 | 10 | T38、T40、T41（Room DO、積分、網頁） | 3 |
 | 11 | T39 → T42（大廳、skill.md 與試玩） | 1 |
@@ -421,7 +421,21 @@
 - 驗證：`pnpm check`、`pnpm test:skill`。
 - 功能驗證：coordinator 在本機只用 Sonnet 跑一場（`SKIP_SKILL=1`，提示語同第 12 輪），看它讀到摘要後有沒有改用 curl、有沒有裝好 kit。
 
-### T52 kit 上正式環境 ★🔒 · Blocked by：T53
+### T54 首頁教主人怎麼開始玩 ★（約 200 行）· Blocked by：T53
+- 來源：`docs/playtests/arena-13.md`。Claude Code 的 WebFetch 會把網頁裡叫 agent 做事的句子當成網頁注入擋掉，所以 `llms.txt` 裡的「用 curl 讀、照著安裝」傳不到 agent。只有主人親口說，agent 才會用 curl 讀、才會安裝。
+- 要做的：首頁最上面用幾行說明主人怎麼開始（2026-10-20 Ann）：
+  1. 開一個新資料夾（kit 會裝在這裡）。
+  2. 在這個資料夾裡打開你的 agent（Claude Code、Codex 等）。
+  3. 對它說一句話，例如：「用 curl 讀 `<本站網址>/llms.txt`，照著安裝，幫我玩一局德州撲克，名字用「你想要的名字」。」
+  4. agent 會給你觀戰連結，在網頁上看它打。
+- 那句話放在可以整段選取的區塊裡。網址用目前網站的網址（本機、staging、正式環境各自正確），不要寫死。
+- 規則 4：網頁只給人看，不加按鈕（包括複製按鈕）、表單。
+- 原本「把 skill.md 網址交給 agent」那段改成這個說明；`/skill.md` 本身不動。
+- 文字短，給一般主人看得懂，不講 API、curl 以外的技術細節。
+- 驗證：`pnpm check`、`pnpm test:web`（首頁出現那句話，網址是目前網站的網址）。
+- 功能驗證：coordinator 在本機用 Sonnet 和 Haiku 各打一場（`SKIP_SKILL=1`），提示語就是首頁上的那句話，看它們有沒有用 curl 讀、裝好 kit、只用 `casino.sh` 玩。
+
+### T52 kit 上正式環境 ★🔒 · Blocked by：T54
 - coordinator 跑 arena 驗收，通過後經 Ann 同意部署到正式環境，再跑一輪正式環境試玩，打完照 Ann 的要求清掉紀錄。
 
 ## Epic E3 Skill 與接入
