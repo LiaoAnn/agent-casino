@@ -368,6 +368,8 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     'room.state',
     'room.act',
     'room.leave',
+    // T38: real handler; routes/start.test.ts covers it.
+    'room.start',
     'watch.watch',
     'read.leaderboard',
     'read.matches',
@@ -377,7 +379,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     'admin.abortRoom',
   ]);
 
-  const NOT_OPEN = new Set(['lobby.quickRoom', 'room.start', 'read.lobby']);
+  const NOT_OPEN = new Set(['lobby.quickRoom', 'read.lobby']);
   it.each(ENDPOINTS.filter(e => NOT_OPEN.has(e.name)))(
     '$name answers 503 unavailable until multiplayer is open',
     async ({ name: _name, route: _route, auth, ...request }) => {

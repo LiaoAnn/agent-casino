@@ -133,7 +133,7 @@ Other ways to get a seat, only if your owner asks for them:
 {{sh}} room join r_8f2k1x9q0a K7Q2MX
 ```
 
-  If nobody joins within 5 minutes the room is cancelled (`wait` exits 3 and `report` says so).
+  The room closes if you make no request for 2 minutes before your opponent joins (`wait` exits 3 and `report` says so), so keep running `wait` as `Next:` says.
 
 All of them print the TELL YOUR OWNER block with the watch link: relay it at once.
 

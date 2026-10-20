@@ -1,10 +1,10 @@
 // T11 slice 2: rooms that end without a finished match (casino-api skill:
-// 狀況處理 (等人超過 5 分鐘, 主動離開, 平台出錯), A6, A8, A9 (管理員中止), A15;
+// 狀況處理 (等人超過 2 分鐘沒有請求, 主動離開, 平台出錯), A6, A8, A9 (管理員中止), A15;
 // holdem-rules: 等人解散). Same harness as timeouts.test.ts: HTTP through
 // handle(), one RoomReferee per room id over a memory storage that records
 // its one alarm, an injected clock and a seeded deck.
 //
-// 等人超過 5 分鐘: a room nobody joined is dissolved at created_at + 5 min
+// 等人超過 2 分鐘沒有請求: a room nobody joined is dissolved at created_at + 2 min
 // (now >= that), exactly as if seat 0 had left the waiting room. 管理員中止:
 // POST /v1/admin/rooms/{room_id}/abort voids the match; the unfinished hand is
 // called off like a leave.
@@ -47,7 +47,7 @@ const BASE = 'http://api.test';
 const SEED = '0'.repeat(64);
 const STACK = 40;
 const ADMIN_KEY = 'test-admin-key';
-const WAIT_LIMIT_MS = 5 * 60 * 1000;
+const WAIT_LIMIT_MS = 2 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
 // --- Fakes ------------------------------------------------------------------
@@ -353,22 +353,22 @@ const expectCancelled = (status: Status, start: number) => {
     to_act_seat: null,
     hand_number: null,
     view: null,
-    final_stacks: [start, start],
+    final_stacks: [start],
     ratings: null,
     last_hand: null,
   });
 };
 
-// --- 等人超過 5 分鐘 -------------------------------------------------------------
+// --- 等人超過 2 分鐘沒有請求 -------------------------------------------------------------
 
-describe('狀況處理 等人超過 5 分鐘: a room nobody joined is dissolved at created_at + 5 min', () => {
-  it('the alarm is scheduled at created_at + 5 min right after the room is created', async () => {
+describe('狀況處理 等人超過 2 分鐘沒有請求: a room nobody joined is dissolved at created_at + 2 min', () => {
+  it('the alarm is scheduled at created_at + 2 min right after the room is created', async () => {
     const t = makeEnv();
     const room = await openRoom(t);
     expect(t.storage(room.room_id).alarm).toBe(room.createdAt + WAIT_LIMIT_MS);
   });
 
-  it('alarm() at created_at + 5 min dissolves it: match_over cancelled, finished, final_stacks [start, start], ratings null; the alarm is deleted', async () => {
+  it('alarm() at created_at + 2 min dissolves it: match_over cancelled, finished, final_stacks [start], ratings null; the alarm is deleted', async () => {
     const t = makeEnv();
     const room = await openRoom(t, { blind_every: 50, starting_stack: 100 });
     t.clock.ms = room.createdAt + WAIT_LIMIT_MS;
@@ -377,14 +377,31 @@ describe('狀況處理 等人超過 5 分鐘: a room nobody joined is dissolved 
     expect(t.storage(room.room_id).alarm).toBeNull();
   });
 
-  it('alarm() 1 ms earlier (created_at + 299_999) changes nothing: still waiting, the alarm stays', async () => {
+  it('alarm() 1 ms earlier (created_at + 119_999) changes nothing: still waiting, the alarm stays', async () => {
     const t = makeEnv();
     const room = await openRoom(t);
     t.clock.ms = room.createdAt + WAIT_LIMIT_MS - 1;
     await t.referee(room.room_id).alarm();
     const status = await state(t, room.room_id, room.token);
     expect(status).toMatchObject({ status: 'waiting', room_status: 'waiting' });
-    expect(t.storage(room.room_id).alarm).toBe(room.createdAt + WAIT_LIMIT_MS);
+    expect(t.storage(room.room_id).alarm).toBe(t.clock.ms + WAIT_LIMIT_MS);
+  });
+
+  it('keeps a waiting room open beyond five minutes while the host makes requests within two minutes', async () => {
+    const t = makeEnv();
+    const room = await openRoom(t);
+    for (let request = 0; request < 4; request++) {
+      t.clock.ms += WAIT_LIMIT_MS - 1;
+      expect(await state(t, room.room_id, room.token)).toMatchObject({
+        status: 'waiting',
+        room_status: 'waiting',
+      });
+      expect(t.storage(room.room_id).alarm).toBe(t.clock.ms + WAIT_LIMIT_MS);
+    }
+    expect(t.clock.ms - room.createdAt).toBeGreaterThan(5 * 60 * 1000);
+    t.clock.ms += WAIT_LIMIT_MS;
+    await t.referee(room.room_id).alarm();
+    expectCancelled(await state(t, room.room_id, room.token), STACK);
   });
 
   it("seat 0's pending wait answers the cancelled match_over as soon as alarm() fires", async () => {
@@ -399,7 +416,7 @@ describe('狀況處理 等人超過 5 分鐘: a room nobody joined is dissolved 
     expect(elapsedMs).toBeLessThan(1_500);
   });
 
-  it('catch-up: state and wait after 5 min answer cancelled without alarm()', async () => {
+  it('catch-up: state and wait after 2 min answer cancelled without alarm()', async () => {
     const t = makeEnv({ waitMs: 3_000 });
     const room = await openRoom(t);
     t.clock.ms = room.createdAt + WAIT_LIMIT_MS;
@@ -430,7 +447,7 @@ describe('狀況處理 等人超過 5 分鐘: a room nobody joined is dissolved 
     expect(dissolvedOver.match_id).toBe(dissolved.room_id);
   });
 
-  it('joining after 5 min with the right invite code answers 409 match_over; a wrong code still answers 403 wrong_invite_code', async () => {
+  it('joining after 2 min with the right invite code answers 409 match_over; a wrong code still answers 403 wrong_invite_code', async () => {
     const t = makeEnv();
     const room = await openRoom(t);
     t.clock.ms = room.createdAt + WAIT_LIMIT_MS;
@@ -459,7 +476,7 @@ describe('狀況處理 等人超過 5 分鐘: a room nobody joined is dissolved 
     expectCancelled(errorState(left), STACK);
   });
 
-  it('joining at created_at + 299_999 still works and cancels the 5-minute rule: the alarm moves to the first deadline and the room keeps playing past 5 min', async () => {
+  it('joining at created_at + 119_999 still works and cancels the waiting absence rule: the alarm moves to the first deadline and the room keeps playing past 2 min', async () => {
     const t = makeEnv();
     const room = await openRoom(t, { turn_seconds: 60 });
     t.clock.ms = room.createdAt + WAIT_LIMIT_MS - 1;
@@ -474,7 +491,7 @@ describe('狀況處理 等人超過 5 分鐘: a room nobody joined is dissolved 
     expect(alice.hand_number).toBe(1);
   });
 
-  it('A8: the one hour of the tokens counts from the dissolution (created_at + 5 min), even if nobody asked in between', async () => {
+  it('A8: the one hour of the tokens counts from the dissolution (created_at + 2 min), even if nobody asked in between', async () => {
     const t = makeEnv();
     const room = await openRoom(t);
     t.clock.ms = room.createdAt + WAIT_LIMIT_MS + HOUR_MS;
@@ -503,14 +520,24 @@ describe('狀況處理 平台出錯', () => {
       });
       const turn = await yourTurn(t, roomId, tokens[0]);
       const storage = t.storage(roomId);
-      const stored = await storage.get<{
-        turn: { seat: Seat };
-        match: { toAct: Seat };
-      }>('room');
+      const stored = await storage.get<
+        Record<string, unknown> & {
+          turn: { seat: Seat };
+        }
+      >('room');
       if (stored === undefined) throw new Error('expected stored room');
-      expect(stored.turn.seat).toBe(stored.match.toAct);
+      // Persistence may name its engine field differently after migration.
+      const table = Object.values(stored).find(
+        (value): value is { toAct: Seat; config: unknown } =>
+          typeof value === 'object' &&
+          value !== null &&
+          'toAct' in value &&
+          'config' in value,
+      );
+      if (table === undefined) throw new Error('expected persisted table');
+      expect(stored.turn.seat).toBe(table.toAct);
       // Model a platform fault: the scheduled actor disagrees with the engine.
-      stored.turn.seat = stored.match.toAct === 0 ? 1 : 0;
+      stored.turn.seat = table.toAct === 0 ? 1 : 0;
       await storage.put('room', stored);
       // Eviction and wake-up reload the persisted fault into a fresh referee.
       t.restart(roomId);
@@ -624,7 +651,7 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
     expect(elapsedMs).toBeLessThan(1_500);
   });
 
-  it('a waiting room (no opponent yet) is voided too: final_stacks [start, start], view null; joining afterwards answers 409 match_over', async () => {
+  it('a waiting room (no opponent yet) is voided too: final_stacks [start], view null; joining afterwards answers 409 match_over', async () => {
     const t = makeEnv();
     const room = await openRoom(t, { blind_every: 50, starting_stack: 100 });
     await abort(t, room.room_id);
@@ -634,7 +661,7 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
       room_status: 'void',
       view: null,
       hand_number: null,
-      final_stacks: [100, 100],
+      final_stacks: [100],
       ratings: null,
     });
     await expectError(await joinPost(t, room), 'match_over');
@@ -704,7 +731,7 @@ describe('A9 管理員中止: POST /v1/admin/rooms/{room_id}/abort voids the mat
       },
     },
     {
-      case: 'a dissolved waiting room (5 minutes)',
+      case: 'a dissolved waiting room (2 minutes)',
       end: async (t: TestEnv) => {
         const room = await openRoom(t);
         t.clock.ms = room.createdAt + WAIT_LIMIT_MS;

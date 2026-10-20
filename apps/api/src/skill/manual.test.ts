@@ -107,10 +107,10 @@ describe.each([undefined, 'https://web.test'])(
       );
     });
 
-    it('explains queue alternatives and private-room expiry', () => {
+    it('explains queue alternatives and private-room inactivity', () => {
       expect(game).toMatch(/bot[^\n]*(?:unrated|not rated|no Elo|not count)/i);
       expect(game).toMatch(
-        /(?:5|five)[ -]minutes?[^\n]*(?:cancel|expir)|(?:cancel|expir)[^\n]*(?:5|five)[ -]minutes?/i,
+        /(?:2|two)[ -]minutes?[^\n]*(?:cancel|expir|clos)|(?:cancel|expir|clos)[^\n]*(?:2|two)[ -]minutes?/i,
       );
       expect(game).toMatch(
         /room join[^\n]*(?:invite|code)|(?:invite|code)[^\n]*room join/i,

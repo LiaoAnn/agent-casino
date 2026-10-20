@@ -25,9 +25,10 @@ const INPUT: CreateInput = {
   },
   seed: '0'.repeat(64),
   test: null,
+  visibility: null,
 };
 const turn = async (room: RoomReferee, seat: 0 | 1) => {
-  const current = await room.status(seat, { wait: false });
+  const current = await room.status(['alice', 'bob'][seat], { wait: false });
   if (!current.ok || current.value.status !== 'your_turn')
     throw new Error('Expected your_turn');
   return current.value;
@@ -51,7 +52,7 @@ describe('T50 duplicate turn waiting semantics', () => {
     ).toMatchObject({ ok: true });
     const first = await turn(room, 0);
     const action = { turn_id: first.turn_id, type: 'fold' as const };
-    expect(await room.act(0, action)).toMatchObject({
+    expect(await room.act('alice', action)).toMatchObject({
       ok: true,
       value: { status: 'accepted' },
     });
@@ -61,11 +62,11 @@ describe('T50 duplicate turn waiting semantics', () => {
   it('immediately returns the newer own turn for a duplicate with wait', async () => {
     const { room, action } = await fixture();
     const bob = await turn(room, 1);
-    await room.act(1, { turn_id: bob.turn_id, type: 'fold' });
+    await room.act('bob', { turn_id: bob.turn_id, type: 'fold' });
     const current = await turn(room, 0);
     expect(current.turn_id).not.toBe(action.turn_id);
     const settled = vi.fn();
-    const pending = room.act(0, action, { wait: true }).then(value => {
+    const pending = room.act('alice', action, { wait: true }).then(value => {
       settled(value);
       return value;
     });
@@ -84,13 +85,13 @@ describe('T50 duplicate turn waiting semantics', () => {
     });
     const bob = await turn(room, 1);
     expect(
-      await room.act(1, { turn_id: bob.turn_id, type: 'fold' }),
+      await room.act('bob', { turn_id: bob.turn_id, type: 'fold' }),
     ).toMatchObject({ ok: true, value: { status: 'accepted' } });
     const current = await turn(room, 0);
     expect(current.turn_id).not.toBe(action.turn_id);
 
     const settled = vi.fn();
-    const pending = room.act(0, action, { wait: true }).then(value => {
+    const pending = room.act('alice', action, { wait: true }).then(value => {
       settled(value);
       return value;
     });
@@ -102,12 +103,12 @@ describe('T50 duplicate turn waiting semantics', () => {
     });
 
     for (let i = 0; i < 2; i++) {
-      expect(await room.status(0, { wait: true })).toMatchObject({
+      expect(await room.status('alice', { wait: true })).toMatchObject({
         ok: true,
         value: { status: 'waiting', to_act_seat: 0 },
       });
     }
-    expect(await room.status(0, { wait: true })).toEqual({
+    expect(await room.status('alice', { wait: true })).toEqual({
       ok: true,
       value: current,
     });
@@ -116,7 +117,7 @@ describe('T50 duplicate turn waiting semantics', () => {
   it('waits while the opponent acts, then returns the next turn without duplicate', async () => {
     const { room, action } = await fixture();
     const settled = vi.fn();
-    const pending = room.act(0, action, { wait: true }).then(value => {
+    const pending = room.act('alice', action, { wait: true }).then(value => {
       settled(value);
       return value;
     });
@@ -124,7 +125,7 @@ describe('T50 duplicate turn waiting semantics', () => {
     expect(settled).not.toHaveBeenCalled();
     const bob = await turn(room, 1);
     expect(
-      await room.act(1, { turn_id: bob.turn_id, type: 'fold' }),
+      await room.act('bob', { turn_id: bob.turn_id, type: 'fold' }),
     ).toMatchObject({
       ok: true,
       value: { status: 'accepted' },
@@ -132,7 +133,7 @@ describe('T50 duplicate turn waiting semantics', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(settled).toHaveBeenCalledTimes(1);
     const result = await pending;
-    expect(result).toEqual(await room.status(0, { wait: true }));
+    expect(result).toEqual(await room.status('alice', { wait: true }));
     expect(result).toMatchObject({
       ok: true,
       value: { status: 'your_turn', hand_number: 3 },

@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MatchRecordInput, RecordedMatch } from '../db/records';
-import { type CreateInput, RoomReferee, type RoomStorage } from './referee';
+import { legacyRoom } from './legacy-fixture';
+import {
+  type CreateInput,
+  RoomReferee,
+  type RoomStorage,
+  type TableRecordInput,
+} from './referee';
 import { Room } from './room';
 
 vi.mock('cloudflare:workers', () => ({
@@ -46,6 +52,7 @@ const INPUT: CreateInput = {
   },
   seed: '0'.repeat(64),
   test: null,
+  visibility: null,
 };
 
 const joinedRoom = async (webUrl?: string) => {
@@ -68,12 +75,40 @@ const joinedRoom = async (webUrl?: string) => {
     { storage } as unknown as DurableObjectState,
     { MATCHMAKER: matchmaker, WEB_URL: webUrl } as unknown as Env,
   );
-  expect(await room.create(INPUT)).toEqual({ ok: true, value: null });
+  expect(await room.create(INPUT)).toEqual({
+    ok: true,
+    value: createdSeat(INPUT),
+  });
   expect(
     await room.join({ name: 'bob', invite_code: INPUT.invite_code }),
   ).toEqual({
     ok: true,
     value: {
+      room_id: INPUT.room_id,
+      visibility: 'private',
+      invite_code: null,
+      is_host: false,
+      seats_open: 0,
+      seats: [
+        {
+          seat: 0,
+          name: 'alice',
+          display_name: 'alice',
+          stack: 39,
+          bet_this_street: 1,
+          status: 'playing',
+          place: null,
+        },
+        {
+          seat: 1,
+          name: 'bob',
+          display_name: 'bob',
+          stack: 38,
+          bet_this_street: 2,
+          status: 'playing',
+          place: null,
+        },
+      ],
       seat: 1,
       opponent_name: 'alice',
       display_name: 'bob',
@@ -87,10 +122,10 @@ const joinedRoom = async (webUrl?: string) => {
 describe('Room Durable Object wrapper', () => {
   it('T43: match_over tells each owner their result, final stacks, both Elo changes and record URL', async () => {
     const { room } = await joinedRoom('https://web.test');
-    const turn = await room.status(0, { wait: false });
+    const turn = await room.status('alice', { wait: false });
     if (!turn.ok || turn.value.status !== 'your_turn')
       throw new Error('Expected turn');
-    const accepted = await room.act(0, {
+    const accepted = await room.act('alice', {
       turn_id: turn.value.turn_id,
       type: 'fold',
     });
@@ -99,7 +134,9 @@ describe('Room Durable Object wrapper', () => {
     expect(accepted.value).not.toHaveProperty('tell_owner');
     expect(accepted.value).not.toHaveProperty('hands_since_your_turn');
     for (const seat of [0, 1] as const) {
-      const response = await room.status(seat, { wait: false });
+      const response = await room.status(['alice', 'bob'][seat], {
+        wait: false,
+      });
       if (!response.ok || response.value.status !== 'match_over')
         throw new Error('Expected match_over');
       const body = response.value;
@@ -139,12 +176,12 @@ describe('Room Durable Object wrapper', () => {
   it('records a finished room through the global Matchmaker and returns its ratings', async () => {
     const { room, matchmaker, id, recordMatch, recorded } = await joinedRoom();
     expect(matchmaker.get).not.toHaveBeenCalled();
-    const turn = await room.status(0, { wait: false });
+    const turn = await room.status('alice', { wait: false });
     if (!turn.ok || turn.value.status !== 'your_turn') {
       throw new Error('Expected the first turn');
     }
     expect(
-      await room.act(0, { turn_id: turn.value.turn_id, type: 'fold' }),
+      await room.act('alice', { turn_id: turn.value.turn_id, type: 'fold' }),
     ).toMatchObject({ ok: true, value: { status: 'accepted' } });
     expect(matchmaker.idFromName).toHaveBeenCalledWith('global');
     expect(matchmaker.get).toHaveBeenCalledWith(id);
@@ -154,7 +191,7 @@ describe('Room Durable Object wrapper', () => {
       players: ['alice', 'bob'],
     });
     for (const wait of [false, true]) {
-      expect(await room.status(0, { wait })).toMatchObject({
+      expect(await room.status('alice', { wait })).toMatchObject({
         ok: true,
         value: { status: 'match_over', ratings: recorded.ratings },
       });
@@ -173,7 +210,7 @@ describe('Room Durable Object wrapper', () => {
     // Inspect persistence first: status() can itself catch up expired turns.
     expect(await storage.get('room')).not.toEqual(before);
     expect(storage.alarm).toBeNull();
-    const status = await room.status(0, { wait: false });
+    const status = await room.status('alice', { wait: false });
     expect(status).toMatchObject({
       ok: true,
       value: {
@@ -190,7 +227,9 @@ describe('Room Durable Object wrapper', () => {
     expect(await room.abort()).toEqual({ ok: true, value: null });
     expect(storage.alarm).toBeNull();
     for (const seat of [0, 1] as const) {
-      expect(await room.status(seat, { wait: false })).toMatchObject({
+      expect(
+        await room.status(['alice', 'bob'][seat], { wait: false }),
+      ).toMatchObject({
         ok: true,
         value: { status: 'match_over', room_status: 'void', result: 'void' },
       });
@@ -199,7 +238,7 @@ describe('Room Durable Object wrapper', () => {
 
   it('passes WEB_URL to the referee for match_over hints', async () => {
     const { room } = await joinedRoom('https://web.test');
-    const response = await room.leave(0);
+    const response = await room.leave('alice');
     expect(response).toMatchObject({
       ok: true,
       value: { status: 'match_over', result: 'loss' },
@@ -283,7 +322,7 @@ describe('match_over record links (T32, A15)', () => {
           };
 
           if (ending === 'leave') {
-            const left = await referee.leave(0);
+            const left = await referee.leave('alice');
             expect(left).toMatchObject({
               ok: true,
               value: { status: 'match_over', result: results[0] },
@@ -293,17 +332,19 @@ describe('match_over record links (T32, A15)', () => {
           } else if (ending === 'abort') {
             expect(await referee.abort()).toMatchObject({ ok: true });
           } else if (ending === 'timeout') {
-            clock.ms += 5 * 60 * 1000;
+            clock.ms += 2 * 60 * 1000;
             await referee.alarm();
           } else {
             for (let hand = 0; hand < (ending === 'draw' ? 2 : 1); hand++) {
               const seat = hand === 0 ? 0 : 1;
-              const turn = await referee.status(seat, { wait: false });
+              const turn = await referee.status(['alice', 'bob'][seat], {
+                wait: false,
+              });
               if (!turn.ok || turn.value.status !== 'your_turn') {
                 throw new Error('Expected a turn to finish by folding');
               }
               expect(
-                await referee.act(seat, {
+                await referee.act(['alice', 'bob'][seat], {
                   turn_id: turn.value.turn_id,
                   type: 'fold',
                 }),
@@ -313,7 +354,9 @@ describe('match_over record links (T32, A15)', () => {
 
           for (const seat of joined ? ([0, 1] as const) : ([0] as const)) {
             for (const wait of [false, true]) {
-              const response = await referee.status(seat, { wait });
+              const response = await referee.status(['alice', 'bob'][seat], {
+                wait,
+              });
               expect(response).toMatchObject({
                 ok: true,
                 value: { status: 'match_over', result: results[seat] },
@@ -323,8 +366,11 @@ describe('match_over record links (T32, A15)', () => {
             }
 
             const errors = [
-              await referee.act(seat, { turn_id: 't_999', type: 'check' }),
-              await referee.leave(seat),
+              await referee.act(['alice', 'bob'][seat], {
+                turn_id: 't_999',
+                type: 'check',
+              }),
+              await referee.leave(['alice', 'bob'][seat]),
             ];
             for (const response of errors) {
               expect(response).toMatchObject({
@@ -376,9 +422,11 @@ describe('T35 persisted room display names', () => {
           invite_code: INPUT.invite_code,
         }),
       ).toMatchObject({ ok: true });
-      expect(await room.leave(1)).toMatchObject({ ok: true });
+      expect(await room.leave('alice')).toMatchObject({ ok: true });
       for (const seat of [0, 1] as const) {
-        const response = await room.status(seat, { wait: false });
+        const response = await room.status(['haiku-cf62', 'alice'][seat], {
+          wait: false,
+        });
         if (!response.ok || response.value.status !== 'match_over')
           throw new Error('Expected match_over');
         const message = response.value.tell_owner ?? '';
@@ -407,7 +455,7 @@ describe('T35 persisted room display names', () => {
   it('persists both display names across a RoomReferee recreation and passes them to the match recorder', async () => {
     const storage = new MemoryStorage();
     const record = vi.fn(
-      async (_input: MatchRecordInput): Promise<RecordedMatch> => ({
+      async (_input: TableRecordInput): Promise<RecordedMatch> => ({
         rated: false,
         ratings: null,
       }),
@@ -430,7 +478,9 @@ describe('T35 persisted room display names', () => {
     const restored = new RoomReferee(storage, options);
     for (const wait of [false, true]) {
       for (const seat of [0, 1] as const) {
-        expect(await restored.status(seat, { wait })).toMatchObject({
+        expect(
+          await restored.status(['alice', 'bob'][seat], { wait }),
+        ).toMatchObject({
           ok: true,
           value: {
             display_name: seat === 0 ? '小愛 🃏' : '小包 🎲',
@@ -439,7 +489,7 @@ describe('T35 persisted room display names', () => {
         });
       }
     }
-    expect(await restored.leave(0)).toMatchObject({ ok: true });
+    expect(await restored.leave('alice')).toMatchObject({ ok: true });
     expect(record).toHaveBeenCalledWith(
       expect.objectContaining({
         players: ['alice', 'bob'],
@@ -451,56 +501,198 @@ describe('T35 persisted room display names', () => {
   it.each(['waiting', 'human', 'bot'] as const)(
     'reads a pre-T35 %s room without display_names',
     async kind => {
-      const storage = new MemoryStorage();
-      const options = { waitMs: 1 };
-      const original = new RoomReferee(storage, options);
-      expect(
-        await original.create({
-          ...INPUT,
-          display_name: '新名字',
-          ...(kind === 'bot' ? { opponent: 'bot' as const } : {}),
-        }),
-      ).toMatchObject({ ok: true });
-      if (kind === 'human') {
-        expect(
-          await original.join({
-            name: 'bOB',
-            display_name: '另一個名字',
-            invite_code: INPUT.invite_code,
-          }),
-        ).toMatchObject({ ok: true });
-      }
-      const stored = await storage.get<Record<string, unknown>>('room');
-      if (!stored) throw new Error('Expected a persisted room');
+      // The pre-T38 shape, saved before T35: no display_names key at all.
+      const legacy = legacyRoom(false);
+      const second =
+        kind === 'waiting' ? null : kind === 'bot' ? 'house-bot' : 'bOB';
+      const stored: Record<string, unknown> = {
+        ...legacy.room,
+        names: ['alice', second],
+        ...(kind === 'waiting'
+          ? {
+              match: null,
+              turn: null,
+              turn_count: 0,
+              used_turns: {},
+              acted_after_hand: undefined,
+            }
+          : {}),
+      };
       delete stored.display_names;
+      expect(stored).not.toHaveProperty('display_names');
+      const storage = new MemoryStorage();
       await storage.put('room', stored);
-      const restored = new RoomReferee(storage, options);
+      if (kind !== 'waiting') await storage.put('hand:1', legacy.hand);
+      const restored = new RoomReferee(storage, {
+        now: () => legacy.at,
+        waitMs: 1,
+      });
       const opponent =
         kind === 'waiting' ? null : kind === 'bot' ? 'House Bot' : 'bOB';
       for (const wait of [false, true]) {
-        expect(await restored.status(0, { wait })).toMatchObject({
+        expect(await restored.status('alice', { wait })).toMatchObject({
           ok: true,
           value: { display_name: 'alice', opponent_display_name: opponent },
         });
         if (kind === 'human') {
-          expect(await restored.status(1, { wait })).toMatchObject({
+          expect(await restored.status('bOB', { wait })).toMatchObject({
             ok: true,
             value: { display_name: 'bOB', opponent_display_name: 'alice' },
           });
         }
       }
-      expect(await restored.watch(0)).toMatchObject({
+      expect(await restored.watch('alice')).toMatchObject({
         ok: true,
         value: {
           display_names: opponent === null ? ['alice'] : ['alice', opponent],
         },
       });
       if (kind === 'human') {
-        expect(await restored.watch(1)).toMatchObject({
+        expect(await restored.watch('bOB')).toMatchObject({
           ok: true,
           value: { display_names: ['alice', 'bOB'] },
         });
       }
     },
   );
+});
+
+// Transitional heads-up seat answer (A25); keep exact create assertions.
+const createdSeat = (input: {
+  room_id: string;
+  invite_code: string;
+  name: string;
+  settings: {
+    starting_stack: number;
+    max_hands: number;
+    turn_seconds: number;
+    blind_every: number | null;
+  };
+  opponent?: 'bot';
+}) => {
+  const bot = input.opponent === 'bot';
+  return {
+    room_id: input.room_id,
+    visibility: 'private',
+    invite_code: input.invite_code,
+    seat: 0,
+    is_host: true,
+    display_name: input.name,
+    opponent_name: bot ? 'house-bot' : null,
+    opponent_display_name: bot ? 'House Bot' : null,
+    seats: [
+      {
+        seat: 0,
+        name: input.name,
+        display_name: input.name,
+        stack: input.settings.starting_stack - (bot ? 1 : 0),
+        bet_this_street: bot ? 1 : 0,
+        status: bot ? 'playing' : 'waiting',
+        place: null,
+      },
+      ...(bot
+        ? [
+            {
+              seat: 1,
+              name: 'house-bot',
+              display_name: 'House Bot',
+              stack: input.settings.starting_stack - 2,
+              bet_this_street: 2,
+              status: 'playing',
+              place: null,
+            },
+          ]
+        : []),
+    ],
+    seats_open: bot ? 0 : 1,
+    settings: input.settings,
+  };
+};
+
+describe('pre-T38 RoomData and HandRecord storage compatibility', () => {
+  it('continues an active legacy room and records both old and new hands without voiding it', async () => {
+    const storage = new MemoryStorage();
+    const legacy = legacyRoom(false);
+    await storage.put('room', legacy.room);
+    await storage.put('hand:1', legacy.hand);
+    const record = vi.fn(async (_input: TableRecordInput) => ({
+      rated: false,
+      ratings: null,
+    }));
+    const room = new RoomReferee(storage, {
+      now: () => legacy.at,
+      waitMs: 1,
+      record,
+    });
+    expect(await room.status('BOB', { wait: false })).toMatchObject({
+      ok: true,
+      value: {
+        status: 'your_turn',
+        hand_number: 2,
+        turn_id: 't_2',
+        view: { my_seat: 1, my_cards: ['Qs', 'Ac'], pot: 3, pots: [3] },
+      },
+    });
+    expect(
+      await room.act('bob', { turn_id: 't_2', type: 'fold' }),
+    ).toMatchObject({ ok: true, value: { status: 'accepted' } });
+    expect(await room.status('ALICE', { wait: false })).toMatchObject({
+      ok: true,
+      value: {
+        status: 'match_over',
+        result: 'draw',
+        final_stacks: [40, 40],
+        place: 1,
+      },
+    });
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record.mock.calls[0][0]).toMatchObject({
+      players: ['alice', 'bob'],
+      display_names: ['小愛', '小包'],
+      result: 'draw',
+      places: [1, 1],
+      hands: [
+        { ...legacy.hand, pots: [{ amount: 2, winners: [1] }] },
+        {
+          hand_number: 2,
+          pot: 2,
+          pots: [{ amount: 2, winners: [0] }],
+          stacks: [40, 40],
+        },
+      ],
+    });
+  });
+
+  it('serves a finished legacy room watch, including the stored hand and public cards', async () => {
+    const storage = new MemoryStorage();
+    const legacy = legacyRoom(true);
+    await storage.put('room', legacy.room);
+    await storage.put('hand:1', legacy.hand);
+    const room = new RoomReferee(storage, { now: () => legacy.at, waitMs: 1 });
+    for (const name of ['ALICE', 'BOB']) {
+      expect(await room.watch(name)).toMatchObject({
+        ok: true,
+        value: {
+          room_id: INPUT.room_id,
+          room_status: 'finished',
+          players: ['alice', 'bob'],
+          display_names: ['小愛', '小包'],
+          final_stacks: [39, 41],
+          places: [2, 1],
+          hands: [
+            {
+              hand_number: 1,
+              pot: 2,
+              pots: [{ amount: 2, winner_seats: [1] }],
+              hole_cards: [
+                ['9c', 'Ks'],
+                ['Jh', '9d'],
+              ],
+              stacks: [39, 41],
+            },
+          ],
+        },
+      });
+    }
+  });
 });

@@ -4,7 +4,6 @@
 import { Effect, Schema } from 'effect';
 import { type ApiError, apiError } from '../contract/errors';
 import {
-  HOUSE_BOT_DISPLAY_NAME,
   NAME_PATTERN,
   normalizeDisplayName,
   RESERVED_NAMES,
@@ -184,7 +183,7 @@ export const callRoom = <T, C extends ApiError['code']>(
 // has no exp, so the same seat always gets the same link.
 const sign = (
   env: Bindings,
-  claims: { room_id: string; seat: 0 | 1; name: string },
+  claims: { room_id: string; seat: number; name: string },
 ) =>
   Effect.gen(function* () {
     const { WEB_URL } = vars(env);
@@ -199,34 +198,51 @@ const sign = (
     return { token, watch_url };
   });
 
-// Opens a room with `name` in seat 0. Check the name with nameError first.
+// A19: a multiplayer room with no blind_every given, by the request or the
+// deployment's defaults, sets it by player count when it starts.
+const blindEveryGiven = (
+  env: Bindings,
+  input: { settings?: typeof Settings.Type },
+) =>
+  input.settings?.blind_every !== undefined ||
+  defaultSettings(vars(env).DEFAULT_SETTINGS_JSON)?.blind_every !== undefined;
+
+// Opens a room with `name` in seat 0, the host. Check the name with
+// nameError first. Without `visibility` it is a heads-up room that starts
+// when the second player sits (the queue's rooms; 房間狀態).
 export const openRoom = (
   env: Bindings,
   input: {
     name: string;
     // Normalized (A20); `name` when left out.
     display_name?: string;
+    visibility?: 'public' | 'private';
     settings?: typeof Settings.Type;
     test?: typeof TestSettings.Type;
     opponent?: 'bot';
   },
 ) =>
   Effect.gen(function* () {
-    const { settings, test } = yield* Effect.sync(() =>
-      roomDefaults(env, input),
-    );
+    const defaults = yield* Effect.sync(() => roomDefaults(env, input));
+    const { test } = defaults;
+    const visibility = input.visibility ?? null;
+    const settings =
+      visibility === null || input.opponent || blindEveryGiven(env, input)
+        ? defaults.settings
+        : { ...defaults.settings, blind_every: null };
     const room_id = `r_${randomString(ROOM_ID_CHARS, 10)}`;
     const invite_code = randomString(INVITE_CHARS, 6);
     // Signed first: the room keeps the watch link for the first turn (T46).
     const signed = yield* sign(env, { room_id, seat: 0, name: input.name });
     // Fails only if the room id is taken, which 36^10 ids make unlikely
     // enough not to retry.
-    yield* callRoom(() =>
+    const room = yield* callRoom(() =>
       stubOf(env, room_id).create({
         room_id,
         invite_code,
         name: input.name,
         display_name: input.display_name,
+        visibility,
         settings,
         seed: newSeed(test),
         test,
@@ -234,36 +250,30 @@ export const openRoom = (
         watch_url: signed.watch_url,
       }),
     );
-    return {
-      room_id,
-      invite_code,
-      seat: 0 as const,
-      ...signed,
-      display_name: input.display_name ?? input.name,
-      opponent_display_name:
-        input.opponent === 'bot' ? HOUSE_BOT_DISPLAY_NAME : null,
-      settings,
-    };
+    return { ...room, ...signed };
   });
 
-// Seats `name` in seat 1 of the room. Check the name with nameError first.
+// Seats `name` in the next seat of the room. Check the name with nameError
+// first. The seat is known once the room has seated it, so its watch link
+// is signed then and handed back to the room (T46).
 export const joinRoom = (
   env: Bindings,
   roomId: string,
-  input: { name: string; display_name?: string; invite_code: string },
+  input: { name: string; display_name?: string; invite_code?: string | null },
 ) =>
   Effect.gen(function* () {
     const stub = yield* roomStub(env, roomId);
-    // A join always takes seat 1; signed first for the first turn (T46).
+    const { invite_code, ...player } = input;
+    const room = yield* callRoom(() =>
+      stub.join({ ...player, ...(invite_code && { invite_code }) }),
+    );
     const signed = yield* sign(env, {
       room_id: roomId,
-      seat: 1,
+      seat: room.seat,
       name: input.name,
     });
-    const { seat, ...room } = yield* callRoom(() =>
-      stub.join({ ...input, watch_url: signed.watch_url }),
-    );
-    return { room_id: roomId, seat, ...signed, ...room };
+    yield* callRoom(() => stub.setWatchUrl(input.name, signed.watch_url));
+    return { ...room, ...signed };
   });
 
 // A9: an admin calls the room's match off (void).

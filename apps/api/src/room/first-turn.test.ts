@@ -8,6 +8,7 @@ import type {
 } from '../contract/schemas';
 import { startTestD1, type TestD1 } from '../db/test-d1';
 import type { Bindings } from '../routes/env';
+import { legacyRoom } from './legacy-fixture';
 import { RoomReferee, type RoomStorage } from './referee';
 
 class MemoryStorage implements RoomStorage {
@@ -269,54 +270,22 @@ describe('T48 tell_owner until this seat accepts its own action', () => {
   });
 
   it('legacy rooms without stored watch_urls omit tell_owner and the watch reminder', async () => {
+    // The pre-T38 shape from before T46: no watch_urls key at all. Seat 1
+    // (bob) has the turn and has never acted, so it is his first turn.
+    const legacy = legacyRoom(false);
+    const stored: Record<string, unknown> = { ...legacy.room };
+    delete stored.watch_urls;
+    expect(stored).not.toHaveProperty('watch_urls');
     const storage = new MemoryStorage();
-    const room = new RoomReferee(storage, {
-      waitMs: 1,
-      webUrl: 'https://web.test',
-    });
-    expect(
-      await room.create({
-        room_id: 'r_legacy0001',
-        invite_code: 'ABCDEF',
-        name: 'alice',
-        settings: {
-          starting_stack: 40,
-          blind_every: 50,
-          max_hands: 5,
-          turn_seconds: 30,
-        },
-        seed: '0'.repeat(64),
-        test: null,
-      }),
-    ).toMatchObject({ ok: true });
-    expect(
-      await room.join({ name: 'bob', invite_code: 'ABCDEF' }),
-    ).toMatchObject({ ok: true });
-    // Pre-T46 persistence has no watch_urls key at all, rather than a pair
-    // of null entries produced by creating a room with today's referee.
-    let removed = false;
-    for (const [key, value] of storage.data) {
-      if (
-        typeof value !== 'object' ||
-        value === null ||
-        !('watch_urls' in value)
-      )
-        continue;
-      const legacy = structuredClone(value) as Record<string, unknown>;
-      delete legacy.watch_urls;
-      expect(legacy).not.toHaveProperty('watch_urls');
-      storage.data.set(key, legacy);
-      removed = true;
-    }
-    expect(removed, 'fixture must remove the persisted watch_urls field').toBe(
-      true,
-    );
+    await storage.put('room', stored);
+    await storage.put('hand:1', legacy.hand);
     const restored = new RoomReferee(storage, {
+      now: () => legacy.at,
       waitMs: 1,
       webUrl: 'https://web.test',
     });
     for (const wait of [false, true]) {
-      const current = await restored.status(0, { wait });
+      const current = await restored.status('bob', { wait });
       expect(current).toMatchObject({
         ok: true,
         value: { status: 'your_turn' },
@@ -397,7 +366,7 @@ describe('T48 first assigned turn gets twice settings.turn_seconds', () => {
         });
       if (response.status === 'your_turn')
         expect(response.turn_id).not.toBe(first.turn_id);
-      const watched = await t.referee.watch(seat);
+      const watched = await t.referee.watch(['alice', 'bob'][seat]);
       if (!watched.ok) throw new Error('Expected watch');
       const events =
         seat === 0
@@ -442,7 +411,7 @@ describe('T48 owner language and script reminders', () => {
     async ending => {
       const t = await fixture({ maxHands: ending === 'draw' ? 2 : 1 });
       if (ending === 'left')
-        expect(await t.referee.leave(0)).toMatchObject({ ok: true });
+        expect(await t.referee.leave('alice')).toMatchObject({ ok: true });
       else {
         expect((await t.act(0, 'fold')).status).toBe(200);
         if (ending === 'draw')

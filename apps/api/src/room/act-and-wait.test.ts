@@ -27,6 +27,7 @@ const INPUT: CreateInput = {
   },
   seed: '0'.repeat(64),
   test: null,
+  visibility: null,
 };
 const WAIT_MS = 100;
 const fixture = async (input: Partial<CreateInput> = {}) => {
@@ -42,14 +43,17 @@ const fixture = async (input: Partial<CreateInput> = {}) => {
   return room;
 };
 const turn = async (room: RoomReferee, seat: 0 | 1) => {
-  const result = await room.status(seat, { wait: false });
+  const result = await room.status(['alice', 'bob'][seat], { wait: false });
   if (!result.ok || result.value.status !== 'your_turn')
     throw new Error('Expected your_turn');
   return result.value;
 };
 const fold = async (room: RoomReferee, seat: 0 | 1) => {
   const current = await turn(room, seat);
-  return room.act(seat, { turn_id: current.turn_id, type: 'fold' });
+  return room.act(['alice', 'bob'][seat], {
+    turn_id: current.turn_id,
+    type: 'fold',
+  });
 };
 const observe = <T>(promise: Promise<T>) => {
   const settled = vi.fn();
@@ -71,11 +75,15 @@ describe('T47 RoomReferee act with wait', () => {
     const room = await fixture();
     const first = await turn(room, 0);
     const action = { turn_id: first.turn_id, type: 'fold' as const };
-    const pending = observe(room.act(0, action, { wait: true }));
+    const pending = observe(room.act('alice', action, { wait: true }));
     await vi.advanceTimersByTimeAsync(0);
     // A different payload for an already accepted turn must not be executed.
     const duplicate = observe(
-      room.act(0, { ...action, type: 'raise', amount: 999 }, { wait: true }),
+      room.act(
+        'alice',
+        { ...action, type: 'raise', amount: 999 },
+        { wait: true },
+      ),
     );
     await vi.advanceTimersByTimeAsync(0);
     expect.soft(pending.settled).not.toHaveBeenCalled();
@@ -85,7 +93,7 @@ describe('T47 RoomReferee act with wait', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(pending.settled).toHaveBeenCalledTimes(1);
     expect(duplicate.settled).toHaveBeenCalledTimes(1);
-    const expected = await room.status(0, { wait: true });
+    const expected = await room.status('alice', { wait: true });
     expect(await pending.result).toEqual(expected);
     expect(await duplicate.result).toEqual(expected);
     if (!expected.ok) throw new Error('Expected status');
@@ -112,14 +120,18 @@ describe('T47 RoomReferee act with wait', () => {
     });
     const first = await turn(room, 0);
     const pending = observe(
-      room.act(0, { turn_id: first.turn_id, type: 'fold' }, { wait: true }),
+      room.act(
+        'alice',
+        { turn_id: first.turn_id, type: 'fold' },
+        { wait: true },
+      ),
     );
     await vi.advanceTimersByTimeAsync(0);
     expect.soft(pending.settled).not.toHaveBeenCalled();
     await fold(room, 1);
     await vi.advanceTimersByTimeAsync(0);
     expect(pending.settled).toHaveBeenCalledTimes(1);
-    const expected = await room.status(0, { wait: true });
+    const expected = await room.status('alice', { wait: true });
     expect(await pending.result).toEqual(expected);
     expect(expected).toMatchObject({
       ok: true,
@@ -140,11 +152,11 @@ describe('T47 RoomReferee act with wait', () => {
     });
     const first = await turn(room, 0);
     const response = await room.act(
-      0,
+      'alice',
       { turn_id: first.turn_id, type: 'fold' },
       { wait: true },
     );
-    expect(response).toEqual(await room.status(0, { wait: true }));
+    expect(response).toEqual(await room.status('alice', { wait: true }));
     expect(response).toMatchObject({
       ok: true,
       value: { status: 'match_over' },
@@ -155,10 +167,14 @@ describe('T47 RoomReferee act with wait', () => {
     const room = await fixture();
     const first = await turn(room, 0);
     const pending = observe(
-      room.act(0, { turn_id: first.turn_id, type: 'call' }, { wait: true }),
+      room.act(
+        'alice',
+        { turn_id: first.turn_id, type: 'call' },
+        { wait: true },
+      ),
     );
     await vi.advanceTimersByTimeAsync(0);
-    const getWait = observe(room.status(0, { wait: true }));
+    const getWait = observe(room.status('alice', { wait: true }));
     await vi.advanceTimersByTimeAsync(WAIT_MS - 1);
     expect.soft(pending.settled).not.toHaveBeenCalled();
     expect(getWait.settled).not.toHaveBeenCalled();
@@ -180,10 +196,10 @@ describe('T47 RoomReferee act with wait', () => {
   ] as const)('returns %s without starting a wait', async code => {
     const room = await fixture();
     const first = await turn(room, 0);
-    if (code === 'match_over') await room.leave(1);
+    if (code === 'match_over') await room.leave('bob');
     const pending = observe(
       room.act(
-        code === 'not_your_turn' ? 1 : 0,
+        code === 'not_your_turn' ? 'bob' : 'alice',
         {
           turn_id: code === 'stale_turn' ? 't_999' : first.turn_id,
           type: code === 'invalid_action' ? 'check' : 'fold',
@@ -213,13 +229,13 @@ describe('T47 RoomReferee act with wait', () => {
       const room = await fixture();
       const first = await turn(room, 0);
       const action = { turn_id: first.turn_id, type: 'call' as const };
-      const accepted = await room.act(0, action, options);
+      const accepted = await room.act('alice', action, options);
       expect(accepted).toMatchObject({
         ok: true,
         value: { status: 'accepted' },
       });
       if (!accepted.ok) throw new Error('Expected accepted');
-      expect(await room.act(0, action, options)).toEqual({
+      expect(await room.act('alice', action, options)).toEqual({
         ok: true,
         value: { ...accepted.value, duplicate: true },
       });
@@ -230,7 +246,7 @@ describe('T47 RoomReferee act with wait', () => {
     const room = await fixture({ test: { chaos: { fail_request_every: 3 } } });
     const first = await turn(room, 0); // seat 0 request 1
     const pending = room.act(
-      0,
+      'alice',
       { turn_id: first.turn_id, type: 'fold' },
       { wait: true },
     ); // request 2
@@ -241,11 +257,11 @@ describe('T47 RoomReferee act with wait', () => {
       ok: true,
       value: { status: 'your_turn' },
     });
-    expect(await room.status(0, { wait: false })).toMatchObject({
+    expect(await room.status('alice', { wait: false })).toMatchObject({
       ok: false,
       error: { code: 'unavailable' },
     }); // request 3
-    expect(await room.status(0, { wait: false })).toMatchObject({
+    expect(await room.status('alice', { wait: false })).toMatchObject({
       ok: true,
       value: { status: 'your_turn', hand_number: 3 },
     });
@@ -255,7 +271,7 @@ describe('T47 RoomReferee act with wait', () => {
     const room = await fixture({ test: { chaos: { extra_waiting: 1 } } });
     const first = await turn(room, 0);
     const pending = room.act(
-      0,
+      'alice',
       { turn_id: first.turn_id, type: 'fold' },
       { wait: true },
     );
@@ -266,7 +282,7 @@ describe('T47 RoomReferee act with wait', () => {
       ok: true,
       value: { status: 'waiting', to_act_seat: 0 },
     });
-    expect(await room.status(0, { wait: true })).toMatchObject({
+    expect(await room.status('alice', { wait: true })).toMatchObject({
       ok: true,
       value: { status: 'your_turn', hand_number: 3 },
     });

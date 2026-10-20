@@ -14,10 +14,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { handle } from '../app';
+import type { MatchRecordInput } from '../db/records';
 import { startTestD1, type TestD1 } from '../db/test-d1';
 import { matchQueueIn, type QueueInput } from '../matchmaker/pairing';
 import { RatingWriter } from '../matchmaker/ratings';
-import { RoomReferee, type RoomStorage } from '../room/referee';
+import {
+  RoomReferee,
+  type RoomStorage,
+  type TableRecordInput,
+} from '../room/referee';
 import type { Bindings } from '../routes/env';
 import { CASINO_SH_VERSION, renderCasinoSh } from './casino-sh';
 
@@ -96,7 +101,11 @@ function makeEnv(chaos = false): Bindings {
         if (!referee) {
           referee = new RoomReferee(new MemoryStorage(), {
             waitMs: 30,
-            record: input => ratings.record(input),
+            record: (input: TableRecordInput) => {
+              expect(input.players).toHaveLength(2);
+              // The test DB still stores heads-up records until T40.
+              return ratings.record(input as unknown as MatchRecordInput);
+            },
           });
           referees.set(id, referee);
         }

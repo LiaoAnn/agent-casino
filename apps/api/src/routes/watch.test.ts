@@ -1,3 +1,4 @@
+import type { MatchRecordInput } from '../db/records';
 // T23: the owner's watch link (casino-api skill A16; also A3, A4, A8, A13,
 // A15). Everything goes over HTTP through handle(); the Room DO namespace is
 // faked with one RoomReferee per room id and finished matches are written to a
@@ -22,7 +23,11 @@ import { startTestD1, type TestD1 } from '../db/test-d1';
 import type { Seat } from '../holdem/match';
 import { dealHand } from '../holdem/shuffle';
 import { RatingWriter } from '../matchmaker/ratings';
-import { RoomReferee, type RoomStorage } from '../room/referee';
+import {
+  RoomReferee,
+  type RoomStorage,
+  type TableRecordInput,
+} from '../room/referee';
 import { signWatchToken, verifyWatchToken } from '../token/token';
 import type { Bindings } from './env';
 
@@ -84,7 +89,11 @@ const makeEnv = (options: { waitMs?: number } = {}): TestEnv => {
         referee = new RoomReferee(new MemoryStorage(), {
           waitMs: options.waitMs ?? 5,
           now: () => clock.ms,
-          record: input => ratings.record(input),
+          record: (input: TableRecordInput) => {
+            expect(input.players).toHaveLength(2);
+            // The test DB still stores heads-up records until T40.
+            return ratings.record(input as unknown as MatchRecordInput);
+          },
         });
         referees.set(id, referee);
       }

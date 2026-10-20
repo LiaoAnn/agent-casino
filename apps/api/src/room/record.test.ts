@@ -1,17 +1,18 @@
 // T13 S1: casino-api A9/A10/A15 and holdem-rules replay requirements.
 // Exercise only the referee's public API and persisted HandRecords.
 import { describe, expect, it, vi } from 'vitest';
-import type { MatchRecordInput, RecordedMatch } from '../db/records';
 import {
   type Action,
-  applyAction,
-  type HandRecord,
-  legalActions,
-  type MatchState,
-  type Seat,
-  startMatch,
-} from '../holdem/match';
+  applyTableAction,
+  startTable,
+  type TableHandRecord,
+  type TableState,
+  tableLegalActions,
+} from '../holdem/table';
+import type { RecordedMatch, TableRecordInput } from './referee';
 import { RoomReferee, type RoomStorage } from './referee';
+
+type Seat = 0 | 1;
 
 const ROOM_ID = 'r_record0001';
 const SEED = '0'.repeat(64);
@@ -29,7 +30,7 @@ const RECORDED: RecordedMatch = {
     { name: 'Bob', rating: 1484, change: -16 },
   ],
 };
-type Recorder = (input: MatchRecordInput) => Promise<RecordedMatch>;
+type Recorder = (input: TableRecordInput) => Promise<RecordedMatch>;
 
 class MemoryStorage implements RoomStorage {
   readonly data = new Map<string, unknown>();
@@ -59,13 +60,14 @@ function fixture(record: Recorder = async () => RECORDED, settings = SETTINGS) {
   // A variable allows the new optional callback before RefereeOptions gains it.
   const options = { now: () => clock.ms, waitMs: 1, record: spy };
   const referee = new RoomReferee(storage, options);
-  let engine = startMatch({
+  let engine = startTable({
+    players: 2,
     seed: SEED,
     maxHands: settings.max_hands,
     blindEvery: 50,
     startingStack: settings.starting_stack,
   });
-  const hands: HandRecord[] = [];
+  const hands: TableHandRecord[] = [];
 
   const open = async (join = true) => {
     expect(
@@ -76,8 +78,17 @@ function fixture(record: Recorder = async () => RECORDED, settings = SETTINGS) {
         settings,
         seed: SEED,
         test: null,
+        visibility: null,
       }),
-    ).toEqual({ ok: true, value: null });
+    ).toEqual({
+      ok: true,
+      value: createdSeat({
+        room_id: ROOM_ID,
+        invite_code: 'ABC234',
+        name: PLAYERS[0],
+        settings,
+      }),
+    });
     if (join) {
       expect(
         await referee.join({ name: PLAYERS[1], invite_code: 'ABC234' }),
@@ -87,7 +98,7 @@ function fixture(record: Recorder = async () => RECORDED, settings = SETTINGS) {
 
   const turn = async () => {
     if (engine.toAct === null) throw new Error('Expected an active engine');
-    const result = await referee.status(engine.toAct, { wait: false });
+    const result = await referee.status(PLAYERS[engine.toAct], { wait: false });
     if (!result.ok || result.value.status !== 'your_turn') {
       throw new Error(`Expected your_turn: ${JSON.stringify(result)}`);
     }
@@ -96,15 +107,18 @@ function fixture(record: Recorder = async () => RECORDED, settings = SETTINGS) {
 
   const step = async (action: Action) => {
     const current = await turn();
-    const applied = applyAction(engine, current.seat, action);
+    const applied = applyTableAction(engine, current.seat, action);
     if (!applied.ok) throw new Error(applied.message);
     engine = applied.state;
     hands.push(...applied.finishedHands);
-    return referee.act(current.seat, { turn_id: current.turn_id, ...action });
+    return referee.act(PLAYERS[current.seat], {
+      turn_id: current.turn_id,
+      ...action,
+    });
   };
 
   const finish = async (
-    pick: (state: MatchState) => Action = () => ({ type: 'fold' }),
+    pick: (state: TableState) => Action = () => ({ type: 'fold' }),
   ) => {
     for (let i = 0; !engine.over && i < 2_000; i++) {
       expect(await step(pick(engine))).toMatchObject({
@@ -122,7 +136,9 @@ function fixture(record: Recorder = async () => RECORDED, settings = SETTINGS) {
 type Fixture = ReturnType<typeof fixture>;
 
 async function over(t: Fixture, seat: Seat = 0, wait = false) {
-  const response = await t.referee.status(seat, { wait });
+  const response = await t.referee.status([PLAYERS[0], PLAYERS[1]][seat], {
+    wait,
+  });
   if (!response.ok || response.value.status !== 'match_over') {
     throw new Error(`Expected match_over: ${JSON.stringify(response)}`);
   }
@@ -131,7 +147,7 @@ async function over(t: Fixture, seat: Seat = 0, wait = false) {
 
 async function expectRecord(
   t: Fixture,
-  result: MatchRecordInput['result'],
+  result: TableRecordInput['result'],
   settings = SETTINGS,
   hands = t.hands,
   endReason = 'max_hands',
@@ -146,6 +162,14 @@ async function expectRecord(
     seed: SEED,
     result,
     end_reason: endReason,
+    places:
+      endReason === 'void' || endReason === 'cancelled'
+        ? null
+        : result === 'seat0_win'
+          ? [1, 2]
+          : result === 'seat1_win'
+            ? [2, 1]
+            : [1, 1],
     ended_at: new Date(t.clock.ms).toISOString(),
     final_stacks: response.final_stacks,
     hands,
@@ -192,7 +216,7 @@ describe('T13 S1: replay, record, then match_over', () => {
     const t = fixture(undefined, settings);
     await t.open();
     const final = await t.finish(state => {
-      const actions = legalActions(state);
+      const actions = tableLegalActions(state);
       const raise = actions.find(action => action.type === 'raise');
       if (raise?.type === 'raise') return { type: 'raise', amount: raise.max };
       return actions.some(action => action.type === 'call')
@@ -218,7 +242,7 @@ describe('T13 S1: replay, record, then match_over', () => {
       await t.step({ type: 'fold' });
       await t.step({ type: 'raise', amount: 6 });
       t.clock.ms += 2_000;
-      const response = await t.referee.leave(seat);
+      const response = await t.referee.leave([PLAYERS[0], PLAYERS[1]][seat]);
       expect(response).toMatchObject({
         ok: true,
         value: {
@@ -278,12 +302,12 @@ describe('T13 S1: replay, record, then match_over', () => {
       let settled = false;
       const pending = (
         ending === 'act'
-          ? t.referee.act(current.seat, {
+          ? t.referee.act(PLAYERS[current.seat], {
               turn_id: current.turn_id,
               type: 'fold',
             })
           : ending === 'leave'
-            ? t.referee.leave(0)
+            ? t.referee.leave(PLAYERS[0])
             : t.referee.abort()
       ).finally(() => {
         settled = true;
@@ -311,7 +335,9 @@ describe('T13 S1: replay, record, then match_over', () => {
           expect((await over(t, seat, wait)).ratings).toEqual(recorded.ratings);
         }
         // A repeated leave is an ended-room error with the same match_over state.
-        expect(await t.referee.leave(seat)).toMatchObject({
+        expect(
+          await t.referee.leave([PLAYERS[0], PLAYERS[1]][seat]),
+        ).toMatchObject({
           ok: false,
           error: { code: 'match_over', state: { ratings: recorded.ratings } },
         });
@@ -325,7 +351,7 @@ describe('T13 S1: replay, record, then match_over', () => {
     const t = fixture(async () => ({ rated: false, ratings: null }));
     await t.open();
     await t.step({ type: 'fold' });
-    const hand = await t.storage.get<HandRecord>('hand:1');
+    const hand = await t.storage.get<TableHandRecord>('hand:1');
     if (hand === undefined) throw new Error('Expected completed hand:1');
     hand.stacks = [1, 79];
     await t.storage.put('hand:1', hand);
@@ -367,14 +393,14 @@ describe('T13 S1: replay, record, then match_over', () => {
     });
   });
 
-  it.each(['leave', 'five-minute alarm'] as const)(
+  it.each(['leave', 'two-minute absence alarm'] as const)(
     'does not record a never-started room dissolved by %s',
     async ending => {
       const t = fixture();
       await t.open(false);
-      if (ending === 'leave') await t.referee.leave(0);
+      if (ending === 'leave') await t.referee.leave(PLAYERS[0]);
       else {
-        t.clock.ms += 5 * 60 * 1_000;
+        t.clock.ms += 2 * 60 * 1_000;
         await t.referee.alarm();
       }
       expect(await over(t)).toMatchObject({
@@ -399,7 +425,7 @@ describe('T13 S1: replay, record, then match_over', () => {
     await t.open();
     const current = await t.turn();
     const action = { turn_id: current.turn_id, type: 'fold' as const };
-    const accepted = await t.referee.act(current.seat, action);
+    const accepted = await t.referee.act(PLAYERS[current.seat], action);
     expect(accepted).toMatchObject({
       ok: true,
       value: { status: 'accepted' },
@@ -407,7 +433,7 @@ describe('T13 S1: replay, record, then match_over', () => {
     if (!accepted.ok) throw new Error('Expected accepted final action');
     expect(t.spy).toHaveBeenCalledTimes(1);
     for (let retry = 0; retry < 2; retry++) {
-      expect(await t.referee.act(current.seat, action)).toEqual({
+      expect(await t.referee.act(PLAYERS[current.seat], action)).toEqual({
         ok: true,
         value: { ...accepted.value, duplicate: true },
       });
@@ -479,7 +505,7 @@ describe('T13 S1: replay, record, then match_over', () => {
       expect(t.spy).toHaveBeenCalledTimes(1);
       const original = structuredClone(t.spy.mock.calls[0][0]);
       for (const wait of [false, true]) {
-        expect(await t.referee.status(0, { wait })).toMatchObject({
+        expect(await t.referee.status(PLAYERS[0], { wait })).toMatchObject({
           ok: false,
           error: { code: 'unavailable', retryable: true },
         });
@@ -488,7 +514,7 @@ describe('T13 S1: replay, record, then match_over', () => {
       const retry = () =>
         trigger === 'alarm'
           ? t.referee.alarm()
-          : t.referee.status(0, { wait: trigger === 'wait' });
+          : t.referee.status(PLAYERS[0], { wait: trigger === 'wait' });
       await retry();
       expect(t.spy).toHaveBeenCalledTimes(4);
       failing = false;
@@ -517,7 +543,10 @@ describe('T23: notes go to record (A16)', () => {
     for (let i = 0; i < 50; i++) {
       let moved = false;
       for (const seat of seats) {
-        const response = await t.referee.status(seat, { wait: false });
+        const response = await t.referee.status(
+          [PLAYERS[0], PLAYERS[1]][seat],
+          { wait: false },
+        );
         if (!response.ok) throw new Error(JSON.stringify(response));
         const status = response.value;
         if (status.status === 'match_over') return expected;
@@ -531,7 +560,7 @@ describe('T23: notes go to record (A16)', () => {
           : status.legal_actions.some(action => action.type === 'check')
             ? 'check'
             : 'call';
-        const accepted = await t.referee.act(seat, {
+        const accepted = await t.referee.act([PLAYERS[0], PLAYERS[1]][seat], {
           turn_id: status.turn_id,
           type,
           note,
@@ -569,7 +598,7 @@ describe('T23: notes go to record (A16)', () => {
     await t.open();
     const current = await t.turn();
     expect(
-      await t.referee.act(current.seat, {
+      await t.referee.act(PLAYERS[current.seat], {
         turn_id: current.turn_id,
         type: 'raise',
         amount: 3,
@@ -596,7 +625,7 @@ describe('T28 S2 last_hand.stack_changes', () => {
     async ({ ending, max_hands: hands }) => {
       const t = fixture(undefined, { ...SETTINGS, max_hands: hands });
       await t.open();
-      let before: readonly [number, number] = [40, 40];
+      let before: readonly number[] = [40, 40];
       for (let handNumber = 1; handNumber <= hands; handNumber++) {
         // Keep checking/calling to reach showdown without risking an early bust.
         for (let step = 0; t.hands.length < handNumber && step < 20; step++) {
@@ -623,7 +652,10 @@ describe('T28 S2 last_hand.stack_changes', () => {
         expect(changes[0] + changes[1]).toBe(0);
         const seat = handNumber === hands ? 0 : (await t.turn()).seat;
         for (const wait of [false, true]) {
-          const result = await t.referee.status(seat, { wait });
+          const result = await t.referee.status(
+            [PLAYERS[0], PLAYERS[1]][seat],
+            { wait },
+          );
           expect(result).toMatchObject({
             ok: true,
             value: {
@@ -661,7 +693,7 @@ describe('T28 S3 seconds_remaining', () => {
       for (const elapsed of [0, 600, 1_001, 29_999]) {
         t.clock.ms = deadline - 30_000 + elapsed;
         const seconds = Math.max(0, Math.floor((deadline - t.clock.ms) / 1000));
-        const result = await t.referee.status(first.seat, { wait });
+        const result = await t.referee.status(PLAYERS[first.seat], { wait });
         expect.soft(result).toMatchObject({
           ok: true,
           value: {
@@ -680,7 +712,7 @@ describe('T28 S3 seconds_remaining', () => {
     await t.open();
     const first = await t.turn();
     t.clock.ms += 600;
-    const result = await t.referee.act(first.seat, {
+    const result = await t.referee.act(PLAYERS[first.seat], {
       turn_id: first.turn_id,
       type: 'check',
     });
@@ -700,3 +732,55 @@ describe('T28 S3 seconds_remaining', () => {
     });
   });
 });
+
+// Transitional heads-up seat answer (A25); keep exact create assertions.
+const createdSeat = (input: {
+  room_id: string;
+  invite_code: string;
+  name: string;
+  settings: {
+    starting_stack: number;
+    max_hands: number;
+    turn_seconds: number;
+    blind_every: number | null;
+  };
+  opponent?: 'bot';
+}) => {
+  const bot = input.opponent === 'bot';
+  return {
+    room_id: input.room_id,
+    visibility: 'private',
+    invite_code: input.invite_code,
+    seat: 0,
+    is_host: true,
+    display_name: input.name,
+    opponent_name: bot ? 'house-bot' : null,
+    opponent_display_name: bot ? 'House Bot' : null,
+    seats: [
+      {
+        seat: 0,
+        name: input.name,
+        display_name: input.name,
+        stack: input.settings.starting_stack - (bot ? 1 : 0),
+        bet_this_street: bot ? 1 : 0,
+        status: bot ? 'playing' : 'waiting',
+        place: null,
+      },
+      ...(bot
+        ? [
+            {
+              seat: 1,
+              name: 'house-bot',
+              display_name: 'House Bot',
+              stack: input.settings.starting_stack - 2,
+              bet_this_street: 2,
+              status: 'playing',
+              place: null,
+            },
+          ]
+        : []),
+    ],
+    seats_open: bot ? 0 : 1,
+    settings: input.settings,
+  };
+};
