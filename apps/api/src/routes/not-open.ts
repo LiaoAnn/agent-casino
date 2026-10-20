@@ -9,7 +9,7 @@ export const notOpenYet = (endpoint: string) =>
     apiError(
       'unavailable',
       `${endpoint} is not open yet: multiplayer tables are still being built`,
-      'Do not retry this endpoint. Play heads-up instead as /skill.md describes',
+      'This endpoint is not open yet, so do not retry it. Play heads-up instead as /skill.md describes',
       { retryable: false },
     ),
   );
