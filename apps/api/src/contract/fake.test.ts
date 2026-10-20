@@ -43,7 +43,11 @@ const eventsOf = (detail: MatchDetail): HistoryEvent[] =>
   detail.hands.flatMap(hand =>
     hand.events.map(event => {
       expect([0, 1]).toContain(event.seat);
-      return { ...event, seat: event.seat as 0 | 1 };
+      if (event.type === 'leave')
+        throw new Error(
+          'Heads-up fake records must not contain table leave events',
+        );
+      return { ...event, type: event.type, seat: event.seat as 0 | 1 };
     }),
   );
 

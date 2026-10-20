@@ -285,11 +285,19 @@ export const JoinResponse = SeatResponse;
 
 // --- Playing ----------------------------------------------------------------
 
-// `call` amount = chips added; `raise` amount = total raised to this street.
+// `call` amount = chips added; `raise` amount = total raised to this street;
+// `leave` amount = chips taken off the table (E6).
 const HistoryEntry = Schema.Struct({
   seat: Seat,
   street: Street,
-  type: Schema.Literals(['post_blind', 'fold', 'check', 'call', 'raise']),
+  type: Schema.Literals([
+    'post_blind',
+    'fold',
+    'check',
+    'call',
+    'raise',
+    'leave',
+  ]),
   amount: Schema.optionalKey(NonNegativeInt),
   timeout: Schema.optionalKey(Schema.Literal(true)),
 });

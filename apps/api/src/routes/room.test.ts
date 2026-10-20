@@ -756,7 +756,7 @@ describe('POST /v1/rooms/{room_id}/join', () => {
     const { env } = makeEnv();
     const room = await createRoom(env);
     const joined = await joinRoom(env, room, {
-      invite_code: room.invite_code!.toLowerCase(),
+      invite_code: required(room.invite_code).toLowerCase(),
     });
     expect(joined.seat).toBe(1);
   });
@@ -1173,7 +1173,10 @@ describe('POST /v1/rooms/{room_id}/actions: accepted', () => {
       engineAfter({ seed: SEED, max_hands: 10 }, [[0, { type: 'call' }]]),
       1,
     );
-    expect(bob.view).toEqual({ ...expected.view, pots: [expected.view!.pot] });
+    expect(bob.view).toEqual({
+      ...expected.view,
+      pots: [required(expected.view).pot],
+    });
     expect(bob.legal_actions).toEqual(
       expect.arrayContaining([{ type: 'check' }]),
     );
@@ -1218,7 +1221,10 @@ describe('POST /v1/rooms/{room_id}/actions: accepted', () => {
       ]),
       1,
     );
-    expect(bob.view).toEqual({ ...expected.view, pots: [expected.view!.pot] });
+    expect(bob.view).toEqual({
+      ...expected.view,
+      pots: [required(expected.view).pot],
+    });
     expect(bob.view?.history.at(-1)).toEqual({
       seat: 0,
       street: 'preflop',
@@ -1533,11 +1539,11 @@ describe('POST /v1/rooms/{room_id}/actions: finishing a 1-hand match by a fold',
         ...expectedEnd.lastHand,
         pots: [
           {
-            amount: expectedEnd.lastHand!.pot,
+            amount: required(expectedEnd.lastHand).pot,
             winner_seats:
-              expectedEnd.lastHand!.winner_seat === null
+              required(expectedEnd.lastHand).winner_seat === null
                 ? [0, 1]
-                : [expectedEnd.lastHand!.winner_seat],
+                : [required(expectedEnd.lastHand).winner_seat],
           },
         ],
         stack_changes: [-1, 1],
@@ -1649,11 +1655,11 @@ describe('POST /v1/rooms/{room_id}/actions: a 1-hand match to showdown', () => {
         ...expected.lastHand,
         pots: [
           {
-            amount: expected.lastHand!.pot,
+            amount: required(expected.lastHand).pot,
             winner_seats:
-              expected.lastHand!.winner_seat === null
+              required(expected.lastHand).winner_seat === null
                 ? [0, 1]
-                : [expected.lastHand!.winner_seat],
+                : [required(expected.lastHand).winner_seat],
           },
         ],
         stack_changes: [s0 - 40, s1 - 40],
@@ -1684,16 +1690,19 @@ describe('POST /v1/rooms/{room_id}/actions: the next hand', () => {
       view: { button_seat: 1, street: 'preflop' },
     });
     const engineView = viewFor(expected, 1).view;
-    expect(bob.view).toEqual({ ...engineView, pots: [engineView!.pot] });
+    expect(bob.view).toEqual({
+      ...engineView,
+      pots: [required(engineView).pot],
+    });
     expect(bob.last_hand).toEqual({
       ...expected.lastHand,
       pots: [
         {
-          amount: expected.lastHand!.pot,
+          amount: required(expected.lastHand).pot,
           winner_seats:
-            expected.lastHand!.winner_seat === null
+            required(expected.lastHand).winner_seat === null
               ? [0, 1]
-              : [expected.lastHand!.winner_seat],
+              : [required(expected.lastHand).winner_seat],
         },
       ],
       stack_changes: [-1, 1],
@@ -1846,11 +1855,11 @@ describe('POST /v1/rooms/{room_id}/leave while playing', () => {
       ...expected.lastHand,
       pots: [
         {
-          amount: expected.lastHand!.pot,
+          amount: required(expected.lastHand).pot,
           winner_seats:
-            expected.lastHand!.winner_seat === null
+            required(expected.lastHand).winner_seat === null
               ? [0, 1]
-              : [expected.lastHand!.winner_seat],
+              : [required(expected.lastHand).winner_seat],
         },
       ],
       stack_changes: [-1, 1],
@@ -3214,3 +3223,12 @@ describe('T46 first assigned turn watch link reminder over HTTP', () => {
     }
   });
 });
+
+// Fail explicitly if a fixture expected by this assertion is absent.
+function required<T>(value: T | null | undefined): T {
+  expect(value).not.toBeNull();
+  expect(value).not.toBeUndefined();
+  if (value === null || value === undefined)
+    throw new Error('Missing test fixture value');
+  return value;
+}

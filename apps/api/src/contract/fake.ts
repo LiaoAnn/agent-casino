@@ -16,6 +16,7 @@ import {
 import { dealHand, mulberry32 } from '../holdem/shuffle';
 import { headsUpPots, placesOf } from '../room/heads-up';
 import { type HandNotes, watchView } from '../room/watch';
+import { fakeTable } from './fake-table';
 import type {
   Leaderboard,
   MatchDetail,
@@ -433,6 +434,7 @@ export function makeFakeData(
   }
 
   const watch = fakeWatch(seed);
+  const table = fakeTable(seed);
   const newestFirst: MatchSummary[] = details
     .map(
       ({
@@ -491,8 +493,12 @@ export function makeFakeData(
     },
     match: (matchId: string): MatchDetail | undefined =>
       details.find(d => d.match_id === matchId) ??
-      (matchId === watch.record.match_id ? watch.record : undefined),
+      (matchId === watch.record.match_id ? watch.record : undefined) ??
+      (matchId === table.record.match_id ? table.record : undefined),
     // The owner's watch link of a match in play and of one that is over.
     watch: { playing: watch.playing, finished: watch.finished },
+    // A six-seat public table: lobby, the host's and a knocked-out seat's
+    // answers, the host's watch link and the record (A25).
+    table,
   };
 }

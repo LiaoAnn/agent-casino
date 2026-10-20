@@ -562,7 +562,7 @@ describe('GET /v1/matches/{match_id}', () => {
       [2, 'fold', dealHand(match.seed, 2).holeCards],
       [3, 'showdown', hand(3).hole_cards],
     ]);
-    const { pots: _pots, ...foldedRecord } = hands[1]!;
+    const { pots: _pots, ...foldedRecord } = required(hands[1]);
     expect(foldedRecord).toStrictEqual({
       ...folded,
       hole_cards: dealHand(match.seed, 2).holeCards,
@@ -836,3 +836,11 @@ describe('T35 recorded display names', () => {
     );
   });
 });
+
+function required<T>(value: T | null | undefined): T {
+  expect(value).not.toBeNull();
+  expect(value).not.toBeUndefined();
+  if (value === null || value === undefined)
+    throw new Error('Missing test fixture value');
+  return value;
+}

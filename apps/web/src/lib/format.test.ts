@@ -93,3 +93,14 @@ describe('eventParts betting labels (T44)', () => {
     expect(labels[4]).toBe('加注到');
   });
 });
+
+describe('eventParts leave (A15)', () => {
+  it('labels leaving and preserves the chips taken off the table', () => {
+    expect(
+      eventParts({ seat: 1, street: 'turn', type: 'leave', amount: 17 }, [
+        'Alice',
+        'Bob',
+      ]),
+    ).toMatchObject({ action: '離開', amount: 17 });
+  });
+});

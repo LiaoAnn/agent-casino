@@ -215,6 +215,14 @@ const lobby = {
 };
 
 describe('T37 multiplayer room responses (A25)', () => {
+  it('decodes and preserves a leave event with chips taken (A15)', () => {
+    const event = { seat: 4, street: 'turn', type: 'leave', amount: 17 };
+    const room = { ...yourTurn, view: { ...view, history: [event] } };
+    expect(decode(RoomStatus, room)).toEqual(room);
+    const record = { ...detail, hands: [{ ...publicHand, events: [event] }] };
+    expect(decode(MatchDetail, record)).toEqual(record);
+  });
+
   it('exports the six-seat limit', () => expect(MAX_SEATS).toBe(6));
 
   it.each([

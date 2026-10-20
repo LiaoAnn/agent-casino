@@ -99,5 +99,8 @@ export function eventParts(
           : '下注',
         amount: event.amount,
       };
+    // Only at a multiplayer table (E6): the chips taken off the table.
+    case 'leave':
+      return { street, who, action: '離開', amount: event.amount };
   }
 }

@@ -136,7 +136,7 @@ const seatPairs = (
 ): [string, string][] => {
   const before = m.rating_changes?.[seat].before;
   return [
-    ['底牌', h.hole_cards[seat]!.map(card).join(' ')],
+    ['底牌', required(h.hole_cards[seat]).map(card).join(' ')],
     ['籌碼', String(h.stacks[seat])],
     ...(before === undefined
       ? []
@@ -155,6 +155,8 @@ const actionText = (e: Event, previousEvents: readonly Event[]) => {
   switch (e.type) {
     case 'post_blind':
       return `下盲注 ${e.amount}`;
+    case 'leave':
+      return `離開 ${e.amount}`;
     case 'fold':
       return '棄牌';
     case 'check':
@@ -301,7 +303,7 @@ test('shows a showdown hand step by step', async ({ page }) => {
   const section = handSection(page, h.hand_number);
   await expectHand(page, m, h);
   await expect(seatPanel(section, m.display_names[0])).toContainText(
-    h.hole_cards[0]!.map(card).join(' '),
+    required(h.hole_cards[0]).map(card).join(' '),
   );
   await expect(section.locator('dl[aria-label="牌桌"]')).toContainText(
     h.board.map(card).join(' '),
@@ -325,7 +327,7 @@ test('shows a fold hand step by step with both hole cards', async ({
   await expectHand(page, m, h);
   for (const seat of [0, 1] as const)
     await expect(seatPanel(section, m.display_names[seat])).toContainText(
-      h.hole_cards[seat]!.map(card).join(' '),
+      required(h.hole_cards[seat]).map(card).join(' '),
     );
   await expect(section).toContainText('（對手棄牌）');
   await expect(steps(section, h.hand_number).last()).toContainText('棄牌');
@@ -509,4 +511,13 @@ for (const width of [1280, 390]) {
       expect([...new Set(problems)]).toEqual([]);
     });
   });
+}
+
+// Fail explicitly if a fixture expected by this assertion is absent.
+function required<T>(value: T | null | undefined): T {
+  expect(value).not.toBeNull();
+  expect(value).not.toBeUndefined();
+  if (value === null || value === undefined)
+    throw new Error('Missing test fixture value');
+  return value;
 }
