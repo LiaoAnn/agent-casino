@@ -675,6 +675,129 @@ describe('casino.sh in fresh POSIX shells (A23)', () => {
     checkRequests(api);
   }, 180_000);
 
+  it('reports its own place when another seat has an earlier numeric place', async () => {
+    const api = await serve(false, {
+      answer: (path, answer) => {
+        if (!path.endsWith('/wait') || answer.status !== 'match_over') return;
+        // A25 permits seats[].place to precede the caller's top-level place.
+        const place = answer.place;
+        delete answer.place;
+        answer.place = place;
+      },
+    });
+    const host = player(api.url);
+    const runnerUp = player(api.url);
+    const third = player(api.url);
+    for (const [cwd, name] of [
+      [host, 'Champion'],
+      [runnerUp, 'Runner Up'],
+      [third, 'Third Place'],
+    ] as const) {
+      await run(cwd, 'profile', name);
+      expect(await run(cwd, 'play')).toMatchObject({ code: 0 });
+    }
+    expect(await run(host, 'start')).toMatchObject({ code: 0 });
+    expect(await run(third, 'leave')).toMatchObject({ code: 3 });
+    expect(await run(runnerUp, 'leave')).toMatchObject({ code: 3 });
+    const result = await run(runnerUp, 'wait');
+    expect(result.code, result.out).toBe(3);
+    const response = api.exchanges.at(-1)?.response;
+    expect(response).toMatchObject({
+      status: 'match_over',
+      room_status: 'finished',
+      place: 2,
+      seats: [{ place: 1 }, { place: 2 }, { place: 3 }],
+    });
+    expect(JSON.stringify(response)).toMatch(
+      /"seats":\[.*"place":1.*"place":2}$/,
+    );
+    const summary = result.out.split(END).at(-1) ?? '';
+    expect(summary, result.out).toMatch(/\bplace\s+2\s+of\s+3\b/i);
+    checkRequests(api);
+  });
+
+  it('prints main and side amounts from the current multiplayer view pots', async () => {
+    const api = await serve(false, {
+      answer: (path, answer) => {
+        if (!path.endsWith('/state') || answer.status !== 'your_turn') return;
+        Object.assign(answer.view as object, { pot: 14, pots: [9, 5] });
+      },
+    });
+    const host = player(api.url);
+    for (const [cwd, name] of [
+      [host, 'Pot Reader'],
+      [player(api.url), 'Short Stack'],
+      [player(api.url), 'Deep Stack'],
+    ] as const) {
+      await run(cwd, 'profile', name);
+      expect(await run(cwd, 'play')).toMatchObject({ code: 0 });
+    }
+    expect(await run(host, 'start')).toMatchObject({ code: 0 });
+    const result = await run(host, 'state');
+    expect(result.code, result.out).toBe(0);
+    expect(api.exchanges.at(-1)?.response.view).toMatchObject({
+      pot: 14,
+      pots: [9, 5],
+    });
+    expect(result.out).toMatch(/\bmain\b[^\n]*\b9\b/i);
+    expect(result.out).toMatch(/\bside\b[^\n]*\b5\b/i);
+    checkRequests(api);
+  });
+
+  it('prints each showdown pot winner and every revealed multiplayer hand', async () => {
+    const hand = {
+      hand_number: 6,
+      blinds: [1, 2],
+      winner_seat: null,
+      pot: 14,
+      pots: [
+        { amount: 9, winner_seats: [1] },
+        { amount: 5, winner_seats: [0] },
+      ],
+      ended_by: 'showdown',
+      board: ['Kc', '2d', '7s', '8h', 'Jc'],
+      hole_cards: [['Qh', 'Qs'], ['Kh', 'Ks'], null],
+      stacks: [43, 46, 31],
+      stack_changes: [3, 6, -9],
+    };
+    const api = await serve(false, {
+      answer: (path, answer) => {
+        if (!path.endsWith('/state') || answer.status !== 'your_turn') return;
+        Object.assign(answer, {
+          hand_number: 7,
+          last_hand: hand,
+          hands_since_your_turn: [hand],
+        });
+      },
+    });
+    const host = player(api.url);
+    for (const [cwd, name] of [
+      [host, 'Side Winner'],
+      [player(api.url), 'Main Winner'],
+      [player(api.url), 'Mucked Player'],
+    ] as const) {
+      await run(cwd, 'profile', name);
+      expect(await run(cwd, 'play')).toMatchObject({ code: 0 });
+    }
+    expect(await run(host, 'start')).toMatchObject({ code: 0 });
+    const result = await run(host, 'state');
+    expect(result.code, result.out).toBe(0);
+    expect(api.exchanges.at(-1)?.response.hands_since_your_turn).toEqual([
+      hand,
+    ]);
+    const section =
+      result.out
+        .slice(result.out.indexOf('Since your last move:'))
+        .split(/This hand so far:|\nHand\s+7\b/)[0] ?? '';
+    expect(section, result.out).toMatch(/\b6\b[^\n]*showdown/i);
+    expect(section).toMatch(/\b9\b[^\n]*Main Winner|Main Winner[^\n]*\b9\b/);
+    expect(section).toMatch(/\b5\b[^\n]*\byou\b|\byou\b[^\n]*\b5\b/);
+    for (const card of ['Qh', 'Qs', 'Kh', 'Ks', ...hand.board])
+      expect(section).toContain(card);
+    expect(section).not.toMatch(/Mucked Player[^\n]*\b[2-9TJQKA][cdhs]\b/);
+    checkRequests(api);
+  });
+
   it('asks only to start or leave when all six seats are occupied', async () => {
     const api = await serve();
     const host = player(api.url);

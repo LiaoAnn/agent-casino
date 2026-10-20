@@ -137,6 +137,10 @@ seats_of() {
       "$(printf '%s' "$s" | sed -n 's/.*"place":\([0-9a-z]*\).*/\1/p')"
   done
 }
+# The answer on stdin without its seats, so a top-level field such as your
+# own place is not read from a seat. A seat's last field is place, and no
+# string holds an unescaped quote, so this cuts exactly the seats.
+no_seats() { sed 's/"seats":\[{"seat":.*"place":[0-9a-z]*}\]//'; }
 seat_line() { printf '%s\n' "$SEATS" | sed -n "$(($1 + 1))p"; }
 # Seat $1's display name, or "you".
 name_of() {
@@ -397,7 +401,7 @@ show() {
       ;;
     match_over)
       rm -f "$(room_file turn_id)"
-      place=$(printf '%s' "$body" | jnum place)
+      place=$(printf '%s' "$body" | no_seats | jnum place)
       if [ "$(printf '%s' "$body" | jstr room_status)" = playing ]; then
         say "You are out of the match: place $place of $NSEATS. The table plays on without you; ratings are counted when it ends."
       else
