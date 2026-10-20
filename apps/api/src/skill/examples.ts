@@ -61,6 +61,7 @@ const OPPONENT = {
   settings: SETTINGS,
 };
 // The A25 fields of alice's answers: she opened the room, so she is host.
+// A private table has 6 seats; once it starts, none are open.
 type SeatStatus = (typeof SeatInfo.Type)['status'];
 const seat = (
   n: 0 | 1,
@@ -80,7 +81,7 @@ const seat = (
 const table = (seats: ReturnType<typeof seat>[]) => ({
   visibility: 'private' as const,
   is_host: true,
-  seats_open: seats.length === 1 ? 1 : 0,
+  seats_open: seats.every(s => s.status === 'waiting') ? 6 - seats.length : 0,
   seats,
 });
 const ACT = `POST /v1/rooms/${ROOM}/actions`;
@@ -122,14 +123,14 @@ const joined: typeof JoinResponse.Type = {
   opponent_name: 'alice',
   display_name: BOB,
   opponent_display_name: ALICE,
-  tell_owner: `Playing against ${ALICE}. Watch: ${watchUrl('eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe')}`,
+  tell_owner: `Joined the table of ${ALICE}; seated: ${ALICE}, ${BOB}. Watch: ${watchUrl('eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe')}`,
   settings: SETTINGS,
   watch_url: watchUrl(
     'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe',
   ),
-  hint: `Joined. ${SHARE_WATCH_URL}, then call ${WAIT} for your first turn`,
+  hint: `Joined. ${SHARE_WATCH_URL}. The host's owner decides when the table starts: call ${WAIT} until it does. Make a request at least every 2 minutes, or you lose your seat`,
   invite_code: null,
-  ...table([seat(0, 40, 0), seat(1, 40, 0)]),
+  ...table([seat(0, 40, 0, 'waiting'), seat(1, 40, 0, 'waiting')]),
   is_host: false,
 };
 

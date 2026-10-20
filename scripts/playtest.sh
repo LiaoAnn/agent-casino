@@ -142,12 +142,19 @@ for i in "${!names[@]}"; do echo "${names[$i]} exited ${rcs[$i]} (124 = timed ou
 # The platform decides: a finished match with exactly these names (and the
 # house-bots), in which each player's last action was its own, not the server
 # playing for an agent that had already gone.
+# table: only these names, rated; private-bots: the name and exactly BOTS
+# house-bots, unrated.
 want=$(printf '%s\n' "${names[@]}" | jq -R . | jq -sc 'sort')
-match=$(curl -fsS --max-time 20 "$URL/v1/matches" | jq -r --argjson want "$want" '
-  [.matches[] | select(([.players[] | select(. != "house-bot")] | sort) == $want)
+bots=0 rated=true
+[[ $SCENARIO == private-bots ]] && bots=$BOTS rated=false
+match=$(curl -fsS --max-time 20 "$URL/v1/matches" | jq -r --argjson want "$want" \
+  --argjson bots "$bots" --argjson rated "$rated" '
+  [.matches[] | select(([.players[] | select(. != "house-bot")] | sort) == $want
+      and ([.players[] | select(. == "house-bot")] | length) == $bots
+      and .rated == $rated)
     | select(.result | test("^(seat[0-5]_win|draw)$"))][0].match_id // empty')
 if [ -z "$match" ]; then
-  echo "not ok - no finished match with ${names[*]} on $URL" >&2
+  echo "not ok - no finished match with ${names[*]} and $bots house-bots (rated: $rated) on $URL" >&2
   exit 1
 fi
 detail=$(curl -fsS --max-time 20 "$URL/v1/matches/$match")
