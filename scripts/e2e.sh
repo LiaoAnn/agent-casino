@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # End to end with nothing but curl and jq, the way a participating agent
-# plays: skill.md, a match against house-bot, two players who queue and play
-# each other, then the records and the leaderboard.
+# plays: skill.md, a match against house-bot, two players who sit at one
+# public table with POST /v1/rooms/quick and play each other, then the
+# records and the leaderboard. The local or staging deployment should have no
+# open public table with the default settings: the first player opens one.
 #
 #   pnpm e2e --target=local     # CASINO_URL, else http://127.0.0.1:8787
 #   pnpm e2e --target=staging   # needs CASINO_URL
@@ -39,9 +41,6 @@ command -v jq >/dev/null || { echo "e2e needs jq" >&2; exit 2; }
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"; kill $(jobs -p) 2>/dev/null || true' EXIT
 RUN=$(LC_ALL=C tr -dc 'a-z0-9' </dev/urandom | head -c 8 || true)
-# Settings nobody else is likely to queue with, so the two players here meet
-# each other (A2).
-SETTINGS='{"starting_stack":40,"blind_every":3,"max_hands":40,"turn_seconds":30}'
 
 ok() { echo "ok - $*"; }
 fail() { echo "not ok - $*" >&2; exit 1; }
@@ -124,29 +123,11 @@ play() {
   return 1
 }
 
-# A fresh queue_key (A17): 32 hex characters, as skill.md makes it.
-queue_key() { od -An -N16 -tx1 /dev/urandom | tr -d ' \n'; }
-
-# queue_body <name> <queue_key> [display_name]
-queue_body() {
-  jq -nc --arg name "$1" --arg key "$2" --arg shown "${3-}" \
-    --argjson settings "$SETTINGS" \
-    '{game: "holdem", name: $name, queue_key: $key, settings: $settings}
-     + if $shown == "" then {} else {display_name: $shown} end'
-}
-
-# queue <name> <queue_key> <out file> [display_name]: queues until matched.
-queue() {
-  local r
-  for _ in $(seq 1 10); do
-    r=$(post /v1/queue "$(queue_body "$1" "$2" "${4-}")")
-    case $(jq -r .status <<<"$r") in
-      matched) echo "$r" >"$3"; return 0 ;;
-      waiting) ;;
-      *) echo "$r" >&2; return 1 ;;
-    esac
-  done
-  return 1
+# quick <name> [display_name]: POST /v1/rooms/quick (A2, A25).
+quick() {
+  post /v1/rooms/quick "$(jq -nc --arg name "$1" --arg shown "${2-}" \
+    '{game: "holdem", name: $name}
+     + if $shown == "" then {} else {display_name: $shown} end')"
 }
 
 echo "# e2e against $URL ($target)"
@@ -216,46 +197,49 @@ if [[ $target == prod ]]; then
     [[ $page == *"@$human"* && $page == *"House Bot"* ]] &&
       ok "the web shows the house-bot match" || fail "the web shows the house-bot match"
   fi
-  echo "# skipped rated queue matches on prod"
+  echo "# skipped the rated quick-seat match on prod"
   echo "# all checks passed"
   exit 0
 fi
 
-# --- two players queue and play each other --------------------------------
+# --- the queue is gone (T39) ----------------------------------------------
+for body in '{"game":"holdem","name":"e2e-q","queue_key":"0123456789abcdef0123456789abcdef"}' '{bad'; do
+  r=$(post /v1/queue "$body" -w '\n%{http_code}')
+  check "POST /v1/queue ($body): 410 gone pointing to POST /v1/rooms/quick" \
+    '.[0].code == "gone" and .[1] == 410 and .[0].retryable == false
+     and (.[0].hint | contains("POST /v1/rooms/quick") and contains("/skill.md"))' \
+    "$(jq -s . <<<"$r")"
+done
+
+# --- two players sit at one public table and play each other --------------
 a="e2e-a-$RUN"
 b="e2e-b-$RUN"
-key_a=$(queue_key)
-key_b=$(queue_key)
-r=$(post /v1/queue "$(queue_body "$a" short)" -w '\n%{http_code}')
-check "POST /v1/queue with a bad queue_key: 400 invalid_request" \
-  '.[0].code == "invalid_request" and .[1] == 400' \
-  "$(jq -s . <<<"$r")"
 # $a shows a display name; $b gives none, so theirs is the name (A20).
-queue "$a" "$key_a" "$TMP/qa" "  選手   A 🃏 " &
-qa=$!
-sleep 2
-queue "$b" "$key_b" "$TMP/qb" || fail "POST /v1/queue pairs $b"
-wait $qa || fail "POST /v1/queue pairs $a"
-check "both queued players got the same room" \
-  '.[0].room_id == .[1].room_id and .[0].seat == 0 and .[1].seat == 1' \
-  "$(jq -s . "$TMP/qa" "$TMP/qb")"
-check "matched tells each owner the opponent and their exact watch link" \
-  'all(.[]; . as $r | .tell_owner | contains($r.opponent_display_name) and contains($r.watch_url))' \
-  "$(jq -s . "$TMP/qa" "$TMP/qb")"
-check "matched shows both display names to both" \
-  ".[0].display_name == \"選手 A 🃏\" and .[0].opponent_display_name == \"$b\"
-   and .[1].display_name == \"$b\" and .[1].opponent_display_name == \"選手 A 🃏\"" \
-  "$(jq -s . "$TMP/qa" "$TMP/qb")"
-# Someone who knows $a's name, but not the queue_key, gets nothing (A17).
-r=$(post /v1/queue "$(queue_body "$a" "$(queue_key)")" -w '\n%{http_code}')
-check "POST /v1/queue with $a's name and another queue_key: 409 name_in_use" \
-  '.[0].code == "name_in_use" and .[1] == 409
-   and (.[0] | has("room_id") or has("token") or has("watch_url") | not)' \
-  "$(jq -s . <<<"$r")"
-check "POST /v1/queue again with $a's queue_key and another display name: the same matched" \
-  '.[0] == .[1]' \
-  "$(jq -s . "$TMP/qa" <(post /v1/queue "$(queue_body "$a" "$key_a" "改名")"))"
+quick "$a" "  選手   A 🃏 " >"$TMP/qa"
+check "POST /v1/rooms/quick opens a public table with $a as host" \
+  '.seat == 0 and .is_host == true and .visibility == "public"
+   and .invite_code == null and (has("tell_owner") | not)
+   and .settings.blind_every == null and .seats_open == 5
+   and .display_name == "選手 A 🃏"' "$(cat "$TMP/qa")"
 pair_room=$(jq -r .room_id "$TMP/qa")
+check "GET /v1/lobby lists the new table with $a" \
+  "any(.rooms[]; .room_id == \"$pair_room\" and .visibility == \"public\"
+     and .seats == [{seat: 0, name: \"$a\", display_name: \"選手 A 🃏\"}]
+     and .seats_open == 5)" "$(get /v1/lobby)"
+quick "$b" >"$TMP/qb"
+check "POST /v1/rooms/quick seats $b at the same table" \
+  ".room_id == \"$pair_room\" and .seat == 1 and .is_host == false
+   and .display_name == \"$b\" and .opponent_display_name == \"選手 A 🃏\"" \
+  "$(cat "$TMP/qb")"
+check "quick tells the joining owner the host and their exact watch link" \
+  '. as $r | .tell_owner | contains("Joined the table of 選手 A 🃏")
+   and contains($r.watch_url)' "$(cat "$TMP/qb")"
+r=$(post "/v1/rooms/$pair_room/start" '{}' \
+  -H "Authorization: Bearer $(jq -r .token "$TMP/qa")")
+check "the host starts the table: playing, blind_every set for 2 seats" \
+  '.room_status == "playing" and .settings.blind_every == 5 and .seats_open == 0' "$r"
+check "GET /v1/lobby no longer lists the started table" \
+  "all(.rooms[]; .room_id != \"$pair_room\")" "$(get /v1/lobby)"
 # T47: a refused action answers its error at once, without waiting.
 r=$(post "/v1/rooms/$pair_room/actions?wait=1" '{"turn_id":"t_999","type":"fold"}' \
   -H "Authorization: Bearer $(jq -r .token "$TMP/qb")" -w '\n%{http_code} %{time_total}')
@@ -270,7 +254,7 @@ play "$pair_room" "$(jq -r .token "$TMP/qa")" "$TMP/a" &
 pa=$!
 play "$pair_room" "$(jq -r .token "$TMP/qb")" "$TMP/b" || fail "play $b to match_over"
 wait $pa || fail "play $a to match_over"
-check "queued match: over and rated for both" \
+check "quick-seat match: over and rated for both" \
   "(.[0].result + \"/\" + .[1].result | IN(\"win/loss\", \"loss/win\", \"draw/draw\"))
    and .[0].ratings == .[1].ratings
    and (.[0].ratings | map(.name)) == [\"$a\", \"$b\"]
@@ -323,11 +307,11 @@ out=$(casino report) || { echo "$out" >&2; fail "casino.sh report"; }
 check "GET /v1/matches lists both matches" \
   "[.matches[].match_id] | index(\"$bot_room\") != null and index(\"$pair_room\") != null" \
   "$(get /v1/matches)"
-check "GET /v1/matches/{id} of the queued match is rated" \
+check "GET /v1/matches/{id} of the quick-seat match is rated" \
   ".players == [\"$a\", \"$b\"] and .rated == true
    and .display_names == [\"選手 A 🃏\", \"$b\"]
    and (.rating_changes | length) == 2" "$(get "/v1/matches/$pair_room")"
-check "GET /v1/leaderboard counts the queued match, not house-bot" \
+check "GET /v1/leaderboard counts the quick-seat match, not house-bot" \
   "([.entries[] | select(.name == \"$a\" or .name == \"$b\") | .games] == [1, 1]
     or (.entries | length) == 100)
    and all(.entries[]; .name != \"house-bot\" and .name != \"$human\")
@@ -342,7 +326,7 @@ if [[ -n ${WEB_URL:-} ]]; then
     ok "the web lists both matches" || fail "the web lists both matches"
   page=$(curl -sS --max-time 40 "$WEB_URL/matches/$pair_room")
   [[ $page == *"選手 A 🃏"* && $page == *"@$a"* && $page == *"$b"* ]] &&
-    ok "the web shows the queued match" || fail "the web shows the queued match"
+    ok "the web shows the quick-seat match" || fail "the web shows the quick-seat match"
 else
   echo "# skipped the web checks: no WEB_URL"
 fi
