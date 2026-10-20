@@ -344,6 +344,8 @@ export class RoomReferee {
   readonly #listRoom: RefereeOptions['listRoom'];
   // RoomData.listed as last saved.
   #listed: RoomData['listed'];
+  // The lobby updates sent and not yet answered.
+  #telling: Promise<unknown> = Promise.resolve();
   #data: Promise<RoomData | undefined> | undefined;
   // The write of the finished match in flight, so it runs once at a time.
   #recording: Promise<boolean> | undefined;
@@ -402,6 +404,7 @@ export class RoomReferee {
           )
         : data;
     await this.#save(opened);
+    await this.#told();
     return ok(seatAnswer(opened, 0));
   }
 
@@ -468,6 +471,7 @@ export class RoomReferee {
         ? this.#begin(seated, at)
         : seated;
     await this.#save(next);
+    await this.#told();
     return ok(seatAnswer(next, next.seats.length - 1));
   }
 
@@ -1351,17 +1355,34 @@ export class RoomReferee {
       throw error;
     }
     this.#listed = data.listed;
-    if (listing && this.#listRoom) {
+    // Not awaited: callers go on from the data they saved, which another
+    // request could change while this call is out. Updates arriving out of
+    // order are fine, the lobby goes by rev.
+    if (listing) this.#tell(listing);
+    // A failure is retried by the next request or the alarm.
+    if (unrecorded(data)) await this.#record();
+  }
+
+  #tell(listing: LobbyUpdate) {
+    const listRoom = this.#listRoom;
+    if (!listRoom) return;
+    const told = (async () => {
       try {
-        await this.#listRoom(listing);
+        await listRoom(listing);
       } catch (error) {
         // The lobby catches up with the next change; quick seats go by
         // what join answers anyway.
-        console.error(`Room ${data.room_id}: lobby not told`, error);
+        console.error(`Room ${listing.room_id}: lobby not told`, error);
       }
-    }
-    // A failure is retried by the next request or the alarm.
-    if (unrecorded(data)) await this.#record();
+    })();
+    this.#telling = Promise.all([this.#telling, told]);
+  }
+
+  // Waits until the lobby has heard of every change so far. create and join
+  // answer only after it, so the lobby's next quick seat sees the seat just
+  // taken (A2: people arriving together fill one room).
+  async #told(): Promise<void> {
+    await this.#telling;
   }
 
   #nextChange() {

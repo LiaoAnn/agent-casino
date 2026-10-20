@@ -320,3 +320,73 @@ describe('T39 RoomReferee lobby listing', () => {
     );
   });
 });
+
+describe('T39 RoomReferee pending lobby notification regression', () => {
+  it('preserves a concurrent join while notifying the lobby of an expired guest', async () => {
+    const f = fixture();
+    value(await f.room.create(f.input));
+    value(await f.join('bob'));
+    f.clock.ms += 119_999;
+    value(await f.state('alice'));
+    f.clock.ms += 1;
+
+    const pending: Array<() => void> = [];
+    let holdNotifications = true;
+    let expiredListed = () => {};
+    let joinedListed = () => {};
+    const expiryNotification = new Promise<void>(resolve => {
+      expiredListed = resolve;
+    });
+    const joinNotification = new Promise<void>(resolve => {
+      joinedListed = resolve;
+    });
+    f.listRoom.mockImplementation(update => {
+      f.updates.push(structuredClone(update));
+      const promise = holdNotifications
+        ? new Promise<void>(resolve => pending.push(resolve))
+        : Promise.resolve();
+      if (f.updates.length === 3) expiredListed();
+      if (f.updates.length === 4) joinedListed();
+      return promise;
+    });
+
+    const aliceRequest = f.state('alice');
+    let erinRequest: ReturnType<typeof f.join> | undefined;
+    try {
+      await expiryNotification;
+      erinRequest = f.join('erin');
+      await joinNotification;
+      holdNotifications = false;
+      for (const resolve of pending) resolve();
+      value(await erinRequest);
+      value(await aliceRequest);
+
+      const erinState = await f.state('erin');
+      expect.soft(erinState).toMatchObject({ ok: true });
+      if (erinState.ok) {
+        expect
+          .soft(erinState.value.seats.map(seat => seat.name))
+          .toEqual(['alice', 'erin']);
+      }
+      expect
+        .soft(value(await f.state('alice')).seats.map(seat => seat.name))
+        .toEqual(['alice', 'erin']);
+      expect(f.updates).toEqual([
+        f.update(1, f.row()),
+        f.update(2, f.row({ seats: [HOST, BOB], seats_open: 4 })),
+        f.update(3, f.row()),
+        f.update(
+          4,
+          f.row({
+            seats: [HOST, { seat: 1, name: 'erin', display_name: 'ERIN' }],
+            seats_open: 4,
+          }),
+        ),
+      ]);
+    } finally {
+      holdNotifications = false;
+      for (const resolve of pending) resolve();
+      await Promise.allSettled([aliceRequest, erinRequest]);
+    }
+  });
+});

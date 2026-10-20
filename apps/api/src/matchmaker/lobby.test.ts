@@ -453,3 +453,24 @@ describe('RoomLobby quick serialization', () => {
     }
   });
 });
+
+describe('RoomLobby quick concurrent listing regression', () => {
+  it('retains a newer available listing when an earlier join returns room_full', async () => {
+    const lobby = new RoomLobby(new MemoryStorage());
+    const original = entry('r_reopened', { seats_open: 1 });
+    const newer = entry('r_reopened', { seats_open: 2 });
+    await add(lobby, original, 2);
+    const seating = {
+      join: vi.fn(async (_room_id: string) => {
+        await add(lobby, newer, 3);
+        return failure('room_full');
+      }),
+      open: vi.fn(async () => success('opened')),
+    } satisfies Seating<string>;
+
+    expect(await lobby.quick(input, seating)).toEqual(success('opened'));
+    expect(seating.join.mock.calls).toEqual([['r_reopened']]);
+    expect(seating.open).toHaveBeenCalledTimes(1);
+    expect(await lobby.list()).toEqual({ rooms: [listed(newer)] });
+  });
+});

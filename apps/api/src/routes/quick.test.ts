@@ -383,3 +383,61 @@ describe('T39 S3 retired POST /v1/queue', () => {
     expect(error.hint).toContain('/skill.md');
   });
 });
+
+describe('T39 quick deployment defaults regression', () => {
+  it.each(['quick', 'public create'] as const)(
+    'joins a %s room using deployment stack and test defaults',
+    async source => {
+      const f = fixture();
+      Object.assign(f.env, {
+        DEFAULT_SETTINGS_JSON: JSON.stringify({ starting_stack: 80 }),
+        ALLOW_TEST_ROOMS: 'true',
+        DEFAULT_TEST_JSON: JSON.stringify({ seed: '0'.repeat(64) }),
+      });
+
+      const host = source === 'quick' ? await f.quick('host') : await f.open();
+      expect(host.settings.starting_stack).toBe(80);
+      const guest = await f.quick('guest');
+      expect(guest).toMatchObject({
+        room_id: host.room_id,
+        seat: 1,
+        is_host: false,
+        settings: { starting_stack: 80 },
+      });
+    },
+  );
+
+  it('preserves an explicit deployment blind_every and seats the next quick caller there', async () => {
+    const f = fixture();
+    Object.assign(f.env, {
+      DEFAULT_SETTINGS_JSON: JSON.stringify({ blind_every: 4 }),
+    });
+
+    const host = await f.quick('host');
+    expect(host.settings.blind_every).toBe(4);
+    expect(await f.quick('guest')).toMatchObject({
+      room_id: host.room_id,
+      seat: 1,
+      is_host: false,
+      settings: { blind_every: 4 },
+    });
+  });
+
+  it.each(['false', undefined])(
+    'ignores deployment test defaults when ALLOW_TEST_ROOMS is %j',
+    async allowTestRooms => {
+      const f = fixture();
+      Object.assign(f.env, {
+        ALLOW_TEST_ROOMS: allowTestRooms,
+        DEFAULT_TEST_JSON: JSON.stringify({ seed: '0'.repeat(64) }),
+      });
+
+      const host = await f.quick('host');
+      expect(await f.quick('guest')).toMatchObject({
+        room_id: host.room_id,
+        seat: 1,
+        is_host: false,
+      });
+    },
+  );
+});

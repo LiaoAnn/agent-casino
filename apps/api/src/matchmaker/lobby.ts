@@ -119,12 +119,12 @@ export class RoomLobby {
     await this.#storage.put(KEY, rooms);
   }
 
-  // The listed rooms, oldest first.
-  async #listed(): Promise<LobbyEntry[]> {
+  // The listed rooms with their revs, oldest first.
+  async #listed(): Promise<{ rev: number; entry: LobbyEntry }[]> {
     return Object.values(await this.#rooms())
-      .flatMap(room => ('entry' in room ? [room.entry] : []))
+      .flatMap(room => ('entry' in room ? [room] : []))
       .sort(
-        (a, b) =>
+        ({ entry: a }, { entry: b }) =>
           a.created_at.localeCompare(b.created_at) ||
           a.room_id.localeCompare(b.room_id),
       );
@@ -133,15 +133,18 @@ export class RoomLobby {
   // GET /v1/lobby: the listed rooms, oldest first, without `test`.
   async list(): Promise<Lobby> {
     const listed = await this.#listed();
-    return { rooms: listed.map(({ test: _test, ...room }) => room) };
+    return {
+      rooms: listed.map(({ entry: { test: _test, ...room } }) => room),
+    };
   }
 
   // A join found the room closed: it leaves the lobby until it tells
-  // otherwise with a later rev.
-  async #drop(room_id: string): Promise<void> {
+  // otherwise with a later rev. A row the room sent meanwhile (`rev` is the
+  // one the join went by) stays.
+  async #drop(room_id: string, rev: number): Promise<void> {
     const rooms = await this.#rooms();
     const room = rooms[room_id];
-    if (!room || !('entry' in room)) return;
+    if (!room || !('entry' in room) || room.rev !== rev) return;
     rooms[room_id] = { rev: room.rev, removed_at: this.#now() };
     await this.#storage.put(KEY, rooms);
   }
@@ -163,19 +166,19 @@ export class RoomLobby {
   ): Promise<Result<T, 'unavailable'>> {
     const wanted = canonical({ settings: input.settings, test: input.test });
     const candidates = (await this.#listed()).filter(
-      room =>
+      ({ entry: room }) =>
         room.visibility === 'public' &&
         room.seats_open > 0 &&
         canonical({ settings: room.settings, test: room.test }) === wanted,
     );
-    for (const room of candidates) {
+    for (const { rev, entry: room } of candidates) {
       const joined = await seating.join(room.room_id);
       if (joined.ok) return joined;
       const { code } = joined.error;
       // Already seated there under this name: another room (A2).
       if (code === 'name_invalid') continue;
       if (CLOSED.includes(code)) {
-        await this.#drop(room.room_id);
+        await this.#drop(room.room_id, rev);
         continue;
       }
       // The room couldn't be reached: retry later rather than open another.
