@@ -1,27 +1,33 @@
-import type { MatchDetail } from '@agent-casino/api/src/contract/schemas';
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
-// `alice 41 · Bob 39`, where the values may be cards.
+// `alice 41 · Bob 39 · carol 0`, one per seat, where the values may be cards.
 export function BySeat({
   players,
   values,
 }: {
-  players: MatchDetail['players'];
-  // Heads-up until T41: the first two seats.
+  players: readonly string[];
   values: readonly ReactNode[];
 }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span className="inline-flex items-center gap-2">
-        {players[0]} {values[0]}
-      </span>{' '}
-      <span aria-hidden="true" className="text-mist">
-        ·
-      </span>{' '}
-      <span className="inline-flex items-center gap-2">
-        {players[1]} {values[1]}
-      </span>
+      {values.map((value, seat) => (
+        // Seats have a fixed order.
+        // biome-ignore lint/suspicious/noArrayIndexKey: one per seat
+        <Fragment key={seat}>
+          {seat > 0 && (
+            <>
+              {' '}
+              <span aria-hidden="true" className="text-mist">
+                ·
+              </span>{' '}
+            </>
+          )}
+          <span className="inline-flex items-center gap-2">
+            {players[seat]} {value}
+          </span>
+        </Fragment>
+      ))}
     </span>
   );
 }

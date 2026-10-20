@@ -1,11 +1,8 @@
-import type {
-  MatchDetail,
-  WatchResponse,
-} from '@agent-casino/api/src/contract/schemas';
+import type { WatchResponse } from '@agent-casino/api/src/contract/schemas';
 import { Link } from '@tanstack/react-router';
 import { BySeat, type Pair, Pairs } from '@/components/pairs';
 import { Panel } from '@/components/panel';
-import { PlayerName } from '@/components/player-name';
+import { Players } from '@/components/player-name';
 import { Badge } from '@/components/ui/badge';
 import { formatSigned, resultLabel } from '@/lib/format';
 
@@ -18,20 +15,20 @@ export function WatchResult({
   shown,
 }: {
   watch: Extract<WatchResponse, { result: unknown }>;
-  players: MatchDetail['players'];
-  shown: MatchDetail['display_names'];
+  players: readonly string[];
+  shown: readonly string[];
 }) {
   const label = resultLabel({ players: shown, result: watch.result });
-  const winner =
-    watch.result === 'seat0_win' ? 0 : watch.result === 'seat1_win' ? 1 : null;
+  const winner = watch.result.endsWith('_win') ? Number(watch.result[4]) : null;
   const items: Pair[] = [
     [
       '玩家',
-      <span key="p" className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <PlayerName name={players[0]} displayName={shown[0]} />
-        <span className="text-mist">vs</span>
-        <PlayerName name={players[1]} displayName={shown[1]} />
-      </span>,
+      <Players
+        key="p"
+        players={players}
+        displayNames={shown}
+        places={watch.places}
+      />,
     ],
     [
       '結果',
@@ -51,12 +48,22 @@ export function WatchResult({
       <BySeat key="f" players={shown} values={watch.final_stacks} />,
     ],
   ];
+  // At a bigger table, where the watched seat came.
+  const place = watch.places?.[watch.seat];
+  if (players.length > 2 && place != null) {
+    items.splice(2, 0, [
+      '名次',
+      `${shown[watch.seat] ?? ''} 第 ${place} 名`,
+      'font-semibold text-gold-200',
+    ]);
+  }
   if (watch.ratings !== null) {
     items.push([
       'Elo',
       watch.ratings
         .map(
-          (r, seat) => `${shown[seat]} ${r.rating} (${formatSigned(r.change)})`,
+          (r, seat) =>
+            `${shown[seat] ?? ''} ${r.rating} (${formatSigned(r.change)})`,
         )
         .join(' · '),
     ]);

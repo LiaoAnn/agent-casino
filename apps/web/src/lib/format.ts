@@ -4,32 +4,91 @@ import type {
   MatchSummary,
 } from '@agent-casino/api/src/contract/schemas';
 
-// A match result in words, from the seats' point of view.
+// A match result in words, from the seats' point of view: heads-up `alice
+// 勝`, at a bigger table who came first.
 export function resultLabel(match: Pick<MatchSummary, 'players' | 'result'>) {
+  const headsUp = match.players.length <= 2;
   switch (match.result) {
-    case 'seat0_win':
-      return `${match.players[0]} 勝`;
-    case 'seat1_win':
-      return `${match.players[1]} 勝`;
     case 'draw':
-      return '平手';
+      return headsUp ? '平手' : '並列第 1';
     case 'void':
       return '作廢';
     case 'cancelled':
       return '取消';
+    default: {
+      const winner = match.players[Number(match.result[4])];
+      return headsUp ? `${winner} 勝` : `冠軍：${winner}`;
+    }
   }
 }
 
 // A match's settings in one line. `blind_every: null` is a match from
-// before T34: a fixed number of hands at blinds 1/2 (A19).
-export function settingsLabel(settings: MatchDetail['settings']) {
+// before T34: a fixed number of hands at blinds 1/2 (A19); for a table not
+// `started` yet, a pace set by the player count when it starts (A25).
+export function settingsLabel(
+  settings: MatchDetail['settings'],
+  { started = true }: { started?: boolean } = {},
+) {
   const { starting_stack, blind_every, max_hands, turn_seconds } = settings;
   const format =
-    blind_every === null
-      ? `固定盲注 1/2 · ${max_hands} 手`
-      : `盲注每 ${blind_every} 手翻倍 · 最多 ${max_hands} 手`;
+    blind_every !== null
+      ? `盲注每 ${blind_every} 手翻倍 · 最多 ${max_hands} 手`
+      : started
+        ? `固定盲注 1/2 · ${max_hands} 手`
+        : `盲注依人數翻倍 · 最多 ${max_hands} 手`;
   return `起始籌碼 ${starting_stack} · ${format} · 每步 ${turn_seconds} 秒`;
 }
+
+// What each pot of a hand is called, main pot first: one pot is just the
+// pot; side pots are numbered when there is more than one.
+export const potNames = (count: number): string[] =>
+  count <= 1
+    ? ['底池']
+    : [
+        '主池',
+        ...Array.from({ length: count - 1 }, (_, i) =>
+          count === 2 ? '邊池' : `邊池 ${i + 1}`,
+        ),
+      ];
+
+// How a finished hand ended, in words. Heads-up reads as it always has;
+// at a bigger table, who won each pot.
+export function handResult(
+  hand: Pick<MatchHand, 'winner_seat' | 'pot' | 'pots' | 'ended_by'>,
+  players: readonly string[],
+) {
+  const names = (seats: readonly number[]) =>
+    seats.map(seat => players[seat]).join('、');
+  const how = hand.ended_by === 'showdown' ? '攤牌' : null;
+  if (players.length <= 2 || hand.pots.length <= 1) {
+    if (hand.winner_seat !== null) {
+      const fold = players.length <= 2 ? '對手棄牌' : '其他人棄牌';
+      return `${players[hand.winner_seat]} 贏得 ${hand.pot}（${how ?? fold}）`;
+    }
+    const winners = hand.pots[0]?.winner_seats ?? [];
+    return players.length <= 2 || winners.length === 0
+      ? `平分底池 ${hand.pot}`
+      : `${names(winners)} 平分底池 ${hand.pot}（${how ?? '其他人棄牌'}）`;
+  }
+  const label = potNames(hand.pots.length);
+  const each = hand.pots.map(
+    (pot, i) =>
+      `${label[i]} ${pot.amount}：${names(pot.winner_seats)} ${pot.winner_seats.length > 1 ? '平分' : '贏'}`,
+  );
+  return `${each.join('；')}${how === null ? '' : `（${how}）`}`;
+}
+
+// A seat whose match is over before the table's: `第 4 名・出局`.
+export const outLabel = ({
+  place,
+  left,
+}: {
+  place: number | null;
+  left: boolean;
+}) => {
+  const what = left ? '離開' : '出局';
+  return place === null ? what : `第 ${place} 名・${what}`;
+};
 
 // `[small, big]` → `1/2`.
 export const blindsLabel = ([small, big]: MatchHand['blinds']) =>
@@ -72,7 +131,7 @@ export const STREETS = {
 // call's amount is the chips added, a raise's the total raised to.
 export function eventParts(
   event: MatchHand['events'][number],
-  players: MatchDetail['players'],
+  players: readonly string[],
   previousEvents: readonly MatchHand['events'][number][] = [],
 ) {
   const street = STREETS[event.street];

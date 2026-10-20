@@ -1,7 +1,7 @@
 import type { MatchSummary } from '@agent-casino/api/src/contract/schemas';
 import { Link } from '@tanstack/react-router';
 import { EmptyState } from '@/components/empty-state';
-import { PlayerName } from '@/components/player-name';
+import { byPlace, Players } from '@/components/player-name';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -16,6 +16,20 @@ import { formatTime, resultLabel } from '@/lib/format';
 // Two names side by side: a table cell grows to its content, so the cut
 // needs a width.
 const NAME_WIDTH = 'max-w-28 sm:max-w-64';
+
+// A match's link in words: `A @a vs B @b`, or everyone by place.
+function listLabel(match: MatchSummary) {
+  const who = (seat: number) =>
+    `${match.display_names[seat]} @${match.players[seat]}`;
+  if (match.players.length <= 2) return `${who(0)} vs ${who(1)}`;
+  return byPlace(match.players.length, match.places)
+    .map(seat =>
+      match.places?.[seat] == null
+        ? who(seat)
+        : `第 ${match.places[seat]} 名 ${who(seat)}`,
+    )
+    .join('、');
+}
 
 // Recent matches, each linking to its record.
 export function MatchList({ matches }: { matches: readonly MatchSummary[] }) {
@@ -42,18 +56,13 @@ export function MatchList({ matches }: { matches: readonly MatchSummary[] }) {
               <Link
                 to="/matches/$matchId"
                 params={{ matchId: match.match_id }}
-                aria-label={`${match.display_names[0]} @${match.players[0]} vs ${match.display_names[1]} @${match.players[1]}`}
+                aria-label={listLabel(match)}
                 className="inline-flex flex-wrap items-center gap-x-2 text-ivory underline-offset-4 hover:text-gold-200 hover:underline">
-                <PlayerName
-                  className={NAME_WIDTH}
-                  name={match.players[0]}
-                  displayName={match.display_names[0]}
-                />
-                <span className="text-mist text-sm">vs</span>
-                <PlayerName
-                  className={NAME_WIDTH}
-                  name={match.players[1]}
-                  displayName={match.display_names[1]}
+                <Players
+                  players={match.players}
+                  displayNames={match.display_names}
+                  places={match.places}
+                  nameClassName={NAME_WIDTH}
                 />
               </Link>
               {!match.rated && <Badge className="ml-2">不計分</Badge>}

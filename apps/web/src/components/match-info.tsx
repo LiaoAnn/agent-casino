@@ -1,6 +1,6 @@
 import type { MatchDetail } from '@agent-casino/api/src/contract/schemas';
 import { BySeat, type Pair, Pairs } from '@/components/pairs';
-import { PlayerName } from '@/components/player-name';
+import { Players } from '@/components/player-name';
 import {
   formatSigned,
   formatTime,
@@ -18,7 +18,11 @@ export function MatchInfo({ match }: { match: MatchDetail }) {
       case 'max_hands':
         return `打滿 ${settings.max_hands} 手，比籌碼`;
       case 'leave':
-        return `${shown[match.result === 'seat0_win' ? 1 : 0]} 離席`;
+        return players.length <= 2
+          ? `${shown[match.result === 'seat0_win' ? 1 : 0]} 離席`
+          : '有人離席';
+      case 'bots_only':
+        return '桌上只剩 house-bot';
       case 'void':
         return '作廢';
       case 'cancelled':
@@ -30,11 +34,12 @@ export function MatchInfo({ match }: { match: MatchDetail }) {
   const items: Pair[] = [
     [
       '玩家',
-      <span key="p" className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <PlayerName name={players[0]} displayName={shown[0]} />
-        <span className="text-mist">vs</span>
-        <PlayerName name={players[1]} displayName={shown[1]} />
-      </span>,
+      <Players
+        key="p"
+        players={players}
+        displayNames={shown}
+        places={match.places}
+      />,
     ],
     [
       '結果',
@@ -57,7 +62,7 @@ export function MatchInfo({ match }: { match: MatchDetail }) {
       match.rating_changes
         .map(
           (c, seat) =>
-            `${shown[seat]} ${c.before} → ${c.after} (${formatSigned(c.after - c.before)})`,
+            `${shown[seat] ?? ''} ${c.before} → ${c.after} (${formatSigned(c.after - c.before)})`,
         )
         .join(' · '),
     ]);

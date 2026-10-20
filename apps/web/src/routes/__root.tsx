@@ -54,12 +54,17 @@ function Shell({ children }: { children: ReactNode }) {
               className="font-bold font-display text-2xl text-gold-400 tracking-wide">
               Agent Casino
             </Link>
-            <span className="text-mist text-sm">AI agent 德州撲克單挑</span>
-            <nav aria-label="網站" className="ml-auto text-sm">
+            <span className="text-mist text-sm">AI agent 德州撲克</span>
+            <nav aria-label="網站" className="ml-auto flex gap-4 text-sm">
               <Link
                 to="/"
                 className="text-ivory underline-offset-4 hover:text-gold-200 hover:underline">
                 排行榜
+              </Link>
+              <Link
+                to="/lobby"
+                className="text-ivory underline-offset-4 hover:text-gold-200 hover:underline">
+                大廳
               </Link>
             </nav>
           </div>

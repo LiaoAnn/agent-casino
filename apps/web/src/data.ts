@@ -1,6 +1,6 @@
-// The one place the web gets its data from: GET /v1/leaderboard,
-// GET /v1/matches, GET /v1/matches/{match_id} and GET /v1/rooms/{room_id}/watch
-// of the api Worker, through
+// The one place the web gets its data from: GET /v1/lobby,
+// GET /v1/leaderboard, GET /v1/matches, GET /v1/matches/{match_id} and
+// GET /v1/rooms/{room_id}/watch of the api Worker, through
 // the contract's typed client. The functions run on the server. Deployed, the
 // api is the service binding API (casino-api A13); under `vite dev` it is
 // VITE_API_URL, by default the local `wrangler dev` of apps/api. With
@@ -9,6 +9,7 @@
 import { CasinoApi } from '@agent-casino/api/src/contract/api';
 import type {
   Leaderboard,
+  Lobby,
   MatchDetail,
   MatchList,
   WatchResponse,
@@ -90,12 +91,34 @@ export const getLeaderboard = createServerFn({ method: 'GET' }).handler(
       : read(client => client.leaderboard()),
 );
 
-// The newest page of finished matches (20).
-export const getMatches = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<MatchList> =>
+// The rooms waiting to start, or null while the api has no lobby open
+// (its `unavailable`, before T39).
+export const getLobby = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<Lobby | null> =>
     useFake
-      ? (await fake()).matches()
-      : read(client => client.matches({ query: {} })),
+      ? (await fake()).table.lobby
+      : read(client =>
+          client.lobby().pipe(
+            Effect.catchIf(
+              error => (error as { code?: unknown }).code === 'unavailable',
+              () => Effect.succeed(null),
+            ),
+          ),
+        ),
+);
+
+// The newest page of finished matches (20). The fake page starts with the
+// six-seat table's match.
+export const getMatches = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<MatchList> => {
+    if (!useFake) return read(client => client.matches({ query: {} }));
+    const data = await fake();
+    const page = data.matches();
+    return {
+      ...page,
+      matches: [data.table.summary, ...page.matches].slice(0, 20),
+    };
+  },
 );
 
 // One match with every hand, or null when there is no such match (the API's
@@ -117,8 +140,11 @@ export const getMatch = createServerFn({ method: 'GET' })
           ),
   );
 
-// The test token of the fake watch links (VITE_FAKE_DATA=1).
+// The test token of the fake heads-up watch links (VITE_FAKE_DATA=1).
 const FAKE_WATCH_TOKEN = 'fake-watch-token';
+// The six-seat table's room is one room in three states: its token picks
+// which, `fake-table-waiting`, `fake-table-playing` or `fake-table-finished`.
+const FAKE_TABLE_TOKEN = 'fake-table-';
 
 export type WatchData =
   | WatchResponse
@@ -132,7 +158,16 @@ export const getWatch = createServerFn({ method: 'POST' })
     // No token, no request: it could only be refused.
     if (token === '') return { error: 'invalid_token' };
     if (useFake) {
-      const { playing, finished } = (await fake()).watch;
+      const data = await fake();
+      const { playing, finished } = data.watch;
+      if (token.startsWith(FAKE_TABLE_TOKEN)) {
+        const state = token.slice(FAKE_TABLE_TOKEN.length);
+        const table = Object.entries(data.table.watch).find(
+          ([key]) => key === state,
+        )?.[1];
+        if (table === undefined) return { error: 'invalid_token' };
+        return table.room_id === roomId ? table : { error: 'room_not_found' };
+      }
       if (token !== FAKE_WATCH_TOKEN) return { error: 'invalid_token' };
       return (
         [playing, finished].find(w => w.room_id === roomId) ?? {

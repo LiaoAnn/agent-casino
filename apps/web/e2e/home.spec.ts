@@ -5,22 +5,24 @@ import { makeFakeData } from '../../api/src/contract/fake';
 
 const data = makeFakeData();
 const entries = data.leaderboard().entries;
-const matches = data.matches().matches;
+// The page as src/data.ts serves it: the six-seat table's match first.
+const matches = [data.table.summary, ...data.matches().matches].slice(0, 20);
 type Match = (typeof matches)[number];
 
 const resultText = (m: Match): string => {
+  const headsUp = m.players.length === 2;
   switch (m.result) {
     case 'seat0_win':
-      return `${m.display_names[0]} 勝`;
+    case 'seat1_win':
     case 'seat2_win':
     case 'seat3_win':
     case 'seat4_win':
-    case 'seat5_win':
-      throw new Error('Expected a heads-up fixture');
-    case 'seat1_win':
-      return `${m.display_names[1]} 勝`;
+    case 'seat5_win': {
+      const winner = m.display_names[Number(m.result[4])];
+      return headsUp ? `${winner} 勝` : `冠軍：${winner}`;
+    }
     case 'draw':
-      return '平手';
+      return headsUp ? '平手' : '並列第 1';
     case 'void':
       return '作廢';
     case 'cancelled':
@@ -48,8 +50,16 @@ test('keeps the page title', async ({ page }) => {
 test('the fake data covers the cases this page must show', () => {
   expect(entries.map(e => e.name)).toContain('alice');
   expect(matches).toHaveLength(20);
+  expect(new Set(matches.map(m => m.players.length))).toEqual(new Set([2, 6]));
   expect(new Set(matches.map(m => m.result))).toEqual(
-    new Set(['seat0_win', 'seat1_win', 'draw', 'void', 'cancelled']),
+    new Set([
+      data.table.summary.result,
+      'seat0_win',
+      'seat1_win',
+      'draw',
+      'void',
+      'cancelled',
+    ]),
   );
   expect(matches.some(m => m.rated)).toBe(true);
   expect(matches.some(m => !m.rated)).toBe(true);
@@ -65,9 +75,7 @@ test('shows every leaderboard entry in rank order', async ({ page }) => {
     '名字',
     'Elo',
     '場數',
-    '勝',
-    '敗',
-    '平',
+    '冠軍',
   ]);
   const rows = bodyRows(board);
   await expect(rows).toHaveCount(entries.length);
@@ -76,12 +84,10 @@ test('shows every leaderboard entry in rank order', async ({ page }) => {
     await expect(cells(rows.nth(i))).toHaveText(
       [
         e.rank,
-        `${e.display_name}@${e.name}${e.games} 場 · ${e.wins} 勝 ${e.losses} 敗 ${e.draws} 平`,
+        `${e.display_name}@${e.name}${e.games} 場 · ${e.championships} 冠軍`,
         e.rating,
         e.games,
-        e.wins,
-        e.losses,
-        e.draws,
+        e.championships,
       ].map(String),
     );
   }
@@ -102,12 +108,22 @@ test('shows the 20 newest matches, newest first', async ({ page }) => {
   for (const [i, m] of matches.entries()) {
     const [game, result, ended] = [0, 1, 2].map(n => cells(rows.nth(i)).nth(n));
     const link = game.getByRole('link');
+    const who = (seat: number) =>
+      `${m.display_names[seat]} @${m.players[seat]}`;
+    // A bigger table lists everyone by place, each with it.
+    const order = m.players
+      .map((_, seat) => seat)
+      .sort((x, y) => (m.places?.[x] ?? 9) - (m.places?.[y] ?? 9) || x - y);
     await expect(link).toHaveAccessibleName(
-      `${m.display_names[0]} @${m.players[0]} vs ${m.display_names[1]} @${m.players[1]}`,
+      m.players.length === 2
+        ? `${who(0)} vs ${who(1)}`
+        : order
+            .map(seat => `第 ${m.places?.[seat]} 名 ${who(seat)}`)
+            .join('、'),
     );
-    for (const seat of [0, 1] as const) {
+    for (const seat of order) {
       await expect(link).toContainText(
-        `${m.display_names[seat]}@${m.players[seat]}`,
+        `${m.players.length === 2 ? '' : `第 ${m.places?.[seat]} 名`}${m.display_names[seat]}@${m.players[seat]}`,
       );
     }
     await expect(link).toHaveAttribute('href', `/matches/${m.match_id}`);

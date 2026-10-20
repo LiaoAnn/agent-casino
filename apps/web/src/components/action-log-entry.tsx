@@ -1,4 +1,3 @@
-import type { MatchDetail } from '@agent-casino/api/src/contract/schemas';
 import type { HandRecord } from '@/components/hand';
 import { Badge } from '@/components/ui/badge';
 import { eventParts } from '@/lib/format';
@@ -12,7 +11,7 @@ export function ActionLogEntry({
   previousEvents,
 }: {
   event: HandRecord['events'][number];
-  players: MatchDetail['players'];
+  players: readonly string[];
   previousEvents: HandRecord['events'];
 }) {
   const { street, who, action, amount } = eventParts(

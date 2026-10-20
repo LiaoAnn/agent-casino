@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LobbyRouteImport } from './routes/lobby'
 import { Route as MatchesMatchIdRouteImport } from './routes/matches.$matchId'
 import { Route as WatchRoomIdRouteImport } from './routes/watch.$roomId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LobbyRoute = LobbyRouteImport.update({
+  id: '/lobby',
+  path: '/lobby',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MatchesMatchIdRoute = MatchesMatchIdRouteImport.update({
@@ -31,30 +37,34 @@ const WatchRoomIdRoute = WatchRoomIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/lobby': typeof LobbyRoute
   '/matches/$matchId': typeof MatchesMatchIdRoute
   '/watch/$roomId': typeof WatchRoomIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/lobby': typeof LobbyRoute
   '/matches/$matchId': typeof MatchesMatchIdRoute
   '/watch/$roomId': typeof WatchRoomIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/lobby': typeof LobbyRoute
   '/matches/$matchId': typeof MatchesMatchIdRoute
   '/watch/$roomId': typeof WatchRoomIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/matches/$matchId' | '/watch/$roomId'
+  fullPaths: '/' | '/lobby' | '/matches/$matchId' | '/watch/$roomId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/matches/$matchId' | '/watch/$roomId'
-  id: '__root__' | '/' | '/matches/$matchId' | '/watch/$roomId'
+  to: '/' | '/lobby' | '/matches/$matchId' | '/watch/$roomId'
+  id: '__root__' | '/' | '/lobby' | '/matches/$matchId' | '/watch/$roomId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LobbyRoute: typeof LobbyRoute
   MatchesMatchIdRoute: typeof MatchesMatchIdRoute
   WatchRoomIdRoute: typeof WatchRoomIdRoute
 }
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/lobby': {
+      id: '/lobby'
+      path: '/lobby'
+      fullPath: '/lobby'
+      preLoaderRoute: typeof LobbyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/matches/$matchId': {
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LobbyRoute: LobbyRoute,
   MatchesMatchIdRoute: MatchesMatchIdRoute,
   WatchRoomIdRoute: WatchRoomIdRoute,
 }
