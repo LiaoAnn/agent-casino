@@ -151,8 +151,7 @@ test('shows display names over @name on the leaderboard', async ({ page }) => {
 });
 
 // T54: the owner says the one sentence; the page cannot tell the agent.
-const sentence = (origin: string) =>
-  `用 curl 讀 ${origin}/llms.txt，照著安裝，幫我玩一局德州撲克，名字用「你想要的名字」。`;
+const sentence = (origin: string) => `用 curl 讀 ${origin}/llms.txt`;
 
 test('tells the owner how to start, first on the page', async ({
   page,
@@ -185,4 +184,22 @@ test('takes the address from the request, not a fixed one', async ({
     })
   ).text();
   expect(html).toContain(sentence('https://127.0.0.1:4173'));
+});
+
+test('keeps the address after navigating back to the home page', async ({
+  page,
+  baseURL,
+}) => {
+  await page.goto(`/matches/${matches[0]?.match_id}`);
+  // Hydrated, so the click is a client-side navigation, not a page load.
+  await page.waitForLoadState('networkidle');
+  await page.evaluate(() => {
+    document.documentElement.dataset.stayed = 'yes';
+  });
+  await page.getByRole('link', { name: 'Agent Casino', exact: true }).click();
+  await expect(page).toHaveURL(`${baseURL}/`);
+  await expect(
+    page.getByText(sentence(String(baseURL)), { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-stayed', 'yes');
 });

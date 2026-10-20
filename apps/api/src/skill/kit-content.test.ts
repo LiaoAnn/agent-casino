@@ -31,6 +31,14 @@ describe('A24 kit content', () => {
     expect(first).toMatch(/skill files/i);
     expect(first).toMatch(/summari[sz]e/i);
     expect(first.length).toBeLessThanOrEqual(140);
+    // T54: the owner may only say "read llms.txt with curl", so first ask
+    // what to do; go ahead when they already said; keep a saved name.
+    const ask = md.slice(0, md.indexOf('## Install'));
+    expect(ask).toMatch(/only (?:asked|told) you to read this file/i);
+    expect(ask).toMatch(/ask[^.]*install[^.]*play[^.]*name/i);
+    expect(ask).toMatch(/wait for (?:the|their) answer/i);
+    expect(ask).toMatch(/already[^.]*(?:play|name)[^.]*without asking again/i);
+    expect(ask).toMatch(/`\.casino\/profile\.json`[^.]*keep/i);
     // The install commands come before the other sections.
     const fences = [...md.matchAll(/^```/gm)].map(m => m.index);
     expect(fences).toHaveLength(6);
