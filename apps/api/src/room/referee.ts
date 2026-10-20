@@ -1643,7 +1643,7 @@ function waitingHint(data: RoomData, seat: number, now: number): string {
     const choices =
       open === 0
         ? `The table is full, so you can only start or leave. If this list changed since you last told your owner, tell them who is seated and ask whether to start now (${startPath(data)} with {}) or leave (POST /v1/rooms/${data.room_id}/leave, which closes the room)`
-        : `If this list changed since you last told your owner, tell them who is seated and ask: start now (${startPath(data)} with {}), fill the ${open} empty seat${open === 1 ? '' : 's'} with house-bot (${startPath(data)} with {"bots":N}, unrated), or keep waiting?`;
+        : `If this list changed since you last told your owner, tell them who is seated and ask: start now (${startPath(data)} with {}), fill the ${open} empty seat${open === 1 ? '' : 's'} with house-bot (${startPath(data)} with {"bots":N}, unrated), or keep waiting`;
     return `${seated}. ${choices}. ${keepCalling} the room closes. ${again}`;
   }
   const waited = now - data.seats[seat].joined_at;
