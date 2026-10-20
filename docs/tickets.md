@@ -576,7 +576,10 @@
 - 多人桌的 Elo 用兩兩比較算，跟單挑共用同一個 Elo。
 - 網頁有大廳和 6 座位的牌桌。
 
-**⏸ 暫停：T15 完成後也不要自動派工，等 Ann 明確說開始。**
+**2026-10-20 Ann 說開始。**
+
+- **E6 期間 main 不上正式環境**：T39 會拿掉 queue，T42 之前 `casino.sh queue` 在 main 上不能用。正式環境要急修時，從最後部署的 commit（b33f980）開 branch 修，再合回 main。
+- 設計文件寫在 agent kit 之前。參賽 agent 那一側一律走 kit（`casino.sh`、skill、`llms.txt`），見 T42。
 
 設計結論在 `docs/design/multiplayer.md`（2026-10-19 Ann 確認）。每張票開工時先把自己負責的 skill 章節改成多人版（「先改規格」），再實作。改規格時：
 - 第一版的行為只改決定裡寫到的地方；
@@ -647,16 +650,17 @@
 - 只改：`apps/web/`、web-design skill。
 - 驗證：`pnpm test:web`，涵蓋 2、3、6 人，等待中、進行中、出局、結束；桌機和 390px 截圖。
 
-### T42 多人版的 skill.md 與試玩 ★（約 500 行）· Blocked by：T38、T39、T40
-- 先改規格：casino-api 的 skill.md 一節、`docs/cost.md` 的多人估計（設計文件「費用」）、AGENTS.md 開頭（第一版只有單挑那句）。
-- skill.md 要寫：
+### T42 多人版的 kit 與試玩 ★（約 800 行）· Blocked by：T38、T39、T40
+- 先改規格：casino-api 的 skill.md 與 kit 一節、`docs/cost.md` 的多人估計（設計文件「費用」）、AGENTS.md 開頭（第一版只有單挑那句）。
+- agent 那一側照 `docs/design/agent-kit.md`：`casino.sh` 加上自動入座、`start`（房主）等指令，`queue` 改成自動入座或印出改用哪個指令；需要的話加 `agent-casino-table` skill；`llms.txt`、`/skill.md` 一起改。指令名稱開工前跟 coordinator 確認。
+- kit 和 skill.md 要寫：
   - 自動入座、私人房；
   - 房主怎麼回報主人，每次都要列出「用 house-bot 補空位」的選項；
   - 等主人回話時也要持續 wait；
   - 出局時的 `match_over`；
   - 每步 30 秒。
-- 只改：`apps/api/src/skill/`、`docs/cost.md`、`AGENTS.md`、`scripts/`（e2e 和 playtest 改成多人）。
-- 驗證：`pnpm test:skill`、`pnpm e2e --target=local`（3 人桌從頭打到尾）。
+- 只改：`apps/api/src/skill/`（含 `casino.sh` 和 kit）、`docs/cost.md`、`AGENTS.md`、`scripts/`（e2e 和 playtest 改成多人）。
+- 驗證：`pnpm test:skill`（用 `casino.sh` 3 人桌打完）、`pnpm e2e --target=local`（3 人桌從頭打到尾）、CI 的 macOS `casino.sh` 檢查。
 - 試玩：arena 開一桌 3–6 個 agent 自動入座，再加一個「私人房加 bot」的情境，報告寫進 `docs/playtests/`。
 
 ## 還沒定、先照預設做的
