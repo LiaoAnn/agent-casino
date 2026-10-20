@@ -23,8 +23,8 @@ import {
   RoomStatus,
 } from '../contract/schemas';
 import { startTestD1, type TestD1 } from '../db/test-d1';
-import { legalActions, type Seat, startMatch } from '../holdem/match';
 import { dealHand } from '../holdem/shuffle';
+import { startTable, type TableSeat, tableLegalActions } from '../holdem/table';
 import type { Bindings } from '../routes/env';
 import { RoomReferee, type RoomStorage } from './referee';
 
@@ -301,7 +301,13 @@ const waitPath = (roomId: string) => `/v1/rooms/${roomId}/wait`;
 
 // Hand 1 position right after the join.
 const opening = () =>
-  startMatch({ seed: SEED, maxHands: 2, blindEvery: 50, startingStack: STACK });
+  startTable({
+    seed: SEED,
+    maxHands: 2,
+    blindEvery: 50,
+    startingStack: STACK,
+    players: 2,
+  });
 
 // --- reject_first_action --------------------------------------------------------
 
@@ -312,7 +318,7 @@ describe('A11 chaos reject_first_action: each seat’s first judged action answe
       reject_first_action: true,
     });
     const alice = await yourTurn(t, roomId, tokens[0]);
-    expect(alice.legal_actions).toEqual(legalActions(opening()));
+    expect(alice.legal_actions).toEqual(tableLegalActions(opening()));
     const body = await expectError(
       await actPost(t, roomId, tokens[0], {
         turn_id: alice.turn_id,
@@ -675,7 +681,7 @@ describe('A11 DEFAULT_SETTINGS_JSON: the default settings of every room on the d
       expect(turn.view).toMatchObject({ my_stack: 99, opponent_stack: 98 });
       // 3 hands: the small blind folds each one; then the match is over.
       for (let hand = 1; hand <= 3; hand++) {
-        const seat = turn.to_act_seat as Seat;
+        const seat = turn.to_act_seat as TableSeat;
         await act(t, roomId, tokens[seat], {
           turn_id: turn.turn_id,
           type: 'fold',

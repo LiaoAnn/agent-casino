@@ -1,10 +1,11 @@
 /// <reference types="node" />
 import { describe, expect, it } from 'vitest';
 import { evaluateHand } from './hand';
-import { type Action, blindsAt } from './match';
 import { mulberry32 } from './shuffle';
 import {
+  type Action,
   applyTableAction,
+  blindsAt,
   DEFAULT_BLIND_EVERY,
   startTable,
   type TableState,

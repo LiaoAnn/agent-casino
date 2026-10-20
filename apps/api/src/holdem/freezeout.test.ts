@@ -1,19 +1,22 @@
 import { describe, expect, it } from 'vitest';
+import { seatView } from '../room/view';
 import {
   type Action,
-  applyAction,
+  applyTableAction,
   blindsAt,
-  type HandRecord,
-  legalActions,
-  type MatchConfig,
-  type MatchState,
-  type Seat,
-  startMatch,
-} from './match';
-import { replay } from './replay';
-import { viewFor } from './view';
+  replayTable,
+  startTable,
+  type TableConfig,
+  type TableHandRecord,
+  type TableSeat,
+  type TableState,
+  tableLegalActions,
+} from './table';
 
-const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
+// The heads-up config: a 2-seat table without `players`.
+type HeadsUpConfig = Omit<TableConfig, 'players'>;
+
+const config = (overrides: Partial<HeadsUpConfig> = {}): HeadsUpConfig => ({
   seed: '0000000000000000000000000000000000000000000000000000000000000005',
   startingStack: 40,
   blindEvery: 5,
@@ -21,17 +24,17 @@ const config = (overrides: Partial<MatchConfig> = {}): MatchConfig => ({
   ...overrides,
 });
 
-function act(state: MatchState, seat: Seat, action: Action) {
-  const result = applyAction(state, seat, action);
+function act(state: TableState, seat: TableSeat, action: Action) {
+  const result = applyTableAction(state, seat, action);
   if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
   return result;
 }
 
-function folds(matchConfig: MatchConfig, count: number) {
-  let state = startMatch(matchConfig);
-  const hands: HandRecord[] = [];
+function folds(matchConfig: HeadsUpConfig, count: number) {
+  let state = startTable({ ...matchConfig, players: 2 });
+  const hands: TableHandRecord[] = [];
   for (let n = 0; n < count; n++) {
-    const result = act(state, (n % 2) as Seat, { type: 'fold' });
+    const result = act(state, (n % 2) as TableSeat, { type: 'fold' });
     hands.push(...result.finishedHands);
     state = result.state;
   }
@@ -67,7 +70,7 @@ describe('freezeout blind schedule', () => {
     (blindEvery, hand, expected) => {
       const { state, hands } = folds(config({ blindEvery }), hand - 1);
       expect(state.handNumber).toBe(hand);
-      const button = ((hand - 1) % 2) as Seat;
+      const button = ((hand - 1) % 2) as TableSeat;
       expect(state.history).toEqual([
         {
           seat: button,
@@ -119,21 +122,21 @@ describe('freezeout blind schedule', () => {
     expect(state.handNumber).toBe(4);
     expect(state.handNumber).toBeLessThan(state.config.maxHands);
     expect(state.stacks).toEqual([0, 20]);
-    expect(legalActions(state)).toEqual([]);
+    expect(tableLegalActions(state)).toEqual([]);
   });
 
   it('uses the current big blind for the initial raise and resets it on every street', () => {
     let { state } = folds(config({ blindEvery: 1 }), 1);
     expect(state.handNumber).toBe(2);
-    expect(legalActions(state)).toContainEqual({
+    expect(tableLegalActions(state)).toContainEqual({
       type: 'raise',
       min: 8,
       max: 41,
     });
-    const rejected = applyAction(state, 1, { type: 'raise', amount: 6 });
+    const rejected = applyTableAction(state, 1, { type: 'raise', amount: 6 });
     expect(rejected.ok).toBe(false);
     state = act(state, 1, { type: 'call' }).state;
-    expect(legalActions(state)).toContainEqual({
+    expect(tableLegalActions(state)).toContainEqual({
       type: 'raise',
       min: 8,
       max: 39,
@@ -141,17 +144,17 @@ describe('freezeout blind schedule', () => {
     state = act(state, 0, { type: 'check' }).state;
     for (const street of ['flop', 'turn', 'river']) {
       expect(state.street).toBe(street);
-      expect(legalActions(state)).toContainEqual({
+      expect(tableLegalActions(state)).toContainEqual({
         type: 'raise',
         min: 4,
         max: 35,
       });
-      expect(applyAction(state, 0, { type: 'raise', amount: 2 }).ok).toBe(
+      expect(applyTableAction(state, 0, { type: 'raise', amount: 2 }).ok).toBe(
         false,
       );
       // A raise of one big blind, followed by a fold, is accepted on each street.
       const raised = act(state, 0, { type: 'raise', amount: 4 });
-      expect(legalActions(raised.state)).toContainEqual({
+      expect(tableLegalActions(raised.state)).toContainEqual({
         type: 'raise',
         min: 8,
         max: 37,
@@ -178,7 +181,7 @@ describe('freezeout blind schedule', () => {
       expect(state.stacks).toEqual(stacks);
       expect(hands).toHaveLength(maxHands);
       expect(state.lastHand?.stacks).toEqual(stacks);
-      expect(legalActions(state)).toEqual([]);
+      expect(tableLegalActions(state)).toEqual([]);
     },
   );
 });
@@ -193,7 +196,7 @@ describe('freezeout seat view', () => {
     (hand, blinds, next) => {
       const { state } = folds(config(), hand - 1);
       for (const seat of [0, 1] as const) {
-        expect(viewFor(state, seat).view).toMatchObject({
+        expect(seatView(state, seat)).toMatchObject({
           blinds,
           next_blinds_at_hand: next,
         });
@@ -203,7 +206,7 @@ describe('freezeout seat view', () => {
 
   it('reports every hand as a new level with blindEvery 1', () => {
     const { state } = folds(config({ blindEvery: 1 }), 1);
-    expect(viewFor(state, 0).view).toMatchObject({
+    expect(seatView(state, 0)).toMatchObject({
       blinds: [2, 4],
       next_blinds_at_hand: 3,
     });
@@ -211,11 +214,12 @@ describe('freezeout seat view', () => {
 
   it('includes a next level exactly at maxHands, and null beyond it while still playing', () => {
     expect(
-      viewFor(startMatch(config({ maxHands: 6 })), 0).view.next_blinds_at_hand,
+      seatView(startTable({ ...config({ maxHands: 6 }), players: 2 }), 0)
+        ?.next_blinds_at_hand,
     ).toBe(6);
     const { state } = folds(config({ maxHands: 10 }), 5);
     expect(state.over).toBe(false);
-    expect(viewFor(state, 0).view).toMatchObject({
+    expect(seatView(state, 0)).toMatchObject({
       blinds: [2, 4],
       next_blinds_at_hand: null,
     });
@@ -230,7 +234,7 @@ describe('freezeout seat view', () => {
     ] as const) {
       expect(state.over).toBe(true);
       for (const seat of [0, 1] as const) {
-        expect(viewFor(state, seat).view).toMatchObject({
+        expect(seatView(state, seat)).toMatchObject({
           blinds,
           next_blinds_at_hand: null,
         });
@@ -250,7 +254,7 @@ describe('freezeout replay', () => {
       const events = hands.flatMap(hand => hand.events);
       const actions = events.filter(event => event.type !== 'post_blind');
       for (const input of [events, actions]) {
-        const result = replay(matchConfig, input);
+        const result = replayTable({ ...matchConfig, players: 2 }, input);
         if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
         expect(result.hands).toEqual(hands);
         expect(result.state).toEqual(state);

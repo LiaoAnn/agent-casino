@@ -1,13 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import {
-  type Action,
-  applyAction,
-  legalActions,
-  type Seat,
-  startMatch,
-} from './match';
 import { dealTable, shuffledDeck } from './shuffle';
 import {
+  type Action,
   applyTableAction,
   leaveTable,
   replayTable,
@@ -104,12 +98,6 @@ function passiveToHandEnd(state: TableState) {
   }
   expect(hands.length).toBeGreaterThan(0);
   return { state, hands };
-}
-
-// Strip only the new side-pot field for the legacy heads-up comparison.
-function commonHand<T extends { pots: unknown }>(hand: T) {
-  const { pots: _pots, ...common } = hand;
-  return common;
 }
 
 describe('table positions and betting rounds', () => {
@@ -620,75 +608,6 @@ describe('replaying table events', () => {
       code: 'invalid_action',
     });
   });
-});
-
-describe('heads-up compatibility through the public match API', () => {
-  for (const seed of [SEED, SIDE_SEED, ODD_SEED]) {
-    for (const strategy of ['passive', 'mixed'] as const) {
-      it(`${seed.slice(-4)}, ${strategy}: identical legal actions, state and hand records`, () => {
-        const cfg = config({
-          players: 2,
-          seed,
-          startingStack: 10,
-          blindEvery: 2,
-          maxHands: 6,
-        });
-        let table = startTable(cfg);
-        const { players: _players, ...legacyConfig } = cfg;
-        let match = startMatch(legacyConfig);
-        const same = () => {
-          for (const key of [
-            'handNumber',
-            'button',
-            'street',
-            'holeCards',
-            'board',
-            'stacks',
-            'bets',
-            'contributed',
-            'toAct',
-            'over',
-            'history',
-            'acted',
-            'minRaise',
-          ] as const)
-            expect(table[key], key).toEqual(match[key]);
-          expect(table.lastHand ? commonHand(table.lastHand) : null).toEqual(
-            match.lastHand,
-          );
-          expect(tableLegalActions(table)).toEqual(legalActions(match));
-        };
-        same();
-        for (let i = 0; i < 500 && !match.over; i++) {
-          const legal = legalActions(match);
-          const passive = legal.find(
-            a => a.type === 'call' || a.type === 'check',
-          );
-          const aggressive = legal.find(a => a.type === 'raise');
-          if (!passive || match.toAct === null)
-            throw new Error('missing heads-up action');
-          const action: Action =
-            strategy === 'mixed' && i % 5 === 0 && aggressive?.type === 'raise'
-              ? { type: 'raise', amount: aggressive.min }
-              : strategy === 'mixed' && i % 7 === 3
-                ? { type: 'fold' }
-                : { type: passive.type };
-          const options =
-            i % 11 === 2 && action.type !== 'raise' ? { timeout: true } : {};
-          const old = applyAction(match, match.toAct as Seat, action, options);
-          const next = accepted(
-            applyTableAction(table, match.toAct, action, options),
-          );
-          if (!old.ok) throw new Error(old.message);
-          expect(next.finishedHands.map(commonHand)).toEqual(old.finishedHands);
-          match = old.state;
-          table = next.state;
-          same();
-        }
-        expect(table.over).toBe(true);
-      });
-    }
-  }
 });
 
 describe('configuration bounds and immutable actions', () => {

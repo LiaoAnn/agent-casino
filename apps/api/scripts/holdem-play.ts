@@ -12,11 +12,11 @@ import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
 import type {
   Action,
-  HandRecord,
-  HistoryEvent,
   LegalAction,
-  MatchState,
-} from '../src/holdem/match';
+  TableEvent,
+  TableHandRecord,
+  TableState,
+} from '../src/holdem/table';
 
 // The holdem modules use extensionless imports, which Node's own TypeScript
 // support can't resolve; add `.ts` before loading them.
@@ -28,13 +28,16 @@ registerHooks({
     return nextResolve(specifier, context);
   },
 });
-const { applyAction, blindsAt, legalActions, startMatch } = await import(
-  '../src/holdem/match'
-);
+const {
+  applyTableAction,
+  blindsAt,
+  replayTable,
+  startTable,
+  tableLegalActions,
+} = await import('../src/holdem/table');
 const { randomAction } = await import('../src/holdem/bot');
-const { replay } = await import('../src/holdem/replay');
 const { mulberry32 } = await import('../src/holdem/shuffle');
-const { viewFor } = await import('../src/holdem/view');
+const { seatView } = await import('../src/room/view');
 
 const randomSeed = () => Math.floor(Math.random() * 2 ** 32);
 const { values } = parseArgs({
@@ -51,6 +54,7 @@ const config = {
   startingStack: Number(values.stack),
   blindEvery: Number(values['blind-every']),
   maxHands: Number(values['max-hands']),
+  players: 2,
 };
 const botSeed =
   values['bot-seed'] === undefined ? randomSeed() : Number(values['bot-seed']);
@@ -62,9 +66,9 @@ const YOU = 0;
 const BOT = 1;
 const name = (seat: number) => (seat === YOU ? 'You' : 'Bot');
 
-let state: MatchState = startMatch(config);
-const events: HistoryEvent[] = [];
-const hands: HandRecord[] = [];
+let state: TableState = startTable(config);
+const events: TableEvent[] = [];
+const hands: TableHandRecord[] = [];
 
 console.log(
   `Seed ${config.seed}, bot seed ${botSeed}, ${config.startingStack} chips each, ` +
@@ -73,7 +77,7 @@ console.log(
 announceHand();
 
 while (!state.over) {
-  const legal = legalActions(state);
+  const legal = tableLegalActions(state);
   const seat = state.toAct === YOU ? YOU : BOT;
   let action: Action;
   if (seat === BOT) {
@@ -92,7 +96,7 @@ while (!state.over) {
     }
     action = parsed;
   }
-  const result = applyAction(state, seat, action);
+  const result = applyTableAction(state, seat, action);
   if (!result.ok) {
     console.log(result.message);
     continue;
@@ -113,7 +117,7 @@ console.log(
   `Match over: you ${mine}, bot ${theirs}. ` +
     (mine > theirs ? 'You win.' : mine < theirs ? 'Bot wins.' : 'Draw.'),
 );
-const replayed = replay(config, events);
+const replayed = replayTable(config, events);
 const same =
   replayed.ok &&
   JSON.stringify(replayed.state) === JSON.stringify(state) &&
@@ -162,7 +166,8 @@ function announceHand(): void {
 }
 
 function showTable(legal: LegalAction[]): void {
-  const { view } = viewFor(state, YOU);
+  const view = seatView(state, YOU);
+  if (!view) return;
   const options = legal.map(legal =>
     legal.type === 'call'
       ? `call ${legal.amount}`
@@ -179,12 +184,12 @@ function showTable(legal: LegalAction[]): void {
   console.log(`Your move: ${options.join(', ')}`);
 }
 
-function showResult(hand: HandRecord): void {
+function showResult(hand: TableHandRecord): void {
   if (hand.hole_cards) {
     const [yours, bots] = hand.hole_cards;
     console.log(
-      `Showdown: board ${hand.board.join(' ')}, you ${yours.join(' ')}, ` +
-        `bot ${bots.join(' ')}`,
+      `Showdown: board ${hand.board.join(' ')}, you ${yours?.join(' ')}, ` +
+        `bot ${bots?.join(' ')}`,
     );
   }
   const winner =

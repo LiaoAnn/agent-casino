@@ -1,17 +1,19 @@
 import type { Card } from './cards';
 import { compareHands, evaluateHand } from './hand';
+import { type Deal, dealHand } from './shuffle';
 import {
   blindsAt,
-  type HandRecord,
-  type HistoryEvent,
-  legalActions,
-  type MatchConfig,
-  type MatchState,
-  otherSeat,
-  type Seat,
   type Street,
-} from './match';
-import { type Deal, dealHand } from './shuffle';
+  type TableConfig,
+  type TableEvent,
+  type TableHandRecord,
+  type TableSeat,
+  type TableState,
+  tableLegalActions,
+} from './table';
+
+// The heads-up config: a 2-seat table without `players`.
+type HeadsUpConfig = Omit<TableConfig, 'players'>;
 
 // Restated here, not imported, so a wrong table in the engine can't hide.
 const STREETS: Street[] = ['preflop', 'flop', 'turn', 'river'];
@@ -23,7 +25,7 @@ const BOARD_SIZE: Record<Street, number> = {
 };
 
 /** Rule violations in `state`, as English sentences; [] when none. */
-export function checkState(state: MatchState): string[] {
+export function checkState(state: TableState): string[] {
   const { config } = state;
   const errors: string[] = [];
   const chips = [...state.stacks, ...state.contributed];
@@ -99,9 +101,9 @@ export function checkState(state: MatchState): string[] {
 
 /** Rule violations in one finished hand record of a match with `config`. */
 export function checkHand(
-  hand: HandRecord,
-  config: MatchConfig,
-  before?: [number, number],
+  hand: TableHandRecord,
+  config: HeadsUpConfig,
+  before?: number[],
 ): string[] {
   const errors: string[] = [];
   if (
@@ -117,10 +119,10 @@ export function checkHand(
     errors.push('Recorded blinds do not match the scheduled blinds');
   }
   // Heads-up pots contain equal matched contributions; undo the payout.
-  const start: [number, number] = before ?? [...hand.stacks];
+  const start = before ?? [...hand.stacks];
   if (!before && hand.winner_seat !== null) {
     start[hand.winner_seat] -= hand.pot / 2;
-    start[otherSeat(hand.winner_seat)] += hand.pot / 2;
+    start[1 - hand.winner_seat] += hand.pot / 2;
   }
   errors.push(...checkBlinds(hand.events, hand.button_seat, scheduled, start));
   const expectedPot = potOf(hand.events);
@@ -135,7 +137,7 @@ export function checkHand(
   if (hand.ended_by === 'fold') {
     if (last?.type !== 'fold') {
       errors.push('Hand ended by a fold but the last event is no fold');
-    } else if (hand.winner_seat !== otherSeat(last.seat)) {
+    } else if (hand.winner_seat !== 1 - last.seat) {
       errors.push(`Seat ${last.seat} folded but the winner isn't the other`);
     }
     if (hand.hole_cards !== null) {
@@ -163,7 +165,7 @@ export function checkHand(
   if (hand.hole_cards && !sameCards(hand.hole_cards, deal.holeCards)) {
     errors.push("Hole cards aren't the ones the seed deals");
   } else if (hand.hole_cards && dealtBoard && hand.board.length === 5) {
-    const [a, b] = hand.hole_cards.map(cards =>
+    const [a, b] = (hand.hole_cards as Card[][]).map(cards =>
       evaluateHand([...cards, ...hand.board]),
     );
     const order = compareHands(a, b);
@@ -176,9 +178,9 @@ export function checkHand(
 }
 
 /** What the seat to act is offered: fold, then check or call, then raise. */
-function checkLegal(state: MatchState, seat: Seat): string[] {
+function checkLegal(state: TableState, seat: TableSeat): string[] {
   const errors: string[] = [];
-  const legal = legalActions(state);
+  const legal = tableLegalActions(state);
   const stack = state.stacks[seat];
   const highest = Math.max(...state.bets);
   const toCall = highest - state.bets[seat];
@@ -209,7 +211,7 @@ function checkLegal(state: MatchState, seat: Seat): string[] {
   return errors;
 }
 
-function checkConfig({ seed }: MatchConfig): string[] {
+function checkConfig({ seed }: HeadsUpConfig): string[] {
   return /^[0-9a-f]{64}$/.test(seed)
     ? []
     : [`Seed must be 64 lowercase hex characters: ${seed}`];
@@ -219,7 +221,7 @@ function checkConfig({ seed }: MatchConfig): string[] {
  * The chips both seats put in according to `events`, less the part of the
  * bigger last-street bet nobody matched (it goes back to its owner).
  */
-function potOf(events: HistoryEvent[]): number {
+function potOf(events: TableEvent[]): number {
   let total = 0;
   let bets = [0, 0];
   let street: Street = 'preflop';
@@ -240,8 +242,8 @@ function potOf(events: HistoryEvent[]): number {
 
 function checkHandNumber(
   handNumber: number,
-  button: Seat,
-  config: MatchConfig,
+  button: TableSeat,
+  config: HeadsUpConfig,
 ): string[] {
   const errors: string[] = [];
   if (
@@ -261,18 +263,18 @@ function checkHandNumber(
  * Nobody acts out of turn: two blinds (button first), streets in order,
  * seats taking turns, the button first preflop and the other seat after.
  */
-function checkOrder(events: HistoryEvent[], button: Seat): string[] {
+function checkOrder(events: TableEvent[], button: TableSeat): string[] {
   const errors: string[] = [];
   const [small, big] = events;
   if (
     small?.type !== 'post_blind' ||
     small.seat !== button ||
     big?.type !== 'post_blind' ||
-    big.seat !== otherSeat(button)
+    big.seat !== 1 - button
   ) {
     errors.push('History must start with the two blinds, button first');
   }
-  let previous: HistoryEvent | undefined;
+  let previous: TableEvent | undefined;
   for (const event of events.slice(2)) {
     if (event.type === 'post_blind') {
       errors.push('A blind was posted after the hand started');
@@ -295,21 +297,21 @@ function checkOrder(events: HistoryEvent[], button: Seat): string[] {
 
 /** Whose turn the history says it is on `street`. */
 function nextToAct(
-  history: HistoryEvent[],
-  button: Seat,
+  history: TableEvent[],
+  button: TableSeat,
   street: Street,
-): Seat {
+): TableSeat {
   const last = history.at(-1);
   if (last && last.type !== 'post_blind' && last.street === street) {
-    return otherSeat(last.seat);
+    return 1 - last.seat;
   }
   return firstToAct(street, button);
 }
 
-const firstToAct = (street: Street, button: Seat): Seat =>
-  street === 'preflop' ? button : otherSeat(button);
+const firstToAct = (street: Street, button: TableSeat): TableSeat =>
+  street === 'preflop' ? button : 1 - button;
 
-function dealOf(config: MatchConfig, handNumber: number): Deal | null {
+function dealOf(config: HeadsUpConfig, handNumber: number): Deal | null {
   try {
     return dealHand(config.seed, handNumber);
   } catch {
@@ -317,7 +319,7 @@ function dealOf(config: MatchConfig, handNumber: number): Deal | null {
   }
 }
 
-const sameCards = (a: Card[] | Card[][], b: Card[] | Card[][]) =>
+const sameCards = (a: readonly unknown[], b: readonly unknown[]) =>
   JSON.stringify(a) === JSON.stringify(b);
 
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
@@ -326,13 +328,13 @@ const isChipCount = (value: number) => Number.isInteger(value) && value >= 0;
 
 /** Scheduled blinds are capped by each seat's stack before posting. */
 function checkBlinds(
-  events: HistoryEvent[],
-  button: Seat,
+  events: TableEvent[],
+  button: TableSeat,
   scheduled: [number, number],
-  before: [number, number],
+  before: number[],
 ): string[] {
   const errors: string[] = [];
-  for (const [index, seat] of [button, otherSeat(button)].entries()) {
+  for (const [index, seat] of [button, 1 - button].entries()) {
     const expected = Math.min(scheduled[index], before[seat]);
     if (events[index]?.amount !== expected) {
       errors.push(`Seat ${seat} blind must be ${expected}`);

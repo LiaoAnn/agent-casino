@@ -77,8 +77,7 @@ export const upgradeHand = (
 const placesOf = ([a, b]: Pair<number>): Pair<number> =>
   a === b ? [1, 1] : a > b ? [1, 2] : [2, 1];
 
-// Also how contract/fake.ts turns its heads-up matches into tables.
-export const upgradeMatch = (match: LegacyMatch): TableState => ({
+const upgradeMatch = (match: LegacyMatch): TableState => ({
   ...match,
   config: { ...match.config, players: 2 },
   lastHand: match.lastHand && {

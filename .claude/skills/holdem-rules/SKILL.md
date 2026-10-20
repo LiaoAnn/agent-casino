@@ -140,7 +140,7 @@ description: 德州撲克 2–6 人錦標賽的完整規則、洗牌種子與邊
 
 ## 引擎的細節定案
 2026-10-17 T04，2026-10-20 T36 推廣到 N 人。
-- **兩套 API**（T36）：`holdem/table.ts` 是 N 人引擎（`startTable`、`tableLegalActions`、`applyTableAction`、`leaveTable`、`replayTable`），座位是 `number`、陣列長度 N。`holdem/match.ts` 的 `startMatch`、`applyAction`、`legalActions`（和 `view.ts`、`replay.ts`）是**單挑轉接層**：型別照舊（`Seat = 0 | 1`、tuple），內部轉呼叫 table 引擎，輸出跟 T36 以前逐位元相同（`heads-up-golden.test.ts` 鎖住）。T38 把 room 換到 table API 後刪掉轉接層。
+- **引擎 API**：`holdem/table.ts` 是 2–6 人引擎（`startTable`、`tableLegalActions`、`applyTableAction`、`leaveTable`、`replayTable`），座位是 `number`、陣列長度 N；單挑就是 `players: 2`。單挑轉接層（`match.ts`、`view.ts`、`replay.ts`）T56 已刪；`heads-up-golden.test.ts` 直接鎖 2 人桌的輸出，跟 T36 以前的單挑引擎逐位元相同（新增的 N 人欄位不算進雜湊）。
 - **一手結束的 `pot`**（`last_hand.pot`、對局紀錄 `hands[].pot`）是這手所有池加起來、贏家實際贏到的籌碼，**不含**退回的未跟注下注。table 引擎的 `last_hand` 另外有 `pots`：`[{ amount, winners }]`，主池在前，`winners` 是分到這個池的座位（由小到大）。`winner_seat` 是一個人贏走所有池時的座位，否則 `null`（單挑時 `null` 就是平分）。進行中局面的 `view.pot` 照 casino-api A6，是這一手到目前為止所有投入（含這一輪的下注）。
 - table 引擎的 `last_hand.hole_cards` 是 N 個元素，攤牌時沒棄牌的人有牌，其他是 `null`；棄牌結束的手是 `null`。
 - **`street` 只有 `preflop`、`flop`、`turn`、`river`**。自動發完公牌時記為 `river`。

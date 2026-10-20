@@ -2,20 +2,24 @@ import { Exit, Schema } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { compareHands, evaluateHand } from '../holdem/hand';
 import { checkHand } from '../holdem/invariants';
-import {
-  applyAction,
-  type HandRecord,
-  type HistoryEvent,
-  type LegalAction,
-  legalActions,
-  type MatchConfig,
-  type MatchState,
-  startMatch,
-} from '../holdem/match';
-import { replay } from '../holdem/replay';
 import { dealHand } from '../holdem/shuffle';
+import {
+  type Action,
+  applyTableAction,
+  type LegalAction,
+  replayTable,
+  startTable,
+  type TableConfig,
+  type TableEvent,
+  type TableHandRecord,
+  type TableState,
+  tableLegalActions,
+} from '../holdem/table';
 import { makeFakeData } from './fake';
 import { Leaderboard, MatchDetail, MatchList, WatchResponse } from './schemas';
+
+// The heads-up config: a 2-seat table without `players`.
+type HeadsUpConfig = Omit<TableConfig, 'players'>;
 
 const decodes = (schema: Schema.Top, value: unknown): boolean =>
   Exit.isSuccess(
@@ -32,14 +36,14 @@ const allSummaries = (data: ReturnType<typeof makeFakeData>) => {
   return { pages, summaries: pages.flatMap(page => page.matches) };
 };
 
-const configOf = (detail: MatchDetail): MatchConfig => ({
+const configOf = (detail: MatchDetail): HeadsUpConfig => ({
   seed: detail.seed,
   maxHands: detail.settings.max_hands,
   blindEvery: detail.settings.blind_every ?? 50,
   startingStack: detail.settings.starting_stack,
 });
 
-const eventsOf = (detail: MatchDetail): HistoryEvent[] =>
+const eventsOf = (detail: MatchDetail): TableEvent[] =>
   detail.hands.flatMap(hand =>
     hand.events.map(event => {
       expect([0, 1]).toContain(event.seat);
@@ -53,22 +57,22 @@ const eventsOf = (detail: MatchDetail): HistoryEvent[] =>
 
 /** Each non-blind event of a match with the engine state it was made in. */
 const walk = (detail: MatchDetail) => {
-  let state = startMatch(configOf(detail));
+  let state = startTable({ ...configOf(detail), players: 2 });
   const steps: {
-    event: HistoryEvent;
-    before: MatchState;
+    event: TableEvent;
+    before: TableState;
     legal: LegalAction[];
   }[] = [];
   for (const event of eventsOf(detail)) {
     if (event.type === 'post_blind') continue;
-    const legal = legalActions(state);
+    const legal = tableLegalActions(state);
     steps.push({ event, before: state, legal });
-    const result = applyAction(
+    const result = applyTableAction(
       state,
       event.seat,
       event.type === 'raise'
         ? { type: 'raise', amount: event.amount ?? Number.NaN }
-        : { type: event.type },
+        : ({ type: event.type } as Action),
       { timeout: event.timeout },
     );
     if (!result.ok) {
@@ -249,7 +253,10 @@ describe('makeFakeData', () => {
 
   it('replays every match to exactly its hands with the holdem engine', () => {
     for (const detail of details) {
-      const result = replay(configOf(detail), eventsOf(detail));
+      const result = replayTable(
+        { ...configOf(detail), players: 2 },
+        eventsOf(detail),
+      );
       expect(result, detail.match_id).toMatchObject({ ok: true });
       if (!result.ok) continue;
       expect(
@@ -301,7 +308,7 @@ describe('makeFakeData', () => {
           hole_cards: hand.ended_by === 'fold' ? null : hand.hole_cards,
         };
         expect(
-          checkHand(engineHand as unknown as HandRecord, configOf(detail)),
+          checkHand(engineHand as unknown as TableHandRecord, configOf(detail)),
           `${detail.match_id} hand ${hand.hand_number}`,
         ).toEqual([]);
       }

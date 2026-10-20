@@ -19,8 +19,8 @@ import {
 } from '../contract/schemas';
 import { matchEvents } from '../db/schema';
 import { startTestD1, type TestD1 } from '../db/test-d1';
-import type { Seat } from '../holdem/match';
 import { dealHand } from '../holdem/shuffle';
+import type { TableSeat } from '../holdem/table';
 import { RatingWriter } from '../matchmaker/ratings';
 import { RoomReferee, type RoomStorage } from '../room/referee';
 import { signWatchToken, verifyWatchToken } from '../token/token';
@@ -308,7 +308,7 @@ const yourTurn = async (
 };
 
 // The same seat's result in the seat-angle vocabulary of /v1/matches.
-const seatResult = (over: MatchOver, seat: Seat): string =>
+const seatResult = (over: MatchOver, seat: TableSeat): string =>
   over.result === 'win'
     ? `seat${seat}_win`
     : over.result === 'loss'
@@ -341,7 +341,7 @@ interface Seen {
 }
 
 interface LoggedNote {
-  seat: Seat;
+  seat: TableSeat;
   hand_number: number;
   seq: number;
   note: string;
@@ -391,7 +391,7 @@ const openRig = async (
   };
 };
 
-const observe = (rig: Rig, seat: Seat, status: Status) => {
+const observe = (rig: Rig, seat: TableSeat, status: Status) => {
   const seen = rig.seen[seat];
   if (status.view !== null && status.hand_number !== null) {
     seen.histories.set(
@@ -415,13 +415,13 @@ const observeBoth = async (rig: Rig) => {
   return statuses;
 };
 
-const noteText = (seat: Seat, hand: number, seq: number) =>
+const noteText = (seat: TableSeat, hand: number, seq: number) =>
   `NOTE-${seat === 0 ? 'A' : 'B'}-h${hand}-q${seq}`;
 
 type Move =
   | { type: 'fold' | 'check' | 'call' }
   | { type: 'raise'; amount: number };
-type Choose = (turn: YourTurn, seat: Seat) => Move;
+type Choose = (turn: YourTurn, seat: TableSeat) => Move;
 
 // Hands 1 and 3: the first to act folds. Everything else: check or call, so
 // hand 2 (and any later hand) goes to showdown.
@@ -448,12 +448,12 @@ const step = async (
     throw new Error('expected your_turn');
   const hand = turn.hand_number as number;
   const seq = turn.view.history.length;
-  const move = choose(turn, seat as Seat);
-  const note = noteText(seat as Seat, hand, seq);
+  const move = choose(turn, seat as TableSeat);
+  const note = noteText(seat as TableSeat, hand, seq);
   const response = await actPost(
     rig.t.env,
     rig.roomId,
-    rig.tokens[seat as Seat],
+    rig.tokens[seat as TableSeat],
     {
       turn_id: turn.turn_id,
       ...move,
@@ -463,7 +463,7 @@ const step = async (
   expect(response.status).toBe(200);
   expect(decodeAccepted(await response.json()).status).toBe('accepted');
   if (options.note !== false) {
-    rig.notes.push({ seat: seat as Seat, hand_number: hand, seq, note });
+    rig.notes.push({ seat: seat as TableSeat, hand_number: hand, seq, note });
   }
   await observeBoth(rig);
   return true;

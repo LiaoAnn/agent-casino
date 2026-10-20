@@ -7,15 +7,46 @@ import { Leaderboard, MatchDetail, MatchList } from '../contract/schemas';
 import { type MatchRecordInput, recordMatch } from '../db/records';
 import { startTestD1, type TestD1 } from '../db/test-d1';
 import { randomAction } from '../holdem/bot';
-import {
-  applyAction,
-  type HandRecord,
-  legalActions,
-  type MatchState,
-  startMatch,
-} from '../holdem/match';
 import { dealHand, mulberry32 } from '../holdem/shuffle';
+import {
+  applyTableAction,
+  startTable,
+  type TableHandRecord,
+  type TableState,
+  tableLegalActions,
+} from '../holdem/table';
 import type { Bindings } from './env';
+
+// Heads-up fixtures leave out what recordMatch takes since T56: each hand's
+// pots (one: the winner's, or both seats' when split) and the places, which
+// follow from the result.
+type HeadsUpHand = Omit<TableHandRecord, 'pots'> & {
+  pots?: TableHandRecord['pots'];
+};
+type HeadsUpRecord = Omit<MatchRecordInput, 'hands' | 'places'> & {
+  hands: HeadsUpHand[];
+  places?: MatchRecordInput['places'];
+};
+type HeadsUpInput = Partial<HeadsUpRecord>;
+
+const withPot = (hand: HeadsUpHand): TableHandRecord => ({
+  ...hand,
+  pots: hand.pots ?? [
+    {
+      amount: hand.pot,
+      winners: hand.winner_seat === null ? [0, 1] : [hand.winner_seat],
+    },
+  ],
+});
+
+const placesOf = (result: MatchRecordInput['result']) =>
+  result === 'seat0_win'
+    ? [1, 2]
+    : result === 'seat1_win'
+      ? [2, 1]
+      : result === 'draw'
+        ? [1, 1]
+        : null;
 
 let testD1: TestD1;
 
@@ -88,8 +119,8 @@ const nextMatchId = () => `r_${String(++matchCounter).padStart(10, '0')}`;
 
 function hand(
   handNumber: number,
-  overrides: Partial<HandRecord> = {},
-): HandRecord {
+  overrides: Partial<HeadsUpHand> = {},
+): HeadsUpHand {
   return {
     hand_number: handNumber,
     button_seat: handNumber % 2 === 1 ? 0 : 1,
@@ -121,8 +152,8 @@ const hexSeed = (label: string) =>
 
 const RECORDED_SEED = hexSeed('recorded');
 
-function input(overrides: Partial<MatchRecordInput> = {}): MatchRecordInput {
-  return {
+function input(overrides: HeadsUpInput = {}): MatchRecordInput {
+  const match: HeadsUpRecord = {
     match_id: nextMatchId(),
     players: ['Alice', 'Bob'],
     settings: {
@@ -138,9 +169,14 @@ function input(overrides: Partial<MatchRecordInput> = {}): MatchRecordInput {
     hands: [hand(1), hand(2)],
     ...overrides,
   };
+  return {
+    places: placesOf(match.result),
+    ...match,
+    hands: match.hands.map(withPot),
+  };
 }
 
-const record = async (overrides: Partial<MatchRecordInput> = {}) => {
+const record = async (overrides: HeadsUpInput = {}) => {
   const match = input(overrides);
   await recordMatch(testD1.db, match);
   return match;
@@ -150,20 +186,21 @@ const record = async (overrides: Partial<MatchRecordInput> = {}) => {
 function playedMatch(seed: number, hands: number): MatchRecordInput {
   const random = mulberry32(seed + 1);
   const hexed = hexSeed(`played-${seed}`);
-  let state: MatchState = startMatch({
+  let state: TableState = startTable({
     seed: hexed,
     maxHands: hands,
     blindEvery: 50,
     startingStack: 200,
+    players: 2,
   });
-  const finished: HandRecord[] = [];
+  const finished: TableHandRecord[] = [];
   while (!state.over) {
     const seat = state.toAct;
     if (seat === null) throw new Error('nobody to act');
-    const result = applyAction(
+    const result = applyTableAction(
       state,
       seat,
-      randomAction(legalActions(state), random),
+      randomAction(tableLegalActions(state), random),
     );
     if (!result.ok) throw new Error(result.message);
     finished.push(...result.finishedHands);
@@ -575,8 +612,8 @@ describe('GET /v1/matches/{match_id}', () => {
     const detail = await matchDetail(match.match_id);
     expect(detail.seed).toBe(match.seed);
     const expected = (
-      JSON.parse(JSON.stringify(match.hands)) as HandRecord[]
-    ).map(h => ({
+      JSON.parse(JSON.stringify(match.hands)) as TableHandRecord[]
+    ).map(({ pots: _pots, ...h }) => ({
       ...h,
       hole_cards: dealHand(match.seed, h.hand_number).holeCards,
     }));

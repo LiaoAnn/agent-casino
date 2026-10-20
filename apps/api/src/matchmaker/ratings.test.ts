@@ -40,6 +40,7 @@ function input(
     },
     seed: '2a'.repeat(32),
     result: score === 1 ? 'seat0_win' : score === 0 ? 'seat1_win' : 'draw',
+    places: score === 1 ? [1, 2] : score === 0 ? [2, 1] : [1, 1],
     ended_at: '2026-10-18T10:00:00.000Z',
     final_stacks: stacks,
     hands: [
@@ -49,6 +50,12 @@ function input(
         blinds: [1, 2],
         winner_seat: score === 1 ? 0 : score === 0 ? 1 : null,
         pot: 200,
+        pots: [
+          {
+            amount: 200,
+            winners: score === 1 ? [0] : score === 0 ? [1] : [0, 1],
+          },
+        ],
         ended_by: 'showdown',
         board: ['As', 'Kd', '7h', '2c', '9s'],
         hole_cards: [

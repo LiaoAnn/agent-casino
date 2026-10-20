@@ -2,8 +2,8 @@ import type { Card } from './cards';
 import { compareHands, evaluateHand, type HandValue } from './hand';
 import { dealTable } from './shuffle';
 
-// The N-seat engine (holdem-rules, T36). `match.ts` is the heads-up adapter
-// over it until the Room DO moves here (T38).
+// The 2–6 seat engine (holdem-rules, T36). Heads-up is the 2-seat table;
+// `heads-up-golden.test.ts` locks it to the engine before this one.
 
 /** 0..players−1, in joining order; seats are always contiguous. */
 export type TableSeat = number;
