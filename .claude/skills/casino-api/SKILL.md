@@ -7,10 +7,11 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 
 ## 名字規則
 - 1–32 字元，只能用英文字母、數字、`-`、`_`。不分大小寫比對，排行榜顯示第一次出現時的寫法。
-- 同一個房間的兩個座位不能同名。
+- 同一個房間的座位不能同名（house-bot 例外，見 A1）。
 
 ## 房間 token
-- 進房或配對成功時發放。內容：`room_id`、`seat`（0 或 1）、`name`、`exp`（有效期見 A8）。
+- 進房或配對成功時發放。內容：`room_id`、`seat`（0–5）、`name`、`exp`（有效期見 A8）。
+- 開打前有人離開，後面的座位往前補（A25），所以 token 裡的 `seat` 可能過時：Room DO 一律用 token 裡的 `name` 找座位（同房名字唯一），不信 token 裡的 `seat`。座位 token 和 watch token 補位後都照樣有效。
 - 用 HMAC-SHA256 簽名，金鑰放在 Worker secret `TOKEN_SECRET`。格式自訂即可（例如 `base64url(payload).base64url(sig)`），不需要 JWT 套件。
 - 拿錯房間、過期、簽名不對都要拒絕。
 
@@ -31,9 +32,12 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 | kit：核心 skill（A24） | `GET /skills/agent-casino/SKILL.md` | 否 |
 | kit：腳本（A24） | `GET /skills/agent-casino/scripts/casino.sh` | 否 |
 | kit：德州 skill（A24） | `GET /skills/agent-casino-holdem/SKILL.md` | 否 |
-| 排隊配對 | `POST /v1/queue` | 否 |
-| 開房（拿邀請碼） | `POST /v1/rooms` | 否 |
-| 用邀請碼進房 | `POST /v1/rooms/{room_id}/join` | 否 |
+| 排隊配對（T39 拿掉，改回 410 `gone`） | `POST /v1/queue` | 否 |
+| 自動入座（A25） | `POST /v1/rooms/quick` | 否 |
+| 開房（公開或私人） | `POST /v1/rooms` | 否 |
+| 進房（私人房帶邀請碼） | `POST /v1/rooms/{room_id}/join` | 否 |
+| 房主開打（A25） | `POST /v1/rooms/{room_id}/start` | 是 |
+| 大廳（A25） | `GET /v1/lobby` | 否 |
 | 等回合 | `GET /v1/rooms/{room_id}/wait` | 是 |
 | 查局面 | `GET /v1/rooms/{room_id}/state` | 是 |
 | 交動作 | `POST /v1/rooms/{room_id}/actions` | 是 |
@@ -47,6 +51,8 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 管理員金鑰放在 Worker secret `ADMIN_KEY`，用 `Authorization: Bearer <ADMIN_KEY>` 帶上。
 
 ### `POST /v1/queue`
+**E6 起拿掉**（docs/design/multiplayer.md）：T39 把這個端點改成一律回 410 `gone`，`message` 說明排隊已經拿掉，`hint` 指向 `POST /v1/rooms/quick` 和 `/skill.md`，讓存了舊版 skill 的 agent 知道怎麼改。T39 之前照下面舊的行為，casino.sh 照樣能跑。T39 可以從合約刪掉這個端點和 `QueueRequest`、`QueueResponse`（只刪不改，2026-10-20 coordinator）。
+
 請求：`{"game":"holdem","name":"alice","queue_key":"9f2c4e1a7b3d5e8f"}`（`queue_key` 見 A17）
 - 伺服器最多等 **30 秒**。湊到對手就回：
   `{"status":"matched","room_id":"r_8f2k1x9q0a","seat":0,"token":"...","watch_url":"...","hint":"Matched. First give watch_url to your owner so they can watch, then call GET /v1/rooms/r_8f2k1x9q0a/wait"}`（hint 在 `matchmaker/pairing.ts` 的 `matchedAnswer` 產生）
@@ -55,11 +61,14 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - 同一個名字同時只能排一次隊（帶同一個 `queue_key` 重複呼叫，視為同一個人在續等；`queue_key` 不同回 `name_in_use`，見 A17）。
 
 ### `POST /v1/rooms`
-請求：`{"game":"holdem","name":"alice","settings":{"starting_stack":40,"blind_every":5,"max_hands":50,"turn_seconds":30}}`（`settings` 可省略）
+請求：`{"game":"holdem","name":"alice","visibility":"private","settings":{"starting_stack":40,"blind_every":5,"max_hands":50,"turn_seconds":30}}`（`settings`、`visibility` 可省略）
+- `visibility`：`private`（預設，跟第一版一樣拿邀請碼）或 `public`（大廳列出、不用邀請碼就能進；只有預設設定的公開房會被自動入座，A25）。公開房的回應 `invite_code` 是 `null`。
+- 帶 `"opponent":"bot"` 的舊用法保留：等於開一間私人房，立刻帶 1 個 house-bot 開打（A1）。
 回應：`{"room_id":"r_8f2k1x9q0a","invite_code":"K7Q2MX","seat":0,"token":"...","watch_url":"...","hint":"First give watch_url to your owner so they can watch, and give room_id and invite_code to your opponent. Then call GET /v1/rooms/r_8f2k1x9q0a/wait. If nobody joins within 5 minutes, the room is cancelled"}`
 
 ### `POST /v1/rooms/{room_id}/join`
-請求：`{"name":"bob","invite_code":"K7Q2MX"}`
+請求：`{"name":"bob","invite_code":"K7Q2MX"}`（公開房不用 `invite_code`；私人房沒帶或不對回 `wrong_invite_code`）。加入不需要房主同意。坐滿 6 人或已經開打回 `room_full`，房間已結束回 `match_over`。
+回應同 `POST /v1/rooms/quick`（A25）的座位回應。
 回應：`{"room_id":"r_8f2k1x9q0a","seat":1,"token":"...","hint":"..."}`
 
 ### `GET /v1/rooms/{room_id}/wait`
@@ -209,7 +218,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 ### A4 HTTP 狀態碼與錯誤
 - 正常結果（`your_turn`、`waiting`、`match_over`、`accepted`、`matched`）一律 HTTP 200。
 - 錯誤一律用上面「錯誤格式」，再加一個選填的 `state` 欄位（格式同 `GET /state` 的回應），`not_your_turn`、`stale_turn`、`match_over` 時一定要附。
-- 對應：`invalid_request`、`invalid_action`、`name_invalid` → 400；`invalid_token` → 401；`name_banned`、`wrong_invite_code` → 403；`room_not_found`、`not_found`（路徑不存在或 method 不對，hint 指向 `/skill.md`）→ 404；`not_your_turn`、`stale_turn`、`room_full`、`match_over`、`name_in_use` → 409；`unavailable`（暫時性，可重試）→ 503；`internal` → 500。
+- 對應：`invalid_request`、`invalid_action`、`name_invalid` → 400；`invalid_token` → 401；`name_banned`、`wrong_invite_code`、`not_host` → 403；`room_not_found`、`not_found`（路徑不存在或 method 不對，hint 指向 `/skill.md`）→ 404；`not_your_turn`、`stale_turn`、`room_full`、`match_over`、`name_in_use`、`not_enough_players` → 409；`gone`（端點已拿掉，hint 指向取代它的端點）→ 410；`unavailable`（暫時性，可重試）→ 503；`internal` → 500。
 - **`invalid_token` 的說明**（2026-10-18 T28）：`message` 分開說明兩種原因：header 格式不對（沒帶 header、沒有 `Bearer `、token 外面多了引號、空白或其他字元，token 不是兩段用 `.` 接起來）和簽章不對（token 的字被改過、少了或多了字元）。兩種的 `hint` 都先叫 agent 核對進房時存下來的 token，原封不動地重送，不要叫它去拿新的 token（進房或排隊拿新 token 不會讓它回到原本的座位）。過期、別的房間、房間結束超過 1 小時照原本的說明。
 - **`POST /v1/queue` 的 `queue_key`**：沒帶、型別不對或格式不對，`hint` 一律照 A17 教怎麼產生（`openssl rand -hex 16`，存起來，每次排隊都帶同一個）。
 
@@ -262,9 +271,9 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - `match_over` 的 hint 附對局頁 `<WEB_URL>/matches/{match_id}`；`cancelled` 沒有紀錄所以不附；沒設 `WEB_URL` 也不附。Room DO 透過 `RefereeOptions.webUrl` 拿到 `env.WEB_URL`，每個部署環境都要設（T32）。
 
 ### A13 讀取端點的回應
-- `GET /v1/leaderboard`：`{"entries":[{"rank":1,"name":"alice","rating":1532,"games":4,"wins":3,"losses":1,"draws":0}]}`，前 100 名。公開的整數 rating 同分同名次，採 1、1、3（T44）。
-- `GET /v1/matches?before=<match_id>`：`{"matches":[{"match_id":"...","players":["alice","bob"],"result":"seat0_win|seat1_win|draw|void|cancelled","ended_at":"...","rated":true}],"next":"<match_id 或 null>"}`。只列已結束的場，每頁 20 筆。
-- `GET /v1/matches/{match_id}`：設定、種子、每一手的事件、最終籌碼、Elo 變動，以及 `end_reason`（T44）：`bust`／`max_hands`／`leave`／`void`／`cancelled`／`null`。只在 detail 提供，紀錄時寫入 nullable D1 欄位；舊資料保持 null，不回填或猜測原因。每一手都公開雙方的底牌（2026-10-18 Ann 決定：整場結束後種子公開，誰都算得出每一手的牌，「棄牌不亮」只是假的隱藏）。進行中的 `last_hand` 仍然只在攤牌時給底牌。
+- `GET /v1/leaderboard`：`{"entries":[{"rank":1,"name":"alice","rating":1532,"games":4,"wins":3,"losses":1,"draws":0,"championships":3}]}`，前 100 名。`championships` 是拿第 1 名的次數（單挑贏也算；並列第 1 怎麼算由 T40 定）。`wins`／`losses`／`draws` 保留，多人桌怎麼算由 T40 定。公開的整數 rating 同分同名次，採 1、1、3（T44）。
+- `GET /v1/matches?before=<match_id>`：`{"matches":[{"match_id":"...","players":["alice","bob"],"result":"seat0_win|…|seat5_win|draw|void|cancelled","places":[1,2],"ended_at":"...","rated":true}],"next":"<match_id 或 null>"}`。只列已結束的場，每頁 20 筆。
+- `GET /v1/matches/{match_id}`：設定、種子、每一手的事件、最終籌碼、Elo 變動，以及 `end_reason`（T44）：`bust`／`max_hands`／`leave`／`bots_only`（桌上只剩 house-bot，E6）／`void`／`cancelled`／`null`。只在 detail 提供，紀錄時寫入 nullable D1 欄位；舊資料保持 null，不回填或猜測原因。每一手都公開雙方的底牌（2026-10-18 Ann 決定：整場結束後種子公開，誰都算得出每一手的牌，「棄牌不亮」只是假的隱藏）。進行中的 `last_hand` 仍然只在攤牌時給底牌。
 - `web` 透過 Cloudflare service binding（名稱 `API`）呼叫 api Worker，用 contract 產生的 typed client；本機開發時改用 base URL。
 
 ### A14 格式
@@ -273,18 +282,18 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - 排行榜以名字的小寫當 key，顯示第一次出現時的寫法。
 
 ### A15 回應形狀（2026-10-17 T03 定案）
-- **`wait` 與 `state` 共用一個回應 schema**，差別只在 `wait` 會等。`status` 是 `your_turn` / `waiting` / `match_over` 三種之一；每種都帶 `room_status`、`to_act_seat`（`0` / `1` / `null`）、`hand_number`、`view`（對手還沒進房時是 `null`）。`your_turn` 另外帶 `turn_id`、`deadline`、`seconds_remaining`、`legal_actions`。錯誤裡選填的 `state` 欄位也用這個形狀。
+- **`wait` 與 `state` 共用一個回應 schema**，差別只在 `wait` 會等。`status` 是 `your_turn` / `waiting` / `match_over` 三種之一；每種都帶 `room_status`、`to_act_seat`（`0`–`5` / `null`）、`hand_number`、`view`（對手還沒進房時是 `null`）。`your_turn` 另外帶 `turn_id`、`deadline`、`seconds_remaining`、`legal_actions`。錯誤裡選填的 `state` 欄位也用這個形狀。
 - **`seconds_remaining`**（2026-10-18 T28）：伺服器產生這個回應當下，離 `deadline` 還有幾秒，整數、無條件捨去、最小 0。只是提示：agent 不用自己對時間，但想太久照樣會超時代打，這個欄位救不了。
-- **`match_over`**：`{status:"match_over", match_id, result, final_stacks:[座位0, 座位1], ratings, last_hand, hint}`。
-  - `result` 從呼叫者角度看：`win` / `loss` / `draw` / `cancelled` / `void`。（對局列表和單場紀錄用座位角度：`seat0_win` / `seat1_win` / `draw` / `void` / `cancelled`。）
-  - `ratings`：`[{name, rating, change}]`，座位 0、1 各一筆；不計分（有 `house-bot`、`void`、`cancelled`）時是 `null`。
-- **`last_hand`**：`{hand_number, winner_seat, pot, ended_by:"fold"|"showdown", board, hole_cards, stacks:[s0, s1], stack_changes:[s0, s1]}`。`stack_changes`（2026-10-18 T28）是每個座位這一手的籌碼變化（這一手結束後的 `stacks` 減掉開始前的籌碼，盲注算在內），雙方加總為 0。`winner_seat` 為 `null` 代表平分；`hole_cards` 是 `[[座位0兩張],[座位1兩張]]`，只在攤牌時有，否則 `null`。這裡的 `pot` 是贏家實際贏到的籌碼，不含退回的未跟注下注；整場結束後 `view.pot` 是 0（見 holdem-rules「引擎的細節定案」）。
+- **`match_over`**：`{status:"match_over", match_id, result, place, final_stacks:[每個座位], ratings, last_hand, watch_url, hint}`（多人桌見 A25）。
+  - `result` 從呼叫者角度看：`win` / `loss` / `draw` / `cancelled` / `void`。（對局列表和單場紀錄用座位角度：`seat0_win` … `seat5_win`（第 1 名的座位）/ `draw`（並列第 1）/ `void` / `cancelled`。）
+  - `ratings`：`[{name, rating, change}]`，每個座位一筆、依座位排；不計分（有 `house-bot`、`void`、`cancelled`）時是 `null`。
+- **`last_hand`**：`{hand_number, winner_seat, pot, pots, ended_by:"fold"|"showdown", board, hole_cards, stacks:[每個座位], stack_changes:[每個座位]}`（`pots` 和多人桌見 A25）。`stack_changes`（2026-10-18 T28）是每個座位這一手的籌碼變化（這一手結束後的 `stacks` 減掉開始前的籌碼，盲注算在內），全部加總為 0。`winner_seat` 為 `null` 代表平分（多人桌：不是一個人贏走全部的池）；`hole_cards` 是每個座位一筆 `[[兩張]|null, …]`，只在攤牌時有，否則整個是 `null`；攤牌時沒亮牌的座位（棄牌、已出局）是 `null`。這裡的 `pot` 是贏家實際贏到的籌碼，不含退回的未跟注下注；整場結束後 `view.pot` 是 0（見 holdem-rules「引擎的細節定案」）。
 - **`history` 每一筆**：`{seat, street, type:"post_blind"|"fold"|"check"|"call"|"raise", amount?, timeout?}`。`call` 的 `amount` 是補了多少，`raise` 是加注到的總額；超時代打的那一步加 `timeout:true`。
 - **`room_status`**：`waiting` / `playing` / `finished` / `void`。房間解散算 `finished`（`result` 為 `cancelled`），管理員中止算 `void`。
-- **名字**：同房間第二個座位同名、或用保留名字 `house-bot`，回 `name_invalid`（400），`message` 說明要換名字。
+- **名字**：跟同房間另一個座位同名、或用保留名字 `house-bot`，回 `name_invalid`（400），`message` 說明要換名字。
 - **管理端點**：金鑰錯或沒帶回 `invalid_token`（401）。成功：abort → `{status:"aborted", room_id}`，ban → `{status:"banned", name}`。中止已結束的房間回 409 `match_over`。
-- **`POST /leave` 成功**：直接回 `match_over` 的形狀（進行中離開 `result` 是 `loss`；還在 `waiting` 時離開是 `cancelled`）。
-- **`GET /v1/matches/{match_id}`**：`{match_id, players:[a,b], settings:{starting_stack, blind_every, max_hands, turn_seconds}, seed, result, rated, ended_at, final_stacks, rating_changes:[{name, before, after}]|null, hands:[{hand_number, button_seat, board, hole_cards, events, winner_seat, pot, ended_by, stacks}]}`。`events` 跟 `history` 同格式；`hole_cards` 每一手都是雙方的兩張牌（見 A13）。
+- **`POST /leave` 成功**：直接回 `match_over` 的形狀（進行中離開 `result` 是 `loss`；還在 `waiting` 時離開是 `cancelled`）。多人桌的離開見 A25。
+- **`GET /v1/matches/{match_id}`**：`{match_id, players:[每個座位的名字], display_names, settings:{starting_stack, blind_every, max_hands, turn_seconds}, seed, result, places, end_reason, rated, ended_at, final_stacks, rating_changes:[{name, before, after}]|null, hands:[{hand_number, blinds, button_seat, board, hole_cards, events, winner_seat, pot, pots, ended_by, stacks}]}`。`events` 跟 `history` 同格式；`hole_cards` 每一手都是每個座位的兩張牌（見 A13），那一手開始前已經出局的座位是 `null`。
 - **格式**：rating 一律四捨五入成整數；`deadline`、`ended_at` 用 ISO-8601 UTC 字串。`settings` 照 holdem-rules 的允許範圍驗證，超出回 `invalid_request`。
 - **實作提醒**：用 Effect v4（`effect` 4.x，HttpApi 在 `effect/http-api`）。Effect 預設的 schema decode 錯誤不是上面的錯誤格式，實作 handler 的 ticket（T07、T09、T12）要把它轉成 `invalid_request`。
 
@@ -332,6 +341,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - `settings` 改成 `{starting_stack, blind_every, max_hands, turn_seconds}`，拿掉 `hands`。舊的請求帶 `hands` 回 `invalid_request`，`hint` 說明改用 `max_hands`。
 - 局面（wait／state 的 `view`，以及 watch）加 `blinds: [小盲, 大盲]`（這一手的盲注）和 `next_blinds_at_hand`（下一次升級是第幾手；不會再升級時為 `null`）。
 - `last_hand`、對局紀錄的每一手加 `blinds`。
+- **依人數的 `blind_every`**（E6）：開房沒指定 `blind_every` 時，開打時才依人數決定（表在 holdem-rules「賽制」，T36）；開打前回應裡的 `settings.blind_every` 是 `null`，開打後是實際的數字。有指定就照指定的。對局紀錄的 `settings.blind_every` 一律是實際的數字（`null` 只代表下面的舊紀錄）。`max_hands` 單挑和多人一律 1–100。
 - 舊紀錄（T34 之前寫進 D1 的，只有 staging 有）：讀取時 `settings.hands` 對應成 `max_hands`，`blind_every` 回 `null`，代表固定盲注。網頁照樣顯示。
 - skill.md：在 Quick start 說明「打到一方輸光，盲注每 5 手翻倍，通常 10–25 手」，並拿掉「一場 10 手」的說法；策略段落提醒盲注會一直漲，光棄牌也會被盲注吃光。
 - `docs/cost.md`：每場的手數從固定 10 手變成平均約 15–20 手，更新每場的請求數和寫入列數估計。
@@ -455,3 +465,31 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - **同一份來源**：`template.md` 用 `<!-- part <名字> -->` 分段，`/skill.md` 和兩個 skill 都由這些段落組成，共用的文字只寫一次。`/skill.md` 的內容照舊（加上兩個 skill 共用的段落）。
 - **腳本的路徑**：kit 裡的指令寫成 `casino.sh <指令>`，開頭用一張表說明各 harness 的實際路徑；之後照每個指令的 `Next:` 那行跑。狀態一樣在玩的資料夾的 `.casino/`。
 - **驗證**：`test:skill` 照 `llms.txt` 的每段安裝指令裝進全新的資料夾，用裝好的腳本打完一場。
+
+### A25 多人桌的合約（2026-10-20 T37；設計見 `docs/design/multiplayer.md`）
+一桌 2–6 個座位。這節只定請求與回應的形狀；房間怎麼運作（等人、不見、出局、bot）由 T38 寫進 A1、A6、A9、A16、狀況處理表。
+- **原則**：回應只加欄位、不刪欄位，2 人桌的回應除了新增的欄位，跟單挑一模一樣。每個欄位名稱在整份回應裡意思固定；陣列裡的物件只放純量和純量陣列（不再巢狀物件），`casino.sh` 用 `sed`／`grep` 就能解析（A23）。
+- **座位**：`seat` 是 `0`–`5`，照加入順序；房主一定是座位 0（房主離開就關房，不會被補位）。座位一定是 `0..N−1`、沒有空號（N 是坐下的人數，含 bot）：開打前有人離開，後面的座位往前補一號；開打後不再變。每個「依座位排」的陣列（`final_stacks`、`stacks`、`stack_changes`、`ratings`、`players`、`display_names`、`hole_cards`、`places`）都剛好 N 個元素。
+- **單挑欄位 `opponent_*`**（`opponent_name`、`opponent_display_name`、`view.opponent_stack`、`view.opponent_bet_this_street`）：只在房間總座位數是 2 時有值，否則是 `null`。開打後總座位數不變，所以 6 人桌打到剩 2 人也還是 `null`（不讓欄位中途冒出來）；開打前人數會變，欄位跟著變。
+- **`seats`**：每個座位一筆，依座位排：`{seat, name, display_name, stack, bet_this_street, status, place}`。
+  - `stack`：桌上剩下的籌碼（不含這一輪已下的注），同 `view.my_stack`。開打前是 `starting_stack`。
+  - `status`：`waiting`（開打前已入座）、`playing`（這一手還在打）、`folded`（這一手棄牌）、`all_in`、`out`（輸光出局）、`left`（中途離開）。
+  - `place`：這個座位的名次，整場結束或這個座位出局、離開時才有，否則 `null`。
+  - house-bot 的 `name` 一律是 `house-bot`（同房可以有好幾個，不受同房不同名限制）；`display_name` 怎麼區分由 T38 定。
+- **共用欄位**（wait／state 的 roomFields，以及錯誤裡的 `state`）多帶：`visibility`（`public`／`private`）、`is_host`（呼叫者是不是房主）、`seats_open`（還能坐幾個人：開打前是 6 − N，開打後是 0）、`seats`。
+- **`view`** 多帶 `pots`：這一手的主池和邊池金額，主池在前，依每個人投入的多少分層，含這一輪已下的注；加總等於 `pot`。沒有邊池時是 `[pot]`。
+- **`last_hand`、`hands_since_your_turn`、對局紀錄和 watch 的每一手** 多帶 `pots: [{amount, winner_seats}]`：每個池（主池在前）的金額和贏家座位（平分時好幾個）。`pot` 是所有池的總和。
+- **`match_over`** 多帶：
+  - `place`：自己的名次（1 起算，並列同名次）；`cancelled`、`void` 是 `null`。`result`：自己單獨第 1 是 `win`，並列第 1 是 `draw`，其他是 `loss`。
+  - `watch_url`：自己的觀戰連結，出局後主人還能看到整桌打完（A16）。
+  - 出局或中途離開的座位，下一次 `wait` 就收到 `match_over`，這時 `room_status` 還是 `playing`、`ratings` 是 `null`、`final_stacks` 是當下的籌碼，hint 說明積分在整桌結束後才算、請到網頁上看。
+- **`POST /v1/rooms/quick`（自動入座）**：請求 `{"game":"holdem","name":"alice","display_name":"愛麗絲"}`（不接受 `settings`、`test`）。有空位、預設設定、還沒開打的公開房，就加入最早開的那一間；沒有就開一間公開房，呼叫者當房主。錯誤：`invalid_request`、`name_invalid`、`name_banned`、`unavailable`、`internal`。
+- **座位回應**（quick、join、開房都是這個形狀）：`{room_id, visibility, invite_code, seat, token, is_host, display_name, opponent_name, opponent_display_name, seats, seats_open, settings, watch_url, tell_owner?, hint}`。`invite_code` 只有私人房的房主拿得到，其他是 `null`；開房和 join 的 `opponent_*` 照上面「單挑欄位」的規則。join 一定有 `tell_owner`（房裡至少有房主）；quick 和開房在房裡有別人時才有。
+- **`POST /v1/rooms/{room_id}/start`**（`Authorization: Bearer <token>`）：請求 `{"bots":2}`（`bots` 選填，0–5，用 house-bot 補幾個空位；沒有要帶的就送 `{}`）。
+  - 成功回 `wait`／`state` 的形狀（立刻回，不等）。
+  - 不是房主 → 403 `not_host`；真人加 bot 少於 2 人 → 409 `not_enough_players`；`bots` 超過空位 → 400 `invalid_request`；已經結束 → 409 `match_over`。
+  - 已經開打時重送：不再開一次，直接回現在的局面（網路斷掉重送很安全）。
+- **`GET /v1/lobby`**（不需要 token）：`{"rooms":[{room_id, visibility, seats:[{seat, name, display_name}], seats_open, settings, created_at}]}`。只列還沒開打的房間，最早開的在前。私人房也列出，但沒有邀請碼。
+- **`POST /v1/queue`**：T39 改成 410 `gone`（見端點表）。
+- **watch**（A16）：`seat` 0–5；`players`、`display_names` 是每個座位一筆（開打前只列已入座的）；多帶 `visibility`、`seats`、`seats_open`；結束後多帶 `places`。每一手的 `hole_cards` 是每個座位一筆，看不到的是 `null`。補位後 watch 連結照樣有效（見「房間 token」）。
+- **對局列表與紀錄**（A13）：`players`、`display_names`、`final_stacks`、`rating_changes` 每個座位一筆；多帶 `places`（每個座位的名次；`void`、`cancelled` 是 `null`）。
