@@ -575,11 +575,19 @@ describe('RoomAuth answers 401 invalid_token', () => {
       expect.soft(malformed.message).not.toBe(signature.message);
       for (const error of [malformed, signature]) {
         expect.soft(error.hint).toMatch(/saved|original/i);
+        expect.soft(error.hint).toMatch(/cop(?:y|ied|ying)|transcri/i);
+        expect.soft(error.hint).toMatch(/unchanged|exact|as[- ]is/i);
         expect
           .soft(error.hint)
-          .toMatch(/POST \/v1\/queue[^.]*same name[^.]*same queue_key/i);
-        expect.soft(error.hint).toMatch(/same matched[^.]*45 seconds/i);
-        expect.soft(error.hint).not.toMatch(/fresh|new token|new queue_key/i);
+          .toMatch(
+            /(?:do not|don.t|never)[^.\n]*(?:quick|join|creat|re.?seat|re.?enter)/i,
+          );
+        expect
+          .soft(error.hint)
+          .toMatch(/(?:another|different|new)[^.\n]*seat/i);
+        expect
+          .soft(error.hint)
+          .not.toMatch(/queue_key|POST \/v1\/queue|fresh|new token/i);
       }
     },
   );
@@ -609,11 +617,30 @@ describe('RoomAuth answers 401 invalid_token', () => {
     expect.soft(tampered.message).toBe(otherSecret.message);
     expect.soft(tampered.message).not.toBe(malformed.message);
     expect.soft(tampered.hint).toMatch(/saved|original/i);
+    expect.soft(tampered.hint).toMatch(/cop(?:y|ied|ying)|transcri/i);
+    expect.soft(tampered.hint).toMatch(/unchanged|exact|as[- ]is/i);
     expect
       .soft(tampered.hint)
-      .toMatch(/POST \/v1\/queue[^.]*same name[^.]*same queue_key/i);
-    expect.soft(tampered.hint).toMatch(/same matched[^.]*45 seconds/i);
-    expect.soft(tampered.hint).not.toMatch(/fresh|new token|new queue_key/i);
+      .toMatch(
+        /(?:do not|don.t|never)[^.\n]*(?:quick|join|creat|re.?seat|re.?enter)/i,
+      );
+    expect.soft(tampered.hint).toMatch(/(?:another|different|new)[^.\n]*seat/i);
+    expect
+      .soft(tampered.hint)
+      .not.toMatch(/queue_key|POST \/v1\/queue|fresh|new token/i);
+  });
+
+  it('watch credential advice does not send the owner back to the removed queue', async () => {
+    const error = await expectError(
+      await call({
+        method: 'GET',
+        path: `/v1/rooms/${ROOM}/watch`,
+        authorization: 'Bearer not-a-token',
+      }),
+      'invalid_token',
+      401,
+    );
+    expect(error.hint).not.toContain('POST /v1/queue');
   });
 
   it('checks the token before the body (no token + malformed JSON)', async () => {

@@ -264,7 +264,7 @@ const RECORD_GIVE_UP_AFTER_MS = 24 * 60 * 60 * 1000;
 // A8: an hour after the room ended, its tokens stop working.
 const EXPIRES_AFTER_END_MS = 60 * 60 * 1000;
 const PLAY_AGAIN =
-  'To play again, open a room with POST /v1/rooms or join the queue with POST /v1/queue';
+  'To play again, sit at a table with POST /v1/rooms/quick (casino.sh play) or open a room with POST /v1/rooms';
 
 const ok = <T>(value: T) => ({ ok: true as const, value });
 const fail = <C extends ApiError['code']>(error: ApiError<C>) => ({
@@ -1556,7 +1556,7 @@ const roomFull = (data: RoomData) =>
       : data.table
         ? `The table in room ${data.room_id} has already started`
         : `Room ${data.room_id} is full: ${MAX_SEATS} players are seated`,
-    'Open your own room with POST /v1/rooms, or join the queue with POST /v1/queue',
+    'Sit at another table with POST /v1/rooms/quick (casino.sh play), or open your own room with POST /v1/rooms',
   );
 
 // The finished hands and the hand in progress, played again from the seed,

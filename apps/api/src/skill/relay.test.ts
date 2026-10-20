@@ -28,7 +28,7 @@ describe.each([undefined, 'https://web.test'])(
             ? top
             : (chunks.find(chunk =>
                 chunk.includes(
-                  `sh .casino/casino.sh ${location === 'matched' ? 'queue' : 'report'}`,
+                  `sh .casino/casino.sh ${location === 'matched' ? 'play' : 'report'}`,
                 ),
               ) ?? '');
         expect(text).toMatch(/(?:cannot|can't)[\s\S]*command output/i);

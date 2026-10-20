@@ -39,9 +39,9 @@ describe.each([undefined, 'https://web.test'])(
       );
       expect(game).not.toContain('openssl rand');
     });
-    it('permits queue progress but asks no match questions beyond the first-visit name exception', () => {
+    it('permits seating progress but asks no match questions beyond the first-visit name exception', () => {
       expect(game).toMatch(
-        /(?:queu|waiting for an opponent)[^\n]*(?:progress|updates?)/i,
+        /(?:seat|table|waiting)[^\n]*(?:progress|updates?)/i,
       );
       expect(game).toMatch(
         /(?:during|started|starts|begins)[^\n]*match[^\n]*(?:only|except|no questions)/i,
@@ -53,17 +53,15 @@ describe.each([undefined, 'https://web.test'])(
         /(?:update|progress)[^\n]*(?:delay|deadline)|(?:delay|deadline)[^\n]*(?:update|progress)/i,
       );
     });
-    it('asks after three minutes, offers all choices and respects prior owner instructions', () => {
+    it('asks non-hosts after three minutes, offers waiting or leaving and respects prior owner instructions', () => {
       expect(game).toMatch(/(?:3|three) minutes|180/);
-      expect(game).toMatch(
-        /(?:queue_size|queue size|people[^\n]*queue|players[^\n]*queue)/i,
-      );
+      expect(game).toMatch(/(?:seated|seats|players[^\n]*table)/i);
       expect(game).toMatch(/(?:how long|waited|elapsed)/i);
       expect(game).toMatch(/keep waiting|continue waiting/i);
       expect(game).toMatch(/how (?:much )?long|for how long/i);
       expect(game).toMatch(/house-bot/);
       expect(game).toMatch(/unrated/);
-      expect(game).toMatch(/stop/);
+      expect(game).toMatch(/leave/);
       expect(game).toMatch(
         /(?:ask|decid|choose)[^\n]*owner|owner[^\n]*(?:ask|decid|choose)/i,
       );
@@ -74,10 +72,36 @@ describe.each([undefined, 'https://web.test'])(
         /owner[^\n]*(?:already|advance|beforehand)[^\n]*(?:follow|do|instruct)|(?:follow|respect)[^\n]*owner[^\n]*(?:instructions|decision)/i,
       );
       expect(game).toMatch(
-        /(?:pause|stop)[^\n]*queu|(?:queu)[^\n]*(?:pause|stop)/i,
+        /(?:keep|continue|still)[^\n]*wait|wait[^\n]*(?:keep|continue|still)/i,
       );
-      expect(game).toMatch(/45 seconds|45-second/);
-      expect(game).not.toContain('10 minutes');
+      expect(game).toMatch(/(?:2|two)[ -]minutes?/i);
+      expect(game).toMatch(
+        /(?:remov|lose|lost)[^\n]*seat|seat[^\n]*(?:remov|lose|lost)/i,
+      );
+      expect(game).not.toMatch(
+        /10 minutes[^\n]*(?:cancel|close|dissolv|expire)|(?:cancel|close|dissolv|expire)[^\n]*10 minutes/i,
+      );
+    });
+    it('asks the host again when seats change and keeps polling during owner replies', () => {
+      expect(game).toMatch(
+        /(?:roster|seats|seated|lineup)[^\n]*(?:chang|different)|(?:chang|different)[^\n]*(?:roster|seats|seated|lineup)/i,
+      );
+      expect(game).toMatch(
+        /start now|start (?:the match|playing)|start immediately/i,
+      );
+      expect(game).toMatch(
+        /house-bot[^\n]*(?:fill|empty|open|seat)|(?:fill|empty|open)[^\n]*house-bot/i,
+      );
+      expect(game).toMatch(/keep waiting|continue waiting/i);
+      expect(game).toMatch(
+        /(?:while|before|until)[^\n]*(?:answer|repl)[^\n]*wait|wait[^\n]*(?:while|before|until)[^\n]*(?:answer|repl)/i,
+      );
+      expect(game).toMatch(
+        /(?:only you|alone|only one)[^\n]*(?:bot|start)|(?:bot|start)[^\n]*(?:only you|alone|only one)/i,
+      );
+      expect(game).toMatch(
+        /(?:full|6 players|six players)[^\n]*(?:start|leave)/i,
+      );
     });
     it('hands over a read-only watch link at once, and reports the result and rank', () => {
       expect(game).toMatch(
@@ -118,7 +142,9 @@ describe.each([undefined, 'https://web.test'])(
       expect(game).toMatch(
         /(?:double|doubl)[^\n]*(?:5|five)|(?:5|five)[^\n]*(?:double|doubl)/i,
       );
-      expect(game).toMatch(/(?:10[-–]25|10 to 25)[^\n]*hands/i);
+      expect(game).toMatch(/(?:2[-–]3|2 to 3)[^\n]*5|(?:2[^\n]*3)[^\n]*five/i);
+      expect(game).toMatch(/4[^\n]*4[^\n]*hands?/i);
+      expect(game).toMatch(/(?:5[-–]6|5 to 6)[^\n]*3|(?:5[^\n]*6)[^\n]*three/i);
       expect(game).toMatch(/(?:lost all|runs out|no chips|zero|bust)/i);
       expect(game).toMatch(/folding[^\n]*(?:blind|safe|lose)|blind[^\n]*fold/i);
     });
@@ -145,7 +171,7 @@ describe.each([undefined, 'https://web.test'])(
       expect(md).toMatch(
         /(?:can't|cannot|cannot fully)[^\n]*cover[^\n]*blind[^\n]*all-in/i,
       );
-      expect(md).toMatch(/max_hands[^\n]*draw/i);
+      expect(md).toMatch(/max_hands[^\n]*(?:rank|place|chips|stack)/i);
       expect(md).toMatch(/seconds_remaining[^\n]*(?:guide|hint|estimate)/i);
     });
   },

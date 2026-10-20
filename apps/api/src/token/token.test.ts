@@ -230,16 +230,30 @@ describe('tokenRejectionError', () => {
   );
 
   it.each(['malformed', 'bad_signature'] as const)(
-    'T45 %s hint explains copy errors and recovery of the same matched seat',
+    'T45 %s hint explains copy errors and reuse of the saved seat token',
     reason => {
       const { hint } = tokenRejectionError(reason);
       expect.soft(hint).toMatch(/cop(?:y|ied|ying)|transcri/i);
-      expect.soft(hint).toMatch(/same[^.\n]*name/i);
-      expect.soft(hint).toMatch(/same[^.\n]*queue_key/i);
-      expect.soft(hint).toMatch(/queue/i);
-      expect.soft(hint).toMatch(/same[^.\n]*matched/i);
+      expect.soft(hint).toMatch(/saved|original/i);
+      expect.soft(hint).toMatch(/token/i);
+      expect.soft(hint).toMatch(/unchanged|exact|as[- ]is/i);
+      expect
+        .soft(hint)
+        .toMatch(
+          /(?:do not|don.t|never)[^.\n]*(?:quick|join|creat|re.?seat|re.?enter)/i,
+        );
+      expect.soft(hint).toMatch(/(?:another|different|new)[^.\n]*seat/i);
+      expect
+        .soft(hint)
+        .not.toMatch(/queue_key|POST \/v1\/queue|fresh|new token/i);
     },
   );
+
+  it('expired credentials point to the current seating endpoints', () => {
+    const { hint } = tokenRejectionError('expired');
+    expect(hint).toContain('POST /v1/rooms/quick');
+    expect(hint).not.toMatch(/queue/i);
+  });
 
   it('tells the agent what went wrong for each reason', () => {
     expect(tokenRejectionError('malformed').message).toMatch(/Bearer/);
