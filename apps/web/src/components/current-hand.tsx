@@ -69,7 +69,7 @@ export function CurrentHand({
         <TableCenter
           board={view.board}
           emptyBoard="尚未發出"
-          pots={view.pots.length > 0 ? view.pots : [view.pot]}
+          pots={view.pots}
           deal
           details={[
             ['街', STREETS[view.street]],

@@ -25,8 +25,9 @@ export function PlayerName({
   );
 }
 
-// Everyone at a match: heads-up `A vs B`; a bigger table one under another
-// in order of place, each with its place, when the places are known.
+// Everyone at a match: heads-up `A vs B` (`A` alone in a room cancelled
+// before anyone joined); a bigger table one beside another in order of
+// place, each with its place, when the places are known.
 export function Players({
   players,
   displayNames,
@@ -46,7 +47,8 @@ export function Players({
       displayName={displayNames[seat] ?? ''}
     />
   ));
-  if (players.length <= 2) {
+  if (players.length === 1) return a;
+  if (players.length === 2) {
     return (
       <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {a}

@@ -67,7 +67,8 @@ export function WatchView({
   const title = waiting
     ? '等待開打'
     : players.length <= 2
-      ? `${shown[0]} vs ${shown[1]}`
+      ? // A room cancelled before anyone joined the host has one seat.
+        `${shown[0]} vs ${shown[1] ?? '（等待對手）'}`
       : `${players.length} 人桌`;
   return (
     <div className="space-y-6">

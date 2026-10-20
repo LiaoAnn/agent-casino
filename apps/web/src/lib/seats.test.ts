@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aroundTable, outAfter, SLOTS_BY_COUNT } from './seats';
+import { aroundTable, outAfter, SLOT_CLASS, SLOTS_BY_COUNT } from './seats';
 
 describe('seat layout (web-design 牌桌版面, T41)', () => {
   it('places 2-6 seats clockwise from the bottom', () => {
@@ -73,5 +73,41 @@ describe('outAfter (T41)', () => {
       null,
       null,
     ]);
+  });
+});
+
+describe('SLOT_CLASS (T41)', () => {
+  // [column, row] of a slot's cell; row 2 is the middle plate's.
+  const cell = (slot: keyof typeof SLOT_CLASS) => {
+    const css = SLOT_CLASS[slot];
+    return [
+      Number(css.match(/col-start-(\d)/)?.[1]),
+      Number(css.match(/row-start-(\d)/)?.[1]),
+    ];
+  };
+
+  it('puts each slot in its cell around the middle', () => {
+    expect(cell('bottom')).toEqual([2, 3]);
+    expect(cell('bottomLeft')).toEqual([1, 3]);
+    expect(cell('topLeft')).toEqual([1, 1]);
+    expect(cell('top')).toEqual([2, 1]);
+    expect(cell('topRight')).toEqual([3, 1]);
+    expect(cell('bottomRight')).toEqual([3, 3]);
+  });
+
+  it('pushes the bets towards the middle', () => {
+    for (const slot of Object.keys(SLOT_CLASS) as (keyof typeof SLOT_CLASS)[]) {
+      const [, row] = cell(slot);
+      expect(SLOT_CLASS[slot]).toContain(
+        row === 3 ? 'flex-col-reverse' : 'flex-col',
+      );
+    }
+  });
+
+  it.each([3, 4, 5, 6])('gives each of %i seats its own cell', n => {
+    const cells = (SLOTS_BY_COUNT[n] ?? []).map(slot => cell(slot).join(','));
+    expect(cells).toHaveLength(n);
+    expect(new Set(cells).size).toBe(n);
+    expect(cells[0]).toBe('2,3');
   });
 });

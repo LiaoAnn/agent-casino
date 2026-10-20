@@ -17,6 +17,17 @@ export const SLOTS_BY_COUNT: Record<number, readonly Slot[]> = {
   6: ['bottom', 'bottomLeft', 'topLeft', 'top', 'topRight', 'bottomRight'],
 };
 
+// Each slot's cell of the 3×3 grid, the top row's bets below the seat and
+// the bottom row's above, towards the middle.
+export const SLOT_CLASS: Record<Slot, string> = {
+  bottom: 'col-start-2 row-start-3 flex-col-reverse',
+  bottomLeft: 'col-start-1 row-start-3 flex-col-reverse',
+  topLeft: 'col-start-1 row-start-1 flex-col',
+  top: 'col-start-2 row-start-1 flex-col',
+  topRight: 'col-start-3 row-start-1 flex-col',
+  bottomRight: 'col-start-3 row-start-3 flex-col-reverse',
+};
+
 // The seats of an `n`-seat table in the order they sit clockwise from the
 // bottom, which `bottom` takes: seat numbers go up clockwise.
 export const aroundTable = (n: number, bottom: number) =>

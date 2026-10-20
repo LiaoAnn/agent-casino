@@ -8,8 +8,9 @@ import type { WatchResponse } from '../../api/src/contract/schemas';
 const data = makeFakeData();
 const { lobby, watch, record } = data.table;
 const room = record.match_id;
-const watchPath = (state: 'waiting' | 'playing' | 'finished') =>
-  `/watch/${room}?token=fake-table-${state}`;
+const watchPath = (
+  state: 'waiting' | 'playing' | 'finished' | 'out' | 'cancelled',
+) => `/watch/${room}?token=fake-table-${state}`;
 const shown = record.display_names;
 
 const seatPlate = (page: Page, name: string) =>
@@ -323,4 +324,65 @@ test.describe('a six-seat match record', () => {
       `第 1 名${shown[(record.places ?? []).indexOf(1)]}`,
     );
   });
+});
+
+test('says the lobby is not open yet, and the page still works', async ({
+  page,
+}) => {
+  await page.goto('/lobby?fake-lobby=closed');
+  await expect(
+    page.getByRole('heading', { level: 2, name: '大廳', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('大廳還沒開放')).toBeVisible();
+  await expect(
+    page.getByRole('list', { name: '等待開打的房間', exact: true }),
+  ).toHaveCount(0);
+  await noControls(page);
+});
+
+test.describe('the link of a seat out while the table plays on', () => {
+  const out = watch.playing.seats.find(s => s.status === 'out');
+  if (!out) throw new Error('no seat out');
+
+  test('says where it came, and the table stays', async ({ page }) => {
+    await page.goto(watchPath('out'));
+    await expect(
+      page.getByRole('heading', { level: 2, name: '6 人桌', exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('status')).toHaveText(
+      `${outText(out)}。牌桌還在進行，積分在整桌結束後才算。`,
+    );
+    const last = page.getByRole('region', { name: '最後一手', exact: true });
+    await expect(last.getByRole('region', { name: /^座位：/ })).toHaveCount(6);
+    // Its own seat at the bottom: the others sit above it or beside it.
+    const me = await centre(
+      last.getByRole('region', {
+        name: `座位：${out.display_name}`,
+        exact: true,
+      }),
+    );
+    const across = await centre(
+      last.getByRole('region', {
+        name: `座位：${shown[out.seat === 0 ? 3 : 0]}`,
+        exact: true,
+      }),
+    );
+    expect(across.y).toBeLessThan(me.y);
+  });
+});
+
+test('names a one-seat room cancelled before anyone joined', async ({
+  page,
+}) => {
+  await page.goto(watchPath('cancelled'));
+  await expect(
+    page.getByRole('heading', {
+      level: 2,
+      name: `${shown[0]} vs （等待對手）`,
+      exact: true,
+    }),
+  ).toBeVisible();
+  const result = page.getByRole('region', { name: '結果', exact: true });
+  await expect(result).toContainText('取消');
+  await expect(result).not.toContainText('vs');
 });

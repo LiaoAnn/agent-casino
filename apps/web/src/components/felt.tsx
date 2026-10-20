@@ -3,7 +3,7 @@ import { ChipStack } from '@/components/chip-stack';
 import type { Pair } from '@/components/pairs';
 import { Board } from '@/components/playing-card';
 import { potNames } from '@/lib/format';
-import { SLOTS_BY_COUNT, type Slot } from '@/lib/seats';
+import { SLOT_CLASS, SLOTS_BY_COUNT } from '@/lib/seats';
 import { cn } from '@/lib/utils';
 
 // One place at the table: the seat's plate and its bet this street.
@@ -50,7 +50,7 @@ export function Felt({
             key={place.key}
             className={cn(
               'relative flex w-full min-w-0 max-w-xs items-center gap-2',
-              SLOT[slot],
+              SLOT_CLASS[slot],
             )}>
             <div className="w-full">{place.seat}</div>
             <div className="flex min-h-8 items-center">{place.bet}</div>
@@ -63,17 +63,6 @@ export function Felt({
     </div>
   );
 }
-
-// Each place's cell, the top row's bets below the seat and the bottom
-// row's above, towards the middle.
-const SLOT: Record<Slot, string> = {
-  bottom: 'col-start-2 row-start-3 flex-col-reverse',
-  bottomLeft: 'col-start-1 row-start-3 flex-col-reverse',
-  topLeft: 'col-start-1 row-start-1 flex-col',
-  top: 'col-start-2 row-start-1 flex-col',
-  topRight: 'col-start-3 row-start-1 flex-col',
-  bottomRight: 'col-start-3 row-start-3 flex-col-reverse',
-};
 
 function Rim({ className }: { className: string }) {
   return (

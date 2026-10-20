@@ -15,6 +15,7 @@ import type {
   WatchResponse,
 } from '@agent-casino/api/src/contract/schemas';
 import { createServerFn } from '@tanstack/react-start';
+import { getRequestUrl } from '@tanstack/react-start/server';
 import { Effect } from 'effect';
 import { FetchHttpClient, HttpClient, HttpClientRequest } from 'effect/http';
 import { HttpApiClient } from 'effect/http-api';
@@ -92,11 +93,14 @@ export const getLeaderboard = createServerFn({ method: 'GET' }).handler(
 );
 
 // The rooms waiting to start, or null while the api has no lobby open
-// (its `unavailable`, before T39).
+// (its `unavailable`, before T39). The fake lobby is closed for a page
+// loaded with `?fake-lobby=closed`.
 export const getLobby = createServerFn({ method: 'GET' }).handler(
   async (): Promise<Lobby | null> =>
     useFake
-      ? (await fake()).table.lobby
+      ? new URL(getRequestUrl()).searchParams.get('fake-lobby') === 'closed'
+        ? null
+        : (await fake()).table.lobby
       : read(client =>
           client.lobby().pipe(
             Effect.catchIf(
@@ -143,8 +147,45 @@ export const getMatch = createServerFn({ method: 'GET' })
 // The test token of the fake heads-up watch links (VITE_FAKE_DATA=1).
 const FAKE_WATCH_TOKEN = 'fake-watch-token';
 // The six-seat table's room is one room in three states: its token picks
-// which, `fake-table-waiting`, `fake-table-playing` or `fake-table-finished`.
+// which, `fake-table-waiting`, `fake-table-playing` or `fake-table-finished`;
+// `fake-table-out` is the link of a seat already out while it plays on, and
+// `fake-table-cancelled` the host's once it left before anyone joined.
 const FAKE_TABLE_TOKEN = 'fake-table-';
+
+// The table in play as the first seat out of it would watch it: no hand of
+// its own, and none of the watched seat's notes.
+function outSeatWatch(playing: WatchResponse): WatchResponse | undefined {
+  const out = playing.seats.find(seat => seat.status === 'out');
+  if (out === undefined) return undefined;
+  return {
+    ...playing,
+    seat: out.seat,
+    deadline: null,
+    view: null,
+    hands: playing.hands.map(hand => ({
+      ...hand,
+      events: hand.events.map(({ note: _, ...event }) => event),
+    })),
+  };
+}
+
+// The waiting table once its host left alone: cancelled, one seat.
+function cancelledWatch(waiting: WatchResponse): WatchResponse {
+  const host = waiting.seats.slice(0, 1);
+  return {
+    ...waiting,
+    players: waiting.players.slice(0, 1),
+    display_names: waiting.display_names.slice(0, 1),
+    seats: host,
+    seats_open: 5,
+    room_status: 'finished',
+    match_id: waiting.room_id,
+    result: 'cancelled',
+    places: null,
+    final_stacks: host.map(seat => seat.stack),
+    ratings: null,
+  };
+}
 
 export type WatchData =
   | WatchResponse
@@ -162,9 +203,14 @@ export const getWatch = createServerFn({ method: 'POST' })
       const { playing, finished } = data.watch;
       if (token.startsWith(FAKE_TABLE_TOKEN)) {
         const state = token.slice(FAKE_TABLE_TOKEN.length);
-        const table = Object.entries(data.table.watch).find(
-          ([key]) => key === state,
-        )?.[1];
+        const table =
+          state === 'out'
+            ? outSeatWatch(data.table.watch.playing)
+            : state === 'cancelled'
+              ? cancelledWatch(data.table.watch.waiting)
+              : Object.entries(data.table.watch).find(
+                  ([key]) => key === state,
+                )?.[1];
         if (table === undefined) return { error: 'invalid_token' };
         return table.room_id === roomId ? table : { error: 'room_not_found' };
       }

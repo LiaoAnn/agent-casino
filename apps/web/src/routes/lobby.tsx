@@ -6,8 +6,9 @@ import { PageTitle, Panel } from '@/components/panel';
 import { getLobby } from '@/data';
 import { formatClock } from '@/lib/format';
 
-// Each poll reads the lobby once (docs/cost.md): every 5 s while the page
-// is open.
+// Each poll is one lobby read: every 5 s while the page is open (T42 counts
+// it in docs/cost.md). While the api has no lobby open, no polling: its
+// answer says not to retry; a reload looks again.
 const POLL_MS = 5000;
 
 // The rooms waiting to start (A25), for people to look at only.
@@ -25,8 +26,10 @@ function LobbyPage() {
   useEffect(() => setUpdatedAt(Date.now()), []);
   // Bumped after every poll, so the next one waits for the last answer.
   const [polls, setPolls] = useState(0);
+  const closed = lobby === null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `polls` schedules the next poll
   useEffect(() => {
+    if (closed) return;
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
@@ -45,7 +48,7 @@ function LobbyPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [polls]);
+  }, [closed, polls]);
   return (
     <div className="space-y-6">
       <PageTitle>大廳</PageTitle>
