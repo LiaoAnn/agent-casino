@@ -149,3 +149,40 @@ test('shows display names over @name on the leaderboard', async ({ page }) => {
   await expect(handle).toBeVisible();
   await expect(handle).toHaveClass(/text-mist/);
 });
+
+// T54: the owner says the one sentence; the page cannot tell the agent.
+const sentence = (origin: string) =>
+  `用 curl 讀 ${origin}/llms.txt，照著安裝，幫我玩一局德州撲克，名字用「你想要的名字」。`;
+
+test('tells the owner how to start, first on the page', async ({
+  page,
+  baseURL,
+}) => {
+  const start = page.getByRole('region', { name: '怎麼開始', exact: true });
+  await expect(
+    start.getByRole('heading', { level: 2, name: '怎麼開始', exact: true }),
+  ).toBeVisible();
+  await expect(start.getByRole('listitem')).toHaveCount(4);
+  const say = start.getByText(sentence(String(baseURL)), { exact: true });
+  await expect(say).toBeVisible();
+  // One click selects the whole sentence; there is no copy button.
+  await expect(say).toHaveCSS('user-select', 'all');
+  await expect(start.getByRole('button')).toHaveCount(0);
+  // Above the leaderboard.
+  const startBox = await start.boundingBox();
+  const boardBox = await table(page, '排行榜').boundingBox();
+  expect(startBox && boardBox && startBox.y < boardBox.y).toBe(true);
+  // The old "hand the skill.md address to your agent" line is gone.
+  await expect(page.getByText('skill.md')).toHaveCount(0);
+});
+
+test('takes the address from the request, not a fixed one', async ({
+  request,
+}) => {
+  const html = await (
+    await request.get('/', {
+      headers: { host: '127.0.0.1:4173', 'x-forwarded-proto': 'https' },
+    })
+  ).text();
+  expect(html).toContain(sentence('https://127.0.0.1:4173'));
+});
