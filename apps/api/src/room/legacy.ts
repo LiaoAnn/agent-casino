@@ -85,8 +85,12 @@ export const upgradeMatch = (match: LegacyMatch): TableState => ({
     ...match.lastHand,
     pots: onePot(match.lastHand),
   },
-  // Heads-up a fold ends the hand, so nobody is folded between turns.
-  folded: [false, false],
+  // Heads-up a fold ends the hand, so nobody is folded between turns; the
+  // engine keeps the folder marked once a fold ends the match.
+  folded:
+    match.over && match.lastHand?.ended_by === 'fold'
+      ? [0, 1].map(seat => seat !== match.lastHand?.winner_seat)
+      : [false, false],
   places: match.over ? placesOf(match.stacks as Pair<number>) : [null, null],
   taken: [0, 0],
 });

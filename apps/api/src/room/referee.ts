@@ -1900,7 +1900,9 @@ function matchOverHint(
     ended.reason === 'left'
       ? data.seats[seat].left
         ? 'you lost because you left'
-        : 'you won because your opponent left'
+        : result === 'win'
+          ? 'you won because your opponent left'
+          : `you finished in place ${ended.places?.[seat]}`
       : ended.reason === 'bots_only'
         ? `it ended with only house-bot left at the table and you finished in place ${ended.places?.[seat]}`
         : { win: 'you won', loss: 'you lost', draw: 'it is a draw' }[result];
