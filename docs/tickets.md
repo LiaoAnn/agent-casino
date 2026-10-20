@@ -439,6 +439,15 @@
 - 驗證：`pnpm check`、`pnpm test:web`（首頁出現那句話，網址是目前網站的網址）。
 - 功能驗證：coordinator 在本機用 Sonnet 和 Haiku，提示語就是首頁上的那句話（`SKIP_SKILL=1`）：先看它們有沒有用 curl 讀，並在動手前跟主人說明、問要不要安裝和名字；再回答「好，名字用 X」，看有沒有裝好 kit、只用 `casino.sh` 打完。
 
+### T55 casino.sh 在 macOS 的 sh 跑不起來（約 100 行）· Blocked by：—
+- 來源：2026-10-20 Ann 在 macOS 上用 pi 實際玩正式環境。macOS 的 `/bin/sh` 是 bash 3.2，它有個舊 bug：`$( … )` 裡的 `case` 模式 `call)` 的右括號會被當成 `$(` 的結尾，整支腳本語法錯誤。Linux 的 bash、dash、busybox 都測不出來。
+- 要做的：
+  - `apps/api/src/skill/casino.sh` 約 222–227 行，`legal=$( … )` 裡的 `case` 模式改成 `(call)`、`(raise)`、`(*)`（POSIX 允許）。檢查整支腳本，`$( )` 裡如果還有別的 `case`，一起改。
+  - `CASINO_SH_VERSION`（`casino-sh.ts`）改成新版本，例如 `2026-10-20.1`。
+  - CI 加一個 macOS runner 的 job：用系統的 `/bin/sh` 跑 `sh -n`，並跑幾個不連網的指令（`help`、`version`、各指令的 `-h`）。只在 Linux 檢查抓不到這個 bug。
+- 驗證：`pnpm check`、`pnpm test:skill`；CI 的 macOS job 在修之前會失敗（先推一次確認）、修之後通過。
+- 合併後 coordinator 經 Ann 同意部署到正式環境。
+
 ### T52 kit 上正式環境 ★🔒 · Blocked by：T54
 - coordinator 跑 arena 驗收，通過後經 Ann 同意部署到正式環境，再跑一輪正式環境試玩，打完照 Ann 的要求清掉紀錄。
 
