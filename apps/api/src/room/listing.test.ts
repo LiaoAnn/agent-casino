@@ -390,3 +390,51 @@ describe('T39 RoomReferee pending lobby notification regression', () => {
     }
   });
 });
+
+describe('T39 RoomReferee lobby notification response timing', () => {
+  it.each(['create', 'join'] as const)(
+    '%s waits for its lobby notification before responding successfully',
+    async operation => {
+      const f = fixture();
+      if (operation === 'join') value(await f.room.create(f.input));
+
+      let release = () => {};
+      const notification = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      let notified = () => {};
+      const notificationStarted = new Promise<void>(resolve => {
+        notified = resolve;
+      });
+      f.listRoom.mockImplementation(() => {
+        notified();
+        return notification;
+      });
+
+      let settled = false;
+      const request =
+        operation === 'create' ? f.room.create(f.input) : f.join('bob');
+      void request.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      try {
+        await notificationStarted;
+        for (let i = 0; i < 3; i++) {
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        expect(settled).toBe(false);
+
+        release();
+        expect(await request).toMatchObject({ ok: true });
+      } finally {
+        release();
+        await Promise.allSettled([request]);
+      }
+    },
+  );
+});

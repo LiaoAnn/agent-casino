@@ -345,7 +345,7 @@ export class RoomReferee {
   // RoomData.listed as last saved.
   #listed: RoomData['listed'];
   // The lobby updates sent and not yet answered.
-  #telling: Promise<unknown> = Promise.resolve();
+  #telling: Promise<void> = Promise.resolve();
   #data: Promise<RoomData | undefined> | undefined;
   // The write of the finished match in flight, so it runs once at a time.
   #recording: Promise<boolean> | undefined;
@@ -1375,7 +1375,7 @@ export class RoomReferee {
         console.error(`Room ${listing.room_id}: lobby not told`, error);
       }
     })();
-    this.#telling = Promise.all([this.#telling, told]);
+    this.#telling = Promise.all([this.#telling, told]).then(() => {});
   }
 
   // Waits until the lobby has heard of every change so far. create and join
