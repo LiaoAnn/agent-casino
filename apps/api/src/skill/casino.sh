@@ -217,13 +217,15 @@ show() {
       [ -n "$board" ] && board=$(cards "$board") || board=none
       say "Your cards: $(cards "$(printf '%s' "$view" | jarr my_cards)")   Board: $board"
       say "Pot $(printf '%s' "$view" | jnum pot). You: $(printf '%s' "$view" | jnum my_stack) chips, bet $(printf '%s' "$view" | jnum my_bet_this_street) this street. $OPP: $(printf '%s' "$view" | jnum opponent_stack) chips, bet $(printf '%s' "$view" | jnum opponent_bet_this_street) this street."
+      # Inside $( ), case patterns need the leading "(": the old shell behind
+      # macOS /bin/sh reads a bare "call)" as the end of the $( ).
       legal=$(printf '%s' "$body" | sed -n 's/.*"legal_actions":\[\([^]]*\)\].*/\1/p' | sed 's/},{/}\
 {/g' | while IFS= read -r a || [ -n "$a" ]; do
         t=$(printf '%s' "$a" | jstr type)
         case $t in
-          call) printf 'call %s\n' "$(printf '%s' "$a" | jnum amount)" ;;
-          raise) printf 'raise %s-%s\n' "$(printf '%s' "$a" | jnum min)" "$(printf '%s' "$a" | jnum max)" ;;
-          *) printf '%s\n' "$t" ;;
+          (call) printf 'call %s\n' "$(printf '%s' "$a" | jnum amount)" ;;
+          (raise) printf 'raise %s-%s\n' "$(printf '%s' "$a" | jnum min)" "$(printf '%s' "$a" | jnum max)" ;;
+          (*) printf '%s\n' "$t" ;;
         esac
       done | sed -n 'H;${x;s/^\n//;s/\n/ | /g;p;}')
       say "Legal: $legal"

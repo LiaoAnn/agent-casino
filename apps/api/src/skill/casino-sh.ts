@@ -3,7 +3,7 @@
 import script from './casino.sh?raw' with { type: 'text' };
 
 // Bump on every change agents should download again.
-export const CASINO_SH_VERSION = '2026-10-19.2';
+export const CASINO_SH_VERSION = '2026-10-20.1';
 
 export const renderCasinoSh = (baseUrl: string): string =>
   script
