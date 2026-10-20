@@ -429,6 +429,51 @@ describe('T38 狀況處理：主動離開（開打前）與不見', () => {
     });
   });
 
+  it('不見（開打前 2 分鐘沒有請求）：host idle 119 999 ms keeps the room waiting; 120 000 ms closes it', async () => {
+    const f = fixture();
+    await f.sit(2);
+    f.clock.ms += 119_999;
+    await f.state('bob');
+    await f.room.alarm();
+    expect(await f.state('bob')).toMatchObject({
+      room_status: 'waiting',
+      opponent_name: 'alice',
+    });
+    f.clock.ms += 1;
+    await f.room.alarm();
+    expect(await f.state('bob')).toMatchObject({
+      status: 'match_over',
+      result: 'cancelled',
+    });
+    expect(f.records).toEqual([]);
+  });
+
+  it('不見（開打前 2 分鐘沒有請求）：guest idle 119 999 ms keeps its seat; 120 000 ms removes it', async () => {
+    const f = fixture();
+    await f.sit(3);
+    f.clock.ms += 119_999;
+    await f.state('alice');
+    await f.state('carol');
+    await f.room.alarm();
+    expect((await f.state()).seats.map(s => s.name)).toEqual([
+      'alice',
+      'bob',
+      'carol',
+    ]);
+    f.clock.ms += 1;
+    await f.state('alice');
+    await f.state('carol');
+    await f.room.alarm();
+    expect((await f.state()).seats.map(s => s.name)).toEqual([
+      'alice',
+      'carol',
+    ]);
+    expect(await f.room.status('bob', { wait: false })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_token' },
+    });
+  });
+
   it('不見：after start an idle seat times out instead of being removed or compacted', async () => {
     const f = fixture({ settings: { turn_seconds: 120 } });
     await f.sit(3);
@@ -480,6 +525,7 @@ async function bustFixture() {
   for (const [seat, action] of actions)
     engine = (await step(f, engine, seat, action)).state;
   expect(engine.places[0]).not.toBeNull();
+  expect(engine.stacks[0]).toBe(0);
   expect(engine.over).toBe(false);
   return { f, engine };
 }
@@ -487,6 +533,8 @@ async function bustFixture() {
 describe('T38 狀況處理：出局、主動離開（進行中）、桌上只剩 house-bot', () => {
   it('桌上只剩 house-bot：human busting ends at once with the two surviving bots ranked by chips', async () => {
     const oracle = humanBustOracle();
+    expect(oracle.state.places[0]).not.toBeNull();
+    expect(oracle.state.over).toBe(false);
     const f = fixture({
       seed: oracle.seed,
       settings: { starting_stack: 10, blind_every: 50 },
@@ -651,6 +699,8 @@ describe('T38 狀況處理：出局、主動離開（進行中）、桌上只剩
     expect(f.records).toHaveLength(1);
     expect(f.records[0].end_reason).toBe('bots_only');
     const record = f.records[0];
+    // The absent human (seat 0) ranks behind both bots.
+    expect(record.places?.[0]).toBe(3);
     for (const seat of [1, 2]) {
       expect(record.places?.[seat]).toBe(
         1 +
@@ -667,6 +717,8 @@ describe('T38 N-seat final records and watch privacy', () => {
     // Deterministically find a split first place using legal check/call play.
     // The seed and complete action trace are retained; no state is fabricated.
     const oracle = tiedFirstOracle();
+    expect(oracle.state.over).toBe(true);
+    expect(oracle.state.places.filter(p => p === 1).length).toBeGreaterThan(1);
     const f = fixture({
       seed: oracle.seed,
       settings: { blind_every: 50, max_hands: 1 },
@@ -696,29 +748,6 @@ describe('T38 N-seat final records and watch privacy', () => {
       places: engine.places,
       final_stacks: engine.stacks,
     });
-  });
-
-  it('validates seed/action fixtures against the table engine independently of RoomReferee', () => {
-    let engine = engineFor(4, 10);
-    for (const [seat, action] of [
-      [3, { type: 'raise', amount: 10 }],
-      [0, { type: 'call' }],
-      [1, { type: 'fold' }],
-      [2, { type: 'fold' }],
-    ] as [number, Action][]) {
-      const next = applyTableAction(engine, seat, action);
-      if (!next.ok) throw new Error(next.message);
-      engine = next.state;
-    }
-    expect(engine.places[0]).not.toBeNull();
-    expect(engine.stacks[0]).toBe(0);
-    expect(engine.over).toBe(false);
-    const tie = tiedFirstOracle();
-    expect(tie.state.over).toBe(true);
-    expect(tie.state.places.filter(p => p === 1).length).toBeGreaterThan(1);
-    const bust = humanBustOracle();
-    expect(bust.state.places[0]).not.toBeNull();
-    expect(bust.state.over).toBe(false);
   });
 
   it.each([3, 4, 6])(

@@ -1,6 +1,6 @@
 // The multiplayer endpoints in the contract (casino-api A25) whose handlers
-// come with T38 and T39. Until then they answer this, which an agent should
-// not retry.
+// come with T39 (quick seat, lobby). Until then they answer this, which an
+// agent should not retry.
 import { Effect } from 'effect';
 import { apiError } from '../contract/errors';
 

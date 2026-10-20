@@ -7,14 +7,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { handle } from '../app';
-import type { MatchRecordInput } from '../db/records';
 import { startTestD1 } from '../db/test-d1';
 import { RatingWriter } from '../matchmaker/ratings';
-import {
-  RoomReferee,
-  type RoomStorage,
-  type TableRecordInput,
-} from '../room/referee';
+import { RoomReferee, type RoomStorage } from '../room/referee';
 import type { Bindings } from '../routes/env';
 import { renderCasinoSh } from './casino-sh';
 import { renderKitSkill, renderLlmsTxt } from './render';
@@ -89,11 +84,7 @@ describe('A24 install and play from llms.txt', () => {
               room = new RoomReferee(new MemoryStorage(), {
                 waitMs: 30,
                 webUrl: web,
-                record: (input: TableRecordInput) => {
-                  expect(input.players).toHaveLength(2);
-                  // The test DB still stores heads-up records until T40.
-                  return ratings.record(input as unknown as MatchRecordInput);
-                },
+                record: input => ratings.record(input),
               });
               rooms.set(id, room);
             }

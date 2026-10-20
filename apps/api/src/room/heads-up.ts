@@ -1,5 +1,5 @@
 // Heads-up helpers that contract/fake.ts and db/ still use. The Room DO is
-// N-seat since T38; T38 or T40, whichever merges last, deletes this file.
+// N-seat since T38; T56 deletes this file.
 import type { SeatResult } from '../db/schema';
 import type { Seat } from '../holdem/match';
 

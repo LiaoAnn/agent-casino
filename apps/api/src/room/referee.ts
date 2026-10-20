@@ -552,7 +552,7 @@ export class RoomReferee {
   #begin(data: RoomData, at: number): RoomData {
     const players = data.seats.length;
     const blindEvery =
-      data.settings.blind_every ?? DEFAULT_BLIND_EVERY[players] ?? 5;
+      data.settings.blind_every ?? DEFAULT_BLIND_EVERY[players];
     const table = startTable({
       seed: data.seed,
       players,

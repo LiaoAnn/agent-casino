@@ -83,7 +83,7 @@ export const joinRoom = HttpApiBuilder.handler(
           : `Joined the table of ${seated.seats[0]?.display_name}; seated: ${shown(seated.seats)}. Watch: ${seated.watch_url}`,
         hint: playing
           ? `Joined. ${SHARE_WATCH_URL}, then call ${wait} for your first turn`
-          : `Joined. ${SHARE_WATCH_URL}. The host's owner decides when the table starts: call ${wait} until it does. ${KEEP_CALLING.replace('the room closes', 'you lose your seat')}`,
+          : `Joined. ${SHARE_WATCH_URL}. The host's owner decides when the table starts: call ${wait} until it does. Make a request at least every 2 minutes, or you lose your seat`,
       };
     }),
 );
