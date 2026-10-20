@@ -621,6 +621,9 @@
   - 把 room 換到 T36 的 table API（`holdem/table.ts`），刪掉 `holdem/match.ts` 的單挑轉接層（`replay.ts`、`view.ts` 的單挑版一起換掉）。
 - 只改：`apps/api/src/room/`、`routes/room.ts`、`holdem/` 的單挑轉接層、casino-api skill。
 - 驗證：`pnpm test:api`，狀況處理表每一列一個測試。
+- 範圍例外（2026-10-20 coordinator）：`contract/fake.ts` 只改呼叫（換成 N 人的 `watchView`），schemas 不動；`token/token.ts` 的 `seat` 改成 0–5。
+- `holdem/match.ts` 和 `room/heads-up.ts` 剩下的單挑轉接（`contract/fake.ts`、`db/` 還在用），由 T38、T40 中後合併的那張刪掉。
+- 單挑舊模式（過渡用，casino-api「房間狀態」）：queue 開的房，以及沒帶 `visibility` 的 `POST /v1/rooms`，第 2 人入座就開打，讓 queue 和舊版 `casino.sh` 照舊能用。
 
 ### T56 刪掉單挑轉接層（約 600 行，多半是測試搬移）· Blocked by：T38
 - 來源：T38 換到 `holdem/table.ts` 之後，`holdem/match.ts`、`view.ts`、`replay.ts`、`room/heads-up.ts` 剩下的單挑轉接只剩 `contract/fake.ts`、`holdem/invariants.ts`、`apps/api/scripts/` 和測試在用。從 T38 拆出來，讓 T38 的 PR 只放功能。
@@ -637,6 +640,7 @@
 - Matchmaker DO 改成大廳：記住有空位的公開房，自動入座時進最早開的那一間，只進預設設定的房間；拿掉 queue，`POST /v1/queue` 回錯誤並附 hint。
 - 只改：`apps/api/src/matchmaker/`、`routes/queue.ts`、新的自動入座路由、casino-api skill。
 - 合約例外（2026-10-20 coordinator）：可以從 `apps/api/src/contract/` 刪掉 queue 端點和 `QueueRequest`、`QueueResponse`（只刪不改）；`gone` 錯誤碼和自動入座端點 T37 已經加好。
+- queue 拿掉後，單挑舊模式（T38）只剩不帶 `visibility` 的私人房在用。
 - 驗證：`pnpm test:api`。同時 6 個人自動入座，會坐進同一間；第 7 個人另開一間；私人房和自訂設定的房間不會被自動入座。
 
 ### T40 多人積分與紀錄（約 700 行）· Blocked by：T37
@@ -649,6 +653,7 @@
   - `/v1/matches`、排行榜列出 N 人。
 - 跟 T38 接上 `recordMatch`：由大廳依序寫入，跟 A10 一樣。
 - 只改：`apps/api/src/db/`、`matchmaker/` 寫 Elo 的部分、`routes/read.ts`、casino-api skill。
+- `holdem/match.ts` 和 `room/heads-up.ts` 剩下的單挑轉接，由 T38、T40 中後合併的那張刪掉。T38 傳給 `recordMatch` 的 N 人形狀：`players[]`、`display_names[]`、`final_stacks[]`、`places[]`、`hands` 用 `holdem/table.ts` 的 `TableHandRecord`；T40 合併前 3 人以上的場先不寫、回 unrated。
 - 驗證：`pnpm test:api`。2 人桌的 Elo 跟舊算法逐位相同；3 人並列算 0.5；有 bot 的場不計分。
 
 ### T41 網頁多人版（約 900 行）· Blocked by：T37
@@ -672,6 +677,7 @@
   - 出局時的 `match_over`；
   - 每步 30 秒。
 - 只改：`apps/api/src/skill/`（含 `casino.sh` 和 kit）、`docs/cost.md`、`AGENTS.md`、`scripts/`（e2e 和 playtest 改成多人）。
+- 決定單挑舊模式（T38）要不要刪。正式環境上已裝舊版 kit 的主人，會用不帶 `visibility` 的 `room create`／`room join`；刪之前要確認 kit 的版本提醒能讓他們更新，或保留舊模式。
 - 驗證：`pnpm test:skill`（用 `casino.sh` 3 人桌打完）、`pnpm e2e --target=local`（3 人桌從頭打到尾）、CI 的 macOS `casino.sh` 檢查。
 - 試玩：arena 開一桌 3–6 個 agent 自動入座，再加一個「私人房加 bot」的情境，報告寫進 `docs/playtests/`。
 
