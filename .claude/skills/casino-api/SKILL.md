@@ -154,8 +154,9 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 ## 資料與積分
 
 - 資料庫一律用 Cloudflare D1，透過 Drizzle ORM 存取：schema 寫在 `apps/api/src/db/schema.ts`，migration 由 drizzle-kit 產生並用 wrangler 套用。不要手寫 SQL 字串或另外引入其他 ORM。
-- D1 至少三張表：`matches`（房間、雙方名字、設定、種子、結果、狀態）、`match_events`（每一步：手數、街、座位、動作、金額、是否超時）、`ratings`（名字、Elo、場數、勝敗平）。
-- **Elo**：初始 1500，K = 32，平手算 0.5。`void` 的場不計分。被停權的名字不顯示在排行榜。
+- D1 的表：`matches`（房間、設定、種子、結果、狀態）、`match_seats`（每場每個座位一列：名字、顯示名稱、最終籌碼、名次、賽前賽後 Elo；T40）、`match_hands`（每一手的公共牌、池、籌碼）、`match_events`（每一步：手數、街、座位、動作、金額、是否超時）、`ratings`（名字、Elo、場數、勝敗平）。
+- **Elo**（T40，多人桌）：初始 1500。一場 N 人拆成每一對座位各比一次：名次較前的算贏（1），並列算平手（0.5），較後的算輸（0）；每一對的 K = 32 /（N − 1），預期勝率用賽前分數算，同一場所有對的變動加總後才寫入。2 人桌就是原本的 K = 32 單挑公式，結果逐位相同，舊分數照用。有 `house-bot` 的場、`void`、`cancelled` 不計分。被停權的名字不顯示在排行榜。
+- **場數與勝敗平**：計分的場，每個座位場數 +1；照這個座位 `match_over` 的 `result` 記：單獨第 1 名是勝、並列第 1 名是平、其他是敗。`championships`（冠軍數）= 勝，也就是單獨拿第 1 名的次數（並列第 1 不算冠軍，跟單挑平手不算贏一樣）。
 - **賽後重播**：每場結束時用「種子 + `match_events`」在 `holdem` 模組重播一次，結果必須跟實際一模一樣；不一樣就把這場標為 `void` 並記 log。
 
 ## 網頁（人類只看）
@@ -243,7 +244,8 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 
 ### A10 結束與積分寫入
 - 整場結束時 Room DO 依序：重播比對 → 寫入 D1 → 回 `match_over`。重播不一致就標 `void`，`match_over` 的 `result` 為 `"void"`。
-- Elo 更新由 Matchmaker DO 執行（全平台一個，天生依序處理），避免兩場同時更新同一個名字時互相覆蓋。
+- Elo 更新由 Matchmaker DO（E6 的「大廳」）執行（全平台一個，天生依序處理），避免兩場同時更新同一個名字時互相覆蓋。
+- **`recordMatch` 的輸入**（T40，N 人）：`players[]`、`display_names[]`、`final_stacks[]`、`places[]`（`void`、`cancelled` 是 `null`）都是每個座位一筆；`result` 是座位角度（`seat<N>_win`／`draw`／`void`／`cancelled`），要跟 `places` 一致；`hands` 是引擎的 `TableHandRecord`。同一個 `match_id` 重送不再寫入，回第一次的結果。回傳 `{rated, ratings}`，`ratings` 是每個座位一筆 `{name, rating, change}`，不計分是 `null`。
 
 ### A11 chaos 設定（只在 `ALLOW_TEST_ROOMS=true` 時生效）
 ```json
@@ -271,8 +273,9 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - `match_over` 的 hint 附對局頁 `<WEB_URL>/matches/{match_id}`；`cancelled` 沒有紀錄所以不附；沒設 `WEB_URL` 也不附。Room DO 透過 `RefereeOptions.webUrl` 拿到 `env.WEB_URL`，每個部署環境都要設（T32）。
 
 ### A13 讀取端點的回應
-- `GET /v1/leaderboard`：`{"entries":[{"rank":1,"name":"alice","rating":1532,"games":4,"wins":3,"losses":1,"draws":0,"championships":3}]}`，前 100 名。`championships` 是拿第 1 名的次數（單挑贏也算；並列第 1 怎麼算由 T40 定）。`wins`／`losses`／`draws` 保留，多人桌怎麼算由 T40 定。公開的整數 rating 同分同名次，採 1、1、3（T44）。
-- `GET /v1/matches?before=<match_id>`：`{"matches":[{"match_id":"...","players":["alice","bob"],"result":"seat0_win|…|seat5_win|draw|void|cancelled","places":[1,2],"ended_at":"...","rated":true}],"next":"<match_id 或 null>"}`。只列已結束的場，每頁 20 筆。
+- `GET /v1/leaderboard`：`{"entries":[{"rank":1,"name":"alice","rating":1532,"games":4,"wins":3,"losses":1,"draws":0,"championships":3}]}`，前 100 名。`championships` 是單獨拿第 1 名的次數（單挑贏也算；並列第 1 不算），`wins`／`losses`／`draws` 保留，算法見「資料與積分」（T40），所以 `championships` 等於 `wins`。公開的整數 rating 同分同名次，採 1、1、3（T44）。
+- `GET /v1/matches?before=<match_id>`：`{"matches":[{"match_id":"...","players":["alice","bob"],"result":"seat0_win|…|seat5_win|draw|void|cancelled","places":[1,2],"ended_at":"...","rated":true}],"next":"<match_id 或 null>"}`。只列已結束的場，每頁 20 筆。`players`、`display_names`、`places` 每個座位一筆。
+- **舊紀錄**（T40 之前寫入的單挑，都是 2 個座位）：migration 把每場的兩個座位搬進 `match_seats`，名次照 `result` 填（`seat0_win` → `[1,2]`，`draw` → `[1,1]`，`void`／`cancelled` → `null`），讀取時跟新紀錄同一個形狀；每一手的 `pots` 從 `pot` 和 `winner_seat` 推出（一個池，平分時兩個座位都是贏家）。
 - `GET /v1/matches/{match_id}`：設定、種子、每一手的事件、最終籌碼、Elo 變動，以及 `end_reason`（T44）：`bust`／`max_hands`／`leave`／`bots_only`（桌上只剩 house-bot，E6）／`void`／`cancelled`／`null`。只在 detail 提供，紀錄時寫入 nullable D1 欄位；舊資料保持 null，不回填或猜測原因。每一手都公開雙方的底牌（2026-10-18 Ann 決定：整場結束後種子公開，誰都算得出每一手的牌，「棄牌不亮」只是假的隱藏）。進行中的 `last_hand` 仍然只在攤牌時給底牌。
 - `web` 透過 Cloudflare service binding（名稱 `API`）呼叫 api Worker，用 contract 產生的 typed client；本機開發時改用 base URL。
 
