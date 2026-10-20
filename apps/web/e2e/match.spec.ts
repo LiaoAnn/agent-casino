@@ -30,6 +30,11 @@ const resultText = (m: MatchDetail): string => {
   switch (m.result) {
     case 'seat0_win':
       return `${m.display_names[0]} 勝`;
+    case 'seat2_win':
+    case 'seat3_win':
+    case 'seat4_win':
+    case 'seat5_win':
+      throw new Error('Expected a heads-up fixture');
     case 'seat1_win':
       return `${m.display_names[1]} 勝`;
     case 'draw':
@@ -50,7 +55,7 @@ const SUITS: Record<string, string> = { s: '♠', h: '♥', d: '♦', c: '♣' }
 const card = (c: string) =>
   `${c[0] === 'T' ? '10' : c[0]}${SUITS[c[1] as string]}`;
 
-const pairText = (m: MatchDetail, values: readonly [unknown, unknown]) =>
+const pairText = (m: MatchDetail, values: readonly unknown[]) =>
   `${m.display_names[0]} ${values[0]} · ${m.display_names[1]} ${values[1]}`;
 
 const signed = (n: number) => (n >= 0 ? `+${n}` : `-${-n}`);
@@ -75,6 +80,8 @@ const playersText = (m: MatchDetail) =>
 
 const endReasonText = (m: MatchDetail): string | null => {
   switch (m.end_reason) {
+    case 'bots_only':
+      throw new Error('Expected a heads-up fixture');
     case 'bust':
       return '一方輸光';
     case 'max_hands':
@@ -129,7 +136,7 @@ const seatPairs = (
 ): [string, string][] => {
   const before = m.rating_changes?.[seat].before;
   return [
-    ['底牌', h.hole_cards[seat].map(card).join(' ')],
+    ['底牌', h.hole_cards[seat]!.map(card).join(' ')],
     ['籌碼', String(h.stacks[seat])],
     ...(before === undefined
       ? []
@@ -294,7 +301,7 @@ test('shows a showdown hand step by step', async ({ page }) => {
   const section = handSection(page, h.hand_number);
   await expectHand(page, m, h);
   await expect(seatPanel(section, m.display_names[0])).toContainText(
-    h.hole_cards[0].map(card).join(' '),
+    h.hole_cards[0]!.map(card).join(' '),
   );
   await expect(section.locator('dl[aria-label="牌桌"]')).toContainText(
     h.board.map(card).join(' '),
@@ -318,7 +325,7 @@ test('shows a fold hand step by step with both hole cards', async ({
   await expectHand(page, m, h);
   for (const seat of [0, 1] as const)
     await expect(seatPanel(section, m.display_names[seat])).toContainText(
-      h.hole_cards[seat].map(card).join(' '),
+      h.hole_cards[seat]!.map(card).join(' '),
     );
   await expect(section).toContainText('（對手棄牌）');
   await expect(steps(section, h.hand_number).last()).toContainText('棄牌');

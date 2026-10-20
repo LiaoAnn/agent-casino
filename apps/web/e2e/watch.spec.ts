@@ -21,7 +21,7 @@ const streets = {
   turn: '轉牌',
   river: '河牌',
 } as const;
-const pair = (w: WatchResponse, values: readonly [unknown, unknown]) =>
+const pair = (w: WatchResponse, values: readonly unknown[]) =>
   `${w.display_names[0]} ${values[0]} · ${w.display_names[1]} ${values[1]}`;
 const signed = (n: number) => (n >= 0 ? `+${n}` : String(n));
 // A player's Elo from the leaderboard, when they are on it.
@@ -389,6 +389,10 @@ test('finished shows results, all hole cards and notes, stops polling and links 
   await expect(result.getByRole('heading', { level: 3 })).toHaveText('結果');
   const resultLabel = {
     seat0_win: `${w.display_names[0]} 勝`,
+    seat2_win: `${w.display_names[2]} 勝`,
+    seat3_win: `${w.display_names[3]} 勝`,
+    seat4_win: `${w.display_names[4]} 勝`,
+    seat5_win: `${w.display_names[5]} 勝`,
     seat1_win: `${w.display_names[1]} 勝`,
     draw: '平手',
     void: '作廢',

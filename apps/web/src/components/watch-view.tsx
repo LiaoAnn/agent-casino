@@ -108,7 +108,8 @@ export function WatchView({
                 hand={last}
                 players={shown}
                 ratings={seatRatings}
-                bottom={watch.seat}
+                // Heads-up until T41.
+                bottom={watch.seat as 0 | 1}
               />
             </section>
           )}

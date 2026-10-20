@@ -6,8 +6,10 @@ import { Effect, Layer } from 'effect';
 import { HttpApiBuilder } from 'effect/http-api';
 import { CasinoApi, RoomSession, WatchSession } from '../contract/api';
 import * as Rooms from '../room/client';
+import { seatAnswerFields } from '../room/heads-up';
 import type { RoomApi } from '../room/referee';
 import { WorkerEnv } from './env';
+import { notOpenYet } from './not-open';
 import { refuseBanned } from './queue';
 
 // A16, T32: the owner gets the watch link before the agent starts playing.
@@ -28,8 +30,10 @@ export const createRoom = HttpApiBuilder.handler(
         display_name: Rooms.displayNameOf(payload),
       });
       const wait = `GET /v1/rooms/${room.room_id}/wait`;
+      const bot = room.opponent_display_name !== null;
       return {
         ...room,
+        opponent_name: bot ? 'house-bot' : null,
         ...(room.opponent_display_name === null
           ? {}
           : {
@@ -39,6 +43,12 @@ export const createRoom = HttpApiBuilder.handler(
           payload.opponent === 'bot'
             ? `You play house-bot and the match has started. ${SHARE_WATCH_URL}, then call ${wait} for your first turn`
             : `${SHARE_WATCH_URL}, and give room_id and invite_code to your opponent. Then call ${wait}. If nobody joins within 5 minutes, the room is cancelled`,
+        ...seatAnswerFields({
+          seat: 0,
+          names: [payload.name, bot ? 'house-bot' : null],
+          display_names: [room.display_name, room.opponent_display_name],
+          settings: room.settings,
+        }),
       };
     }),
 );
@@ -59,12 +69,22 @@ export const joinRoom = HttpApiBuilder.handler(
       yield* refuseBanned(env, payload.name, `POST /v1/rooms/${roomId}/join`);
       const seated = yield* Rooms.joinRoom(env, roomId, {
         ...payload,
+        // A private room needs it (A25); every room is private until T38.
+        invite_code: payload.invite_code ?? '',
         display_name: Rooms.displayNameOf(payload),
       });
       return {
         ...seated,
+        // Only the host of a private room gets it (A25).
+        invite_code: null,
         tell_owner: `Playing against ${seated.opponent_display_name}. Watch: ${seated.watch_url}`,
         hint: `Joined. ${SHARE_WATCH_URL}, then call GET /v1/rooms/${roomId}/wait for your first turn`,
+        ...seatAnswerFields({
+          seat: 1,
+          names: [seated.opponent_name, payload.name],
+          display_names: [seated.opponent_display_name, seated.display_name],
+          settings: seated.settings,
+        }),
       };
     }),
 );
@@ -83,6 +103,7 @@ const inRoom = <A, E>(
 
 const SeatHandlers = HttpApiBuilder.group(CasinoApi, 'room', handlers =>
   handlers.handleAll({
+    start: ({ params }) => notOpenYet(`POST /v1/rooms/${params.room_id}/start`),
     wait: ({ params }) =>
       inRoom(params.room_id, (stub, seat) =>
         Rooms.callRoom(() => stub.status(seat, { wait: true })),

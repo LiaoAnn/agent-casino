@@ -176,7 +176,8 @@ describe('T43 completed hands since this seat last accepted an action', () => {
       const current = await t.status(0);
       if (current.status === 'match_over') break;
       const seat = current.to_act_seat;
-      if (seat === null) throw new Error('Expected an actor');
+      if (seat !== 0 && seat !== 1)
+        throw new Error('Expected a heads-up actor');
       const turn = await t.status(seat);
       if (turn.status !== 'your_turn') throw new Error('Expected turn');
       actedAt[seat] = turn.hand_number ?? 0;

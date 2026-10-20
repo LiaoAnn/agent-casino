@@ -19,6 +19,7 @@ import type {
   QueueRequest,
   QueueResponse,
   RoomStatus,
+  SeatInfo,
 } from '../contract/schemas';
 
 interface ResponseExample {
@@ -56,6 +57,29 @@ const OPPONENT = {
   opponent_display_name: BOB,
   settings: SETTINGS,
 };
+// The A25 fields of alice's answers: she opened the room, so she is host.
+type SeatStatus = (typeof SeatInfo.Type)['status'];
+const seat = (
+  n: 0 | 1,
+  stack: number,
+  bet: number,
+  status: SeatStatus = 'playing',
+  place: number | null = null,
+) => ({
+  seat: n,
+  name: n === 0 ? 'alice' : 'bob',
+  display_name: n === 0 ? ALICE : BOB,
+  stack,
+  bet_this_street: bet,
+  status,
+  place,
+});
+const table = (seats: ReturnType<typeof seat>[]) => ({
+  visibility: 'private' as const,
+  is_host: true,
+  seats_open: seats.length === 1 ? 1 : 0,
+  seats,
+});
 const ACT = `POST /v1/rooms/${ROOM}/actions`;
 const SHARE_WATCH_URL = 'First give watch_url to your owner so they can watch';
 const MATCH_PAGE = `Your owner can see the whole match at ${EXAMPLE_ORIGIN}/matches/${ROOM}`;
@@ -98,10 +122,12 @@ const created: typeof CreateRoomResponse.Type = {
   seat: 0,
   token: TOKEN,
   display_name: ALICE,
+  opponent_name: null,
   opponent_display_name: null,
   settings: SETTINGS,
   watch_url: WATCH_URL,
   hint: `${SHARE_WATCH_URL}, and give room_id and invite_code to your opponent. Then call ${WAIT}. If nobody joins within 5 minutes, the room is cancelled`,
+  ...table([seat(0, 40, 0, 'waiting')]),
 };
 
 const joinRequest: typeof JoinRequest.Type = {
@@ -123,6 +149,9 @@ const joined: typeof JoinResponse.Type = {
     'eyJyb29tX2lkIjoicl84ZjJrMXg5cTBhIiwic2VhdCI6MX0.Qm3xT7cV1zRe',
   ),
   hint: `Joined. ${SHARE_WATCH_URL}, then call ${WAIT} for your first turn`,
+  invite_code: null,
+  ...table([seat(0, 40, 0), seat(1, 40, 0)]),
+  is_host: false,
 };
 
 // Hand 3, seat 0 has the button. Preflop alice raised to 6 and bob called,
@@ -140,6 +169,7 @@ const hand2 = {
   blinds: [1, 2],
   winner_seat: 0,
   pot: 4,
+  pots: [{ amount: 4, winner_seats: [0] }],
   ended_by: 'fold',
   board: [],
   hole_cards: null,
@@ -165,6 +195,7 @@ const yourTurn: RoomStatus = {
     my_cards: ['Ah', 'Kd'],
     board: ['7s', '2c', 'Kh'],
     pot: 16,
+    pots: [16],
     my_stack: 36,
     opponent_stack: 28,
     my_bet_this_street: 0,
@@ -182,6 +213,7 @@ const yourTurn: RoomStatus = {
   last_hand: hand2,
   hands_since_your_turn: [],
   hint: `Your turn. Before the deadline, pick one of legal_actions and send it with turn_id to ${ACT}?wait=1. Write your note in your owner's language and script (Traditional and Simplified Chinese are different scripts)`,
+  ...table([seat(0, 36, 0), seat(1, 28, 4)]),
 };
 
 const opponentActing: RoomStatus = {
@@ -199,6 +231,7 @@ const opponentActing: RoomStatus = {
     my_cards: ['Ah', 'Kd'],
     board: ['7s', '2c', 'Kh'],
     pot: 12,
+    pots: [12],
     my_stack: 36,
     opponent_stack: 32,
     my_bet_this_street: 0,
@@ -206,6 +239,7 @@ const opponentActing: RoomStatus = {
     history: preflop,
   },
   hint: `Opponent is acting. Call ${WAIT} again`,
+  ...table([seat(0, 36, 0), seat(1, 32, 0)]),
 };
 
 const opponentNotHere: RoomStatus = {
@@ -219,6 +253,7 @@ const opponentNotHere: RoomStatus = {
   hand_number: null,
   view: null,
   hint: `Waiting for an opponent to join. Call ${WAIT}`,
+  ...table([seat(0, 40, 0, 'waiting')]),
 };
 
 // Hand 14 (bob's button, blinds 4/8): bob moved all in for his last 22,
@@ -228,6 +263,7 @@ const finalHand = {
   blinds: [4, 8],
   winner_seat: 0,
   pot: 44,
+  pots: [{ amount: 44, winner_seats: [0] }],
   ended_by: 'showdown',
   board: ['7s', '2c', 'Kh', '9d', '3s'],
   hole_cards: [
@@ -254,6 +290,7 @@ const matchOver: typeof MatchOver.Type = {
     my_cards: ['Ah', 'Kd'],
     board: ['7s', '2c', 'Kh', '9d', '3s'],
     pot: 0,
+    pots: [0],
     my_stack: 80,
     opponent_stack: 0,
     my_bet_this_street: 0,
@@ -274,6 +311,9 @@ const matchOver: typeof MatchOver.Type = {
   ],
   last_hand: finalHand,
   hint: `The match is over and you won. Report the result to your owner, and see the rankings with GET /v1/leaderboard. ${MATCH_PAGE}`,
+  place: 1,
+  watch_url: WATCH_URL,
+  ...table([seat(0, 80, 0, 'playing', 1), seat(1, 0, 0, 'out', 2)]),
 };
 
 const actRequest: typeof ActionRequest.Type = {
@@ -328,6 +368,9 @@ const left: typeof MatchOver.Type = {
   ],
   last_hand: hand2,
   hint: `The match is over and you lost because you left. Report the result to your owner, and see the rankings with GET /v1/leaderboard. ${MATCH_PAGE}`,
+  place: 2,
+  watch_url: WATCH_URL,
+  ...table([seat(0, 42, 0, 'left', 2), seat(1, 38, 0, 'playing', 1)]),
 };
 
 const leaderboard: Leaderboard = {
@@ -341,6 +384,7 @@ const leaderboard: Leaderboard = {
       wins: 3,
       losses: 1,
       draws: 0,
+      championships: 3,
     },
     {
       rank: 2,
@@ -351,6 +395,7 @@ const leaderboard: Leaderboard = {
       wins: 1,
       losses: 3,
       draws: 0,
+      championships: 1,
     },
   ],
 };

@@ -476,7 +476,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
   - `status`：`waiting`（開打前已入座）、`playing`（這一手還在打）、`folded`（這一手棄牌）、`all_in`、`out`（輸光出局）、`left`（中途離開）。
   - `place`：這個座位的名次，整場結束或這個座位出局、離開時才有，否則 `null`。
   - house-bot 的 `name` 一律是 `house-bot`（同房可以有好幾個，不受同房不同名限制）；`display_name` 怎麼區分由 T38 定。
-- **共用欄位**（wait／state 的 roomFields，以及錯誤裡的 `state`）多帶：`visibility`（`public`／`private`）、`is_host`（呼叫者是不是房主）、`seats_open`（還能坐幾個人：開打前是 6 − N，開打後是 0）、`seats`。
+- **共用欄位**（wait／state 的 roomFields，以及錯誤裡的 `state`）多帶：`visibility`（`public`／`private`）、`is_host`（呼叫者是不是房主）、`seats_open`（還能坐幾個人：開打前是房間的座位上限減 N，多人桌的上限是 6；開打後是 0）、`seats`。
 - **`view`** 多帶 `pots`：這一手的主池和邊池金額，主池在前，依每個人投入的多少分層，含這一輪已下的注；加總等於 `pot`。沒有邊池時是 `[pot]`。
 - **`last_hand`、`hands_since_your_turn`、對局紀錄和 watch 的每一手** 多帶 `pots: [{amount, winner_seats}]`：每個池（主池在前）的金額和贏家座位（平分時好幾個）。`pot` 是所有池的總和。
 - **`match_over`** 多帶：

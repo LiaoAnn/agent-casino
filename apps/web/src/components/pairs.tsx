@@ -8,7 +8,8 @@ export function BySeat({
   values,
 }: {
   players: MatchDetail['players'];
-  values: readonly [ReactNode, ReactNode];
+  // Heads-up until T41: the first two seats.
+  values: readonly ReactNode[];
 }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">

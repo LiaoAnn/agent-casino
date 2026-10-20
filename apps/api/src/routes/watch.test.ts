@@ -233,7 +233,7 @@ const createRoom = async (
 
 const joinRoom = async (
   env: Bindings,
-  room: { room_id: string; invite_code: string },
+  room: { room_id: string; invite_code: string | null },
   name = 'bob',
 ) => {
   const response = await post(env, `/v1/rooms/${room.room_id}/join`, {
@@ -325,11 +325,11 @@ const stripNote = <T extends { note?: string }>(event: T): Omit<T, 'note'> => {
 interface LastHandSeen {
   hand_number: number;
   blinds: readonly [number, number];
-  winner_seat: Seat | null;
+  winner_seat: 0 | 1 | 2 | 3 | 4 | 5 | null;
   pot: number;
   ended_by: 'fold' | 'showdown';
   board: readonly string[];
-  hole_cards: readonly (readonly string[])[] | null;
+  hole_cards: readonly (readonly string[] | null)[] | null;
   stacks: readonly number[];
 }
 
@@ -772,9 +772,22 @@ describe('GET /v1/rooms/{room_id}/watch while waiting for an opponent', () => {
     expect(performance.now() - started).toBeLessThan(1000);
     expect(watch).toEqual({
       room_id: room.room_id,
+      visibility: 'private',
+      seats_open: 1,
+      seats: [
+        {
+          seat: 0,
+          name: 'alice',
+          display_name: 'alice',
+          stack: 100,
+          bet_this_street: 0,
+          status: 'waiting',
+          place: null,
+        },
+      ],
       seat: 0,
-      players: ['alice', null],
-      display_names: ['alice', null],
+      players: ['alice'],
+      display_names: ['alice'],
       settings: {
         max_hands: 5,
         turn_seconds: 20,
@@ -1536,7 +1549,7 @@ describe('T35 watch display names', () => {
     const watchToken = tokenOf(room.watch_url);
     expect(
       (await watchOf(env, room.room_id, watchToken)).watch.display_names,
-    ).toEqual(['小愛 🃏', null]);
+    ).toEqual(['小愛 🃏']);
     const response = await post(env, `/v1/rooms/${room.room_id}/join`, {
       name: 'bOB',
       invite_code: room.invite_code,

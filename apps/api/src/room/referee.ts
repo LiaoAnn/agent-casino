@@ -30,6 +30,7 @@ import {
 } from '../holdem/match';
 import { replay } from '../holdem/replay';
 import { viewFor } from '../holdem/view';
+import { headsUpPots, headsUpSeats, placesOf } from './heads-up';
 import { type HandNotes, watchView } from './watch';
 
 // What the referee needs from DurableObjectStorage.
@@ -686,6 +687,7 @@ export class RoomReferee {
       const { button_seat: _button, events: _events, ...summary } = hand;
       const out = {
         ...summary,
+        pots: headsUpPots(summary),
         stack_changes: [
           hand.stacks[0] - previous[0],
           hand.stacks[1] - previous[1],
@@ -760,6 +762,7 @@ export class RoomReferee {
       hand_number: turn.hand_number,
       view: turn.view,
       hint: `Not your turn yet. Call ${waitPath(data)} again`,
+      ...tableFields(data, (turn.view?.my_seat ?? 0) as Seat),
     };
   }
 
@@ -1211,6 +1214,28 @@ const seatFields = (data: RoomData, seat: Seat) => {
   };
 };
 
+// A25 for a heads-up room (heads-up.ts): spread last, so a 2-seat answer
+// reads as before up to these fields.
+const tableFields = (data: RoomData, seat: Seat) => ({
+  visibility: 'private' as const,
+  is_host: seat === 0,
+  seats_open: data.match || data.ended ? 0 : data.names[1] === null ? 1 : 0,
+  seats: headsUpSeats({
+    names: data.names,
+    display_names: displayNames(data),
+    settings: data.settings,
+    match: data.match,
+    places: data.ended && placesOf(seatResult(data.ended)),
+    ...(data.ended?.reason === 'left' && { left: data.ended.loser }),
+  }),
+});
+
+// A view with its one heads-up pot (A25).
+const withPots = <V extends { pot: number }>(view: V) => ({
+  ...view,
+  pots: [view.pot],
+});
+
 // `now`: when the answer is made (epoch ms). `stacksBefore`: the stacks the
 // last finished hand started from.
 interface Answering {
@@ -1227,6 +1252,7 @@ const lastHandOut = (
 ): LastHandBody | null =>
   hand && {
     ...hand,
+    pots: headsUpPots(hand),
     stack_changes: [
       hand.stacks[0] - stacksBefore[0],
       hand.stacks[1] - stacksBefore[1],
@@ -1250,6 +1276,7 @@ function statusFor(
       hand_number: null,
       view: null,
       hint: `Waiting for your opponent to join with the invite code. Call ${waitPath(data)} again`,
+      ...tableFields(data, seat),
     };
   }
   const seen = viewFor(match, seat);
@@ -1258,8 +1285,9 @@ function statusFor(
     ...seatFields(data, seat),
     to_act_seat: seen.to_act_seat,
     hand_number: seen.hand_number,
-    view: seen.view,
+    view: withPots(seen.view),
   };
+  const table = tableFields(data, seat);
   const [first, ...rest] = legalActions(match);
   if (turn && turn.seat === seat && first) {
     // T46, T48: until the seat's own first action is accepted, remind it to
@@ -1290,12 +1318,14 @@ function statusFor(
       ...(remind && {
         tell_owner: `Playing against ${displayNames(data)[otherSeat(seat)]}. Watch: ${remind}`,
       }),
+      ...table,
     };
   }
   return {
     status: 'waiting',
     ...common,
     hint: `Your opponent is to act. Call ${waitPath(data)} again`,
+    ...table,
   };
 }
 
@@ -1330,7 +1360,7 @@ function matchOver(
     to_act_seat: null,
     hand_number: seen?.hand_number ?? null,
     // Also after a leave or an abort mid-match: the blinds never rise again.
-    view: seen && { ...seen.view, next_blinds_at_hand: null },
+    view: seen && withPots({ ...seen.view, next_blinds_at_hand: null }),
     match_id: data.room_id,
     result,
     final_stacks: ended.final_stacks,
@@ -1339,6 +1369,15 @@ function matchOver(
     hands_since_your_turn: answering.hands[seat],
     tell_owner: ownerResult(data, result, seat, matchPage(data, answering)),
     hint: matchOverHint(ended, result, matchPage(data, answering)),
+    place:
+      result === 'cancelled' || result === 'void'
+        ? null
+        : result === 'loss'
+          ? 2
+          : 1,
+    // Rooms from before T46 kept no watch link.
+    watch_url: data.watch_urls?.[seat] ?? '',
+    ...tableFields(data, seat),
   };
 }
 

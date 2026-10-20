@@ -28,11 +28,13 @@ export function CurrentHand({
     const mine = s === watch.seat;
     return {
       name: players[s],
-      bet: mine ? view.my_bet_this_street : view.opponent_bet_this_street,
+      // Heads-up until T41, where the opponent fields are always set.
+      bet:
+        (mine ? view.my_bet_this_street : view.opponent_bet_this_street) ?? 0,
       seat: (
         <SeatPanel
           name={players[s]}
-          stack={mine ? view.my_stack : view.opponent_stack}
+          stack={(mine ? view.my_stack : view.opponent_stack) ?? 0}
           rating={ratings[s]}
           cards={mine ? view.my_cards : null}
           dealer={view.button_seat === s}
@@ -45,7 +47,8 @@ export function CurrentHand({
       ),
     };
   };
-  const bottom = seat(watch.seat);
+  // Heads-up until T41.
+  const bottom = seat(watch.seat as 0 | 1);
   const top = seat(watch.seat === 0 ? 1 : 0);
   return (
     <section aria-label="目前這一手" className="space-y-4">

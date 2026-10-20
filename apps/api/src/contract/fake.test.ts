@@ -40,7 +40,12 @@ const configOf = (detail: MatchDetail): MatchConfig => ({
 });
 
 const eventsOf = (detail: MatchDetail): HistoryEvent[] =>
-  detail.hands.flatMap(hand => hand.events.map(event => ({ ...event })));
+  detail.hands.flatMap(hand =>
+    hand.events.map(event => {
+      expect([0, 1]).toContain(event.seat);
+      return { ...event, seat: event.seat as 0 | 1 };
+    }),
+  );
 
 /** Each non-blind event of a match with the engine state it was made in. */
 const walk = (detail: MatchDetail) => {
@@ -246,6 +251,13 @@ describe('makeFakeData', () => {
       expect(
         result.hands.map(hand => ({
           ...hand,
+          pots: [
+            {
+              amount: hand.pot,
+              winner_seats:
+                hand.winner_seat === null ? [0, 1] : [hand.winner_seat],
+            },
+          ],
           hole_cards: dealHand(detail.seed, hand.hand_number).holeCards,
         })),
         detail.match_id,

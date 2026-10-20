@@ -314,7 +314,9 @@ const expectPosition = (status: Status, match: MatchState, seat: Seat) => {
   const seen = viewFor(match, seat);
   expect(status.hand_number).toBe(seen.hand_number);
   expect(status.to_act_seat).toBe(seen.to_act_seat);
-  expect(status.view).toEqual(seen.view);
+  expect(status.view).toEqual(
+    seen.view === null ? null : { ...seen.view, pots: [seen.view.pot] },
+  );
 };
 
 const iso = (ms: number) => new Date(ms).toISOString();

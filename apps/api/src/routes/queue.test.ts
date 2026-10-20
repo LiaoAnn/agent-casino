@@ -430,7 +430,7 @@ describe('POST /v1/queue (S1)', () => {
           settings.starting_stack,
         );
         expect(
-          status.view.opponent_stack + status.view.opponent_bet_this_street,
+          status.view.opponent_stack! + status.view.opponent_bet_this_street!,
         ).toBe(settings.starting_stack);
       }
     }

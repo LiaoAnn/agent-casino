@@ -422,9 +422,10 @@ describe('狀況處理 等人超過 5 分鐘: a room nobody joined is dissolved 
     const dissolvedOver = asMatchOver(
       await state(t, dissolved.room_id, dissolved.token),
     );
-    expect({ ...dissolvedOver, match_id: '' }).toEqual({
+    expect({ ...dissolvedOver, match_id: '', watch_url: '' }).toEqual({
       ...leftOver,
       match_id: '',
+      watch_url: '',
     });
     expect(dissolvedOver.match_id).toBe(dissolved.room_id);
   });
