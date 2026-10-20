@@ -62,6 +62,6 @@ jobs:
           /bin/sh casino.sh version
           /bin/sh casino.sh -h
           /bin/sh casino.sh help update
-          for c in help version profile queue bot room wait act state leave report update; do
+          for c in help version profile play start queue bot room wait act state leave report update; do
             /bin/sh casino.sh "$c" -h
           done
