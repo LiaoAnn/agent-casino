@@ -7,11 +7,13 @@ import { RoomId } from '../contract/schemas';
 import { withDb } from '../db/client';
 import { getLeaderboard, getMatch, listMatches } from '../db/queries';
 import { WorkerEnv } from './env';
+import { notOpenYet } from './not-open';
 
 const isMatchId = Schema.is(RoomId);
 
 export const ReadHandlers = HttpApiBuilder.group(CasinoApi, 'read', handlers =>
   handlers.handleAll({
+    lobby: () => notOpenYet('GET /v1/lobby'),
     leaderboard: () =>
       Effect.gen(function* () {
         const env = yield* WorkerEnv;

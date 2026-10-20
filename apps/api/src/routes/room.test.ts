@@ -301,6 +301,65 @@ const joinRoom = async (
   return decodeJoin(await response.json());
 };
 
+describe('T37 heads-up seat responses include posted blinds (A25)', () => {
+  it.each([40, 100])(
+    'keeps the waiting host stack intact, then reports first-hand blinds on join (stack %i)',
+    async starting_stack => {
+      const { env } = makeEnv();
+      const room = await createRoom(env, { settings: { starting_stack } });
+      expect(room.seats).toHaveLength(1);
+      expect(room.seats[0]).toMatchObject({
+        seat: 0,
+        stack: starting_stack,
+        bet_this_street: 0,
+        status: 'waiting',
+      });
+      const joined = await joinRoom(env, room);
+      expect(joined.seats).toHaveLength(2);
+      expect(joined.seats).toMatchObject([
+        {
+          seat: 0,
+          stack: starting_stack - 1,
+          bet_this_street: 1,
+          status: 'playing',
+        },
+        {
+          seat: 1,
+          stack: starting_stack - 2,
+          bet_this_street: 2,
+          status: 'playing',
+        },
+      ]);
+    },
+  );
+
+  it.each([40, 100])(
+    'reports first-hand blinds immediately when opening a bot room (stack %i)',
+    async starting_stack => {
+      const { env } = makeEnv();
+      const room = await createRoom(env, {
+        opponent: 'bot',
+        settings: { starting_stack },
+      });
+      expect(room.seats).toHaveLength(2);
+      expect(room.seats).toMatchObject([
+        {
+          seat: 0,
+          stack: starting_stack - 1,
+          bet_this_street: 1,
+          status: 'playing',
+        },
+        {
+          seat: 1,
+          stack: starting_stack - 2,
+          bet_this_street: 2,
+          status: 'playing',
+        },
+      ]);
+    },
+  );
+});
+
 interface StatusResult {
   status: Status;
   raw: string;
@@ -756,7 +815,7 @@ describe('POST /v1/rooms/{room_id}/join', () => {
     const { env } = makeEnv();
     const room = await createRoom(env);
     const joined = await joinRoom(env, room, {
-      invite_code: room.invite_code.toLowerCase(),
+      invite_code: required(room.invite_code).toLowerCase(),
     });
     expect(joined.seat).toBe(1);
   });
@@ -1173,7 +1232,10 @@ describe('POST /v1/rooms/{room_id}/actions: accepted', () => {
       engineAfter({ seed: SEED, max_hands: 10 }, [[0, { type: 'call' }]]),
       1,
     );
-    expect(bob.view).toEqual(expected.view);
+    expect(bob.view).toEqual({
+      ...expected.view,
+      pots: [required(expected.view).pot],
+    });
     expect(bob.legal_actions).toEqual(
       expect.arrayContaining([{ type: 'check' }]),
     );
@@ -1218,7 +1280,10 @@ describe('POST /v1/rooms/{room_id}/actions: accepted', () => {
       ]),
       1,
     );
-    expect(bob.view).toEqual(expected.view);
+    expect(bob.view).toEqual({
+      ...expected.view,
+      pots: [required(expected.view).pot],
+    });
     expect(bob.view?.history.at(-1)).toEqual({
       seat: 0,
       street: 'preflop',
@@ -1531,6 +1596,15 @@ describe('POST /v1/rooms/{room_id}/actions: finishing a 1-hand match by a fold',
       // Seat 0 loses its small blind; seat 1's uncalled blind is returned.
       expect(over.last_hand).toEqual({
         ...expectedEnd.lastHand,
+        pots: [
+          {
+            amount: required(expectedEnd.lastHand).pot,
+            winner_seats:
+              required(expectedEnd.lastHand).winner_seat === null
+                ? [0, 1]
+                : [required(expectedEnd.lastHand).winner_seat],
+          },
+        ],
         stack_changes: [-1, 1],
       });
       expect(over.hint.length).toBeGreaterThan(0);
@@ -1638,6 +1712,15 @@ describe('POST /v1/rooms/{room_id}/actions: a 1-hand match to showdown', () => {
       });
       expect(over.last_hand).toEqual({
         ...expected.lastHand,
+        pots: [
+          {
+            amount: required(expected.lastHand).pot,
+            winner_seats:
+              required(expected.lastHand).winner_seat === null
+                ? [0, 1]
+                : [required(expected.lastHand).winner_seat],
+          },
+        ],
         stack_changes: [s0 - 40, s1 - 40],
       });
       expect(over.view?.pot).toBe(0);
@@ -1665,9 +1748,22 @@ describe('POST /v1/rooms/{room_id}/actions: the next hand', () => {
       to_act_seat: 1,
       view: { button_seat: 1, street: 'preflop' },
     });
-    expect(bob.view).toEqual(viewFor(expected, 1).view);
+    const engineView = viewFor(expected, 1).view;
+    expect(bob.view).toEqual({
+      ...engineView,
+      pots: [required(engineView).pot],
+    });
     expect(bob.last_hand).toEqual({
       ...expected.lastHand,
+      pots: [
+        {
+          amount: required(expected.lastHand).pot,
+          winner_seats:
+            required(expected.lastHand).winner_seat === null
+              ? [0, 1]
+              : [required(expected.lastHand).winner_seat],
+        },
+      ],
       stack_changes: [-1, 1],
     });
     expect(bob.last_hand).toMatchObject({
@@ -1816,6 +1912,15 @@ describe('POST /v1/rooms/{room_id}/leave while playing', () => {
     expect(over.final_stacks).toEqual([39, 41]);
     expect(over.last_hand).toEqual({
       ...expected.lastHand,
+      pots: [
+        {
+          amount: required(expected.lastHand).pot,
+          winner_seats:
+            required(expected.lastHand).winner_seat === null
+              ? [0, 1]
+              : [required(expected.lastHand).winner_seat],
+        },
+      ],
       stack_changes: [-1, 1],
     });
     expect(over.last_hand).toMatchObject({ hand_number: 1, ended_by: 'fold' });
@@ -3177,3 +3282,12 @@ describe('T46 first assigned turn watch link reminder over HTTP', () => {
     }
   });
 });
+
+// Fail explicitly if a fixture expected by this assertion is absent.
+function required<T>(value: T | null | undefined): T {
+  expect(value).not.toBeNull();
+  expect(value).not.toBeUndefined();
+  if (value === null || value === undefined)
+    throw new Error('Missing test fixture value');
+  return value;
+}

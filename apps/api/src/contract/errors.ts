@@ -16,6 +16,9 @@ export const ERROR_CODES = [
   'invalid_action',
   'match_over',
   'name_in_use',
+  'not_host',
+  'not_enough_players',
+  'gone',
   'not_found',
   'unavailable',
   'internal',
@@ -29,6 +32,8 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   invalid_token: 401,
   name_banned: 403,
   wrong_invite_code: 403,
+  // Only the host may start the table (A25).
+  not_host: 403,
   room_not_found: 404,
   // An unknown path, or a known path with the wrong method.
   not_found: 404,
@@ -38,6 +43,10 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   match_over: 409,
   // The name is queued or just matched with another queue_key (A17).
   name_in_use: 409,
+  // Fewer than 2 seats, bots included, at start (A25).
+  not_enough_players: 409,
+  // An endpoint that was taken out; the hint names its replacement.
+  gone: 410,
   internal: 500,
   unavailable: 503,
 };

@@ -368,6 +368,12 @@ describe('recordMatch: long matches', () => {
     });
     const expected = hands.map(h => ({
       ...h,
+      pots: [
+        {
+          amount: h.pot,
+          winner_seats: h.winner_seat === null ? [0, 1] : [h.winner_seat],
+        },
+      ],
       hole_cards:
         h.ended_by === 'fold'
           ? dealHand(match.seed, h.hand_number).holeCards
@@ -414,6 +420,13 @@ describe('recordMatch: long matches', () => {
     expect(detail?.hands).toStrictEqual(
       (JSON.parse(JSON.stringify(match.hands)) as HandRecord[]).map(hand => ({
         ...hand,
+        pots: [
+          {
+            amount: hand.pot,
+            winner_seats:
+              hand.winner_seat === null ? [0, 1] : [hand.winner_seat],
+          },
+        ],
         hole_cards: dealHand(match.seed, hand.hand_number).holeCards,
       })),
     );

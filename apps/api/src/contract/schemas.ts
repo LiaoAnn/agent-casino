@@ -58,7 +58,16 @@ export const InviteCode = pattern(/^[A-HJ-NP-Z2-9]{6}$/);
 export const Card = pattern(/^[2-9TJQKA][shdc]$/);
 // 256 secret bits (holdem-rules: 種子與洗牌).
 const Seed = pattern(/^[0-9a-f]{64}$/);
-const Seat = Schema.Literals([0, 1]);
+// A table seats 2-6, numbered 0..N-1 in the order they sat down, with no
+// gaps (A25). Every by-seat array has one element per seat.
+export const MAX_SEATS = 6;
+const Seat = Schema.Literals([0, 1, 2, 3, 4, 5]);
+// `min`: a room may hold one seat while it waits; a hand has at least two.
+const bySeat = <S extends Schema.Top>(item: S, min = 1) =>
+  Schema.Array(item).check(
+    Schema.isMinLength(min),
+    Schema.isMaxLength(MAX_SEATS),
+  );
 const Street = Schema.Literals(['preflop', 'flop', 'turn', 'river']);
 export const IsoTime = pattern(
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/,
@@ -69,7 +78,9 @@ const DisplayName = Schema.String.check(Schema.isMinLength(1));
 const Token = Schema.String;
 const HoleCards = Schema.Tuple([Card, Card]);
 const Board = Schema.Array(Card).check(Schema.isMaxLength(5));
-const Stacks = Schema.Tuple([NonNegativeInt, NonNegativeInt]);
+const Stacks = bySeat(NonNegativeInt);
+// Each seat's stack after a hand.
+const HandStacks = bySeat(NonNegativeInt, 2);
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 // [small, big] of one hand, as scheduled (A19).
 const Blinds = Schema.Tuple([PositiveInt, PositiveInt]);
@@ -133,10 +144,15 @@ export const QueueRequest = Schema.Struct({
   test: Schema.optionalKey(TestSettings),
 });
 
+// `private` (the default) takes an invite code; `public` is listed in the
+// lobby and open to anyone (A25).
+const Visibility = Schema.Literals(['public', 'private']);
+
 export const CreateRoomRequest = Schema.Struct({
   game: Game,
   name: Schema.String,
   display_name: Schema.optionalKey(DisplayNameInput),
+  visibility: Schema.optionalKey(Visibility),
   settings: Schema.optionalKey(Settings),
   opponent: Schema.optionalKey(Schema.Literal('bot')),
   test: Schema.optionalKey(TestSettings),
@@ -145,7 +161,33 @@ export const CreateRoomRequest = Schema.Struct({
 export const JoinRequest = Schema.Struct({
   name: Schema.String,
   display_name: Schema.optionalKey(DisplayNameInput),
-  invite_code: Schema.String,
+  // Only private rooms need it.
+  invite_code: Schema.optionalKey(Schema.String),
+});
+
+// Sits down at the oldest open public room with default settings, or opens
+// one with the caller as host (A25). No settings: those split the tables.
+export const QuickRoomRequest = Schema.Struct({
+  game: Game,
+  name: Schema.String,
+  display_name: Schema.optionalKey(DisplayNameInput),
+  settings: Schema.optionalKey(
+    Schema.Never.annotate({
+      message:
+        'POST /v1/rooms/quick takes no settings: public tables play the defaults. Open a private room with POST /v1/rooms for your own settings',
+    }),
+  ),
+  test: Schema.optionalKey(
+    Schema.Never.annotate({
+      message:
+        'POST /v1/rooms/quick takes no test settings; open a room with POST /v1/rooms instead',
+    }),
+  ),
+});
+
+// The host starts the table, filling `bots` empty seats with house-bot.
+export const StartRequest = Schema.Struct({
+  bots: Schema.optionalKey(between(0, MAX_SEATS - 1)),
 });
 
 const ActionType = Schema.Literals(['fold', 'check', 'call', 'raise']);
@@ -162,10 +204,11 @@ export const ActionRequest = Schema.Struct({
 
 // --- Joining ----------------------------------------------------------------
 
-// The settings a room is played with, defaults filled in.
+// The settings a room is played with, defaults filled in. `blind_every` is
+// `null` until the table starts when it goes by player count (A19).
 const RoomSettings = Schema.Struct({
   starting_stack: limited('starting_stack'),
-  blind_every: limited('blind_every'),
+  blind_every: Schema.NullOr(limited('blind_every')),
   max_hands: limited('max_hands'),
   turn_seconds: limited('turn_seconds'),
 });
@@ -200,40 +243,73 @@ export const QueueResponse = Schema.Union([
   }),
 ]);
 
-export const CreateRoomResponse = Schema.Struct({
+// One seat at the table (A25). Flat, so casino.sh can read it with sed.
+export const SeatInfo = Schema.Struct({
+  seat: Seat,
+  // house-bot may sit several times at one table.
+  name: Name,
+  display_name: DisplayName,
+  // Chips behind, not counting this street's bet; starting_stack before
+  // the table starts.
+  stack: NonNegativeInt,
+  bet_this_street: NonNegativeInt,
+  status: Schema.Literals([
+    'waiting',
+    'playing',
+    'folded',
+    'all_in',
+    'out',
+    'left',
+  ]),
+  // Set once the match is over for this seat: out, left, or table finished.
+  place: Schema.NullOr(PositiveInt),
+});
+
+const Seats = bySeat(SeatInfo);
+// The room's seat limit (6 at a table) minus N before it starts, 0 after.
+const SeatsOpen = between(0, MAX_SEATS - 1);
+
+// What quick, join and opening a room answer (A25). The opponent_* fields
+// are set only at a table of exactly 2 seats.
+export const SeatResponse = Schema.Struct({
   room_id: RoomId,
-  invite_code: InviteCode,
+  visibility: Visibility,
+  // Only the host of a private room gets it.
+  invite_code: Schema.NullOr(InviteCode),
   seat: Seat,
   token: Token,
+  is_host: Schema.Boolean,
   display_name: DisplayName,
-  // `null` until someone joins; "House Bot" against the bot.
+  opponent_name: Schema.NullOr(Name),
   opponent_display_name: Schema.NullOr(DisplayName),
+  seats: Seats,
+  seats_open: SeatsOpen,
   settings: RoomSettings,
   watch_url: WatchUrl,
+  // Whenever someone else sits at the table: always on join.
   tell_owner: Schema.optionalKey(Schema.String),
   hint: Hint,
 });
-
-export const JoinResponse = Schema.Struct({
-  room_id: RoomId,
-  seat: Seat,
-  token: Token,
-  opponent_name: Name,
-  display_name: DisplayName,
-  opponent_display_name: DisplayName,
-  settings: RoomSettings,
-  watch_url: WatchUrl,
-  tell_owner: Schema.String,
-  hint: Hint,
-});
+/** @alias */
+export const CreateRoomResponse = SeatResponse;
+/** @alias */
+export const JoinResponse = SeatResponse;
 
 // --- Playing ----------------------------------------------------------------
 
-// `call` amount = chips added; `raise` amount = total raised to this street.
+// `call` amount = chips added; `raise` amount = total raised to this street;
+// `leave` amount = chips taken off the table (E6).
 const HistoryEntry = Schema.Struct({
   seat: Seat,
   street: Street,
-  type: Schema.Literals(['post_blind', 'fold', 'check', 'call', 'raise']),
+  type: Schema.Literals([
+    'post_blind',
+    'fold',
+    'check',
+    'call',
+    'raise',
+    'leave',
+  ]),
   amount: Schema.optionalKey(NonNegativeInt),
   timeout: Schema.optionalKey(Schema.Literal(true)),
 });
@@ -259,39 +335,53 @@ const View = Schema.Struct({
   my_cards: HoleCards,
   board: Board,
   pot: NonNegativeInt,
+  // Main pot first, then side pots, this street's bets included; they add
+  // up to `pot`.
+  pots: Schema.Array(NonNegativeInt).check(Schema.isMinLength(1)),
   my_stack: NonNegativeInt,
-  opponent_stack: NonNegativeInt,
+  // Only at a table of exactly 2 seats (A25).
+  opponent_stack: Schema.NullOr(NonNegativeInt),
   my_bet_this_street: NonNegativeInt,
-  opponent_bet_this_street: NonNegativeInt,
+  opponent_bet_this_street: Schema.NullOr(NonNegativeInt),
   history: Schema.Array(HistoryEntry),
 });
 
 const EndedBy = Schema.Literals(['fold', 'showdown']);
-// Both players' hole cards, by seat.
-const BothHoleCards = Schema.Tuple([HoleCards, HoleCards]);
+// Each seat's hole cards; `null` for a seat whose cards aren't shown.
+const SeatCards = bySeat(Schema.NullOr(HoleCards), 2);
 // During a match, only when the hand went to showdown.
-const ShownCards = Schema.NullOr(BothHoleCards);
+const ShownCards = Schema.NullOr(SeatCards);
+// Each pot of a finished hand, main pot first, and who won it.
+const HandPots = Schema.Array(
+  Schema.Struct({
+    amount: NonNegativeInt,
+    winner_seats: Schema.Array(Seat).check(Schema.isMinLength(1)),
+  }),
+).check(Schema.isMinLength(1));
 
 const LastHand = Schema.Struct({
   hand_number: Schema.Int,
   blinds: Blinds,
+  // `null` unless one seat won every pot.
   winner_seat: Schema.NullOr(Seat),
   pot: NonNegativeInt,
+  pots: HandPots,
   ended_by: EndedBy,
   board: Board,
   hole_cards: ShownCards,
-  stacks: Stacks,
+  stacks: HandStacks,
   // Each seat's chips after this hand minus before it, blinds included;
-  // the two add up to 0.
-  stack_changes: Schema.Tuple([Schema.Int, Schema.Int]),
+  // they add up to 0.
+  stack_changes: bySeat(Schema.Int, 2),
 });
 
 const roomFields = {
   room_status: Schema.Literals(['waiting', 'playing', 'finished', 'void']),
-  // `null` until the opponent joins; "house-bot" against the bot.
+  // Only at a table of exactly 2 seats (A25): `null` until the opponent
+  // joins, "house-bot" against the bot.
   opponent_name: Schema.NullOr(Name),
   display_name: DisplayName,
-  // `null` until the opponent joins; "House Bot" against the bot.
+  // As opponent_name; "House Bot" against the bot.
   opponent_display_name: Schema.NullOr(DisplayName),
   settings: RoomSettings,
   to_act_seat: Schema.NullOr(Seat),
@@ -300,6 +390,11 @@ const roomFields = {
   ),
   view: Schema.NullOr(View),
   hint: Hint,
+  // A25, after the heads-up fields so a 2-seat answer reads as before.
+  visibility: Visibility,
+  is_host: Schema.Boolean,
+  seats_open: SeatsOpen,
+  seats: Seats,
 };
 
 const YourTurn = Schema.Struct({
@@ -329,21 +424,26 @@ const Waiting = Schema.Struct({
 const Rating = Schema.Int;
 
 const SeatRatings = Schema.NullOr(
-  Schema.Tuple([
-    Schema.Struct({ name: Name, rating: Rating, change: Schema.Int }),
-    Schema.Struct({ name: Name, rating: Rating, change: Schema.Int }),
-  ]),
+  bySeat(Schema.Struct({ name: Name, rating: Rating, change: Schema.Int })),
 );
+// Each seat's place, 1 first, ties sharing one; `null` for void and
+// cancelled.
+const Places = Schema.NullOr(bySeat(PositiveInt));
 
 export const MatchOver = Schema.Struct({
   status: Schema.Literal('match_over'),
   ...roomFields,
   match_id: MatchId,
+  // `win` alone in first place, `draw` sharing it, else `loss`.
   result: Schema.Literals(['win', 'loss', 'draw', 'cancelled', 'void']),
+  // The caller's place; `null` for cancelled and void. A seat that is out
+  // or left gets this while the table plays on, with `ratings: null`.
+  place: Schema.NullOr(PositiveInt),
   final_stacks: Stacks,
   ratings: SeatRatings,
   last_hand: Schema.NullOr(LastHand),
   hands_since_your_turn: Schema.Array(LastHand),
+  watch_url: WatchUrl,
   tell_owner: Schema.String,
 });
 
@@ -371,17 +471,24 @@ export const Leaderboard = Schema.Struct({
       wins: NonNegativeInt,
       losses: NonNegativeInt,
       draws: NonNegativeInt,
+      // Matches won in first place, heads-up wins included.
+      championships: NonNegativeInt,
     }),
   ),
 });
 export type Leaderboard = typeof Leaderboard.Type;
 
-const Players = Schema.Tuple([Name, Name]);
+const Players = bySeat(Name);
 // As the players were shown in that match, by seat.
-const DisplayNames = Schema.Tuple([DisplayName, DisplayName]);
+const DisplayNames = bySeat(DisplayName);
+// The seat in first place; `draw` when first place is shared.
 const SeatResult = Schema.Literals([
   'seat0_win',
   'seat1_win',
+  'seat2_win',
+  'seat3_win',
+  'seat4_win',
+  'seat5_win',
   'draw',
   'void',
   'cancelled',
@@ -392,6 +499,7 @@ export const MatchSummary = Schema.Struct({
   players: Players,
   display_names: DisplayNames,
   result: SeatResult,
+  places: Places,
   ended_at: IsoTime,
   rated: Schema.Boolean,
 });
@@ -408,13 +516,15 @@ export const MatchHand = Schema.Struct({
   blinds: Blinds,
   button_seat: Seat,
   board: Board,
-  // Every hand: the seed is public once the match is over (A13).
-  hole_cards: BothHoleCards,
+  // Every hand: the seed is public once the match is over (A13); `null`
+  // for a seat already out before the hand.
+  hole_cards: SeatCards,
   events: Schema.Array(HistoryEntry),
   winner_seat: Schema.NullOr(Seat),
   pot: NonNegativeInt,
+  pots: HandPots,
   ended_by: EndedBy,
-  stacks: Stacks,
+  stacks: HandStacks,
 });
 export type MatchHand = typeof MatchHand.Type;
 
@@ -428,6 +538,8 @@ export const MATCH_END_REASONS = [
   'bust',
   'max_hands',
   'leave',
+  // Only house-bot left at the table (E6).
+  'bots_only',
   'void',
   'cancelled',
 ] as const;
@@ -443,11 +555,12 @@ export const MatchDetail = Schema.Struct({
   }),
   seed: Seed,
   result: SeatResult,
+  places: Places,
   end_reason: Schema.NullOr(Schema.Literals(MATCH_END_REASONS)),
   rated: Schema.Boolean,
   ended_at: IsoTime,
   final_stacks: Stacks,
-  rating_changes: Schema.NullOr(Schema.Tuple([RatingChange, RatingChange])),
+  rating_changes: Schema.NullOr(bySeat(RatingChange)),
   hands: Schema.Array(MatchHand),
 });
 export type MatchDetail = typeof MatchDetail.Type;
@@ -478,13 +591,9 @@ const WatchView = Schema.Struct({
 });
 
 // A finished hand as the match record shows it. While the match is played,
-// the opponent's cards are `null` unless the hand went to showdown.
+// the others' cards are `null` unless shown at showdown.
 const WatchHand = Schema.Struct({
   ...MatchHand.fields,
-  hole_cards: Schema.Tuple([
-    Schema.NullOr(HoleCards),
-    Schema.NullOr(HoleCards),
-  ]),
   events: Schema.Array(WatchEvent),
 });
 
@@ -494,9 +603,13 @@ const watchFields = {
   room_id: RoomId,
   // The watched seat.
   seat: Seat,
-  players: Schema.Tuple([Name, Schema.NullOr(Name)]),
-  display_names: Schema.Tuple([DisplayName, Schema.NullOr(DisplayName)]),
+  // One per seated player, by seat.
+  players: Players,
+  display_names: DisplayNames,
   settings: RoomSettings,
+  visibility: Visibility,
+  seats: Seats,
+  seats_open: SeatsOpen,
   hand_number: roomFields.hand_number,
   to_act_seat: roomFields.to_act_seat,
   // Only while it is the watched seat's turn.
@@ -516,8 +629,28 @@ export const WatchResponse = Schema.Union([
     room_status: Schema.Literals(['finished', 'void']),
     match_id: MatchId,
     result: SeatResult,
+    places: Places,
     final_stacks: Stacks,
     ratings: SeatRatings,
   }),
 ]);
 export type WatchResponse = typeof WatchResponse.Type;
+
+// --- Lobby (A25) ------------------------------------------------------------
+
+// The rooms not started yet, oldest first; private ones without the code.
+export const Lobby = Schema.Struct({
+  rooms: Schema.Array(
+    Schema.Struct({
+      room_id: RoomId,
+      visibility: Visibility,
+      seats: bySeat(
+        Schema.Struct({ seat: Seat, name: Name, display_name: DisplayName }),
+      ),
+      seats_open: SeatsOpen,
+      settings: RoomSettings,
+      created_at: IsoTime,
+    }),
+  ),
+});
+export type Lobby = typeof Lobby.Type;

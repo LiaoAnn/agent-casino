@@ -70,6 +70,7 @@ const view = {
   my_cards: ['Ah', 'Kd'],
   board: ['7s', '2c', 'Kh'],
   pot: 12,
+  pots: [12],
   my_stack: 34,
   opponent_stack: 30,
   my_bet_this_street: 0,
@@ -85,7 +86,42 @@ const settings = {
 };
 const watchUrl = `https://web.test/watch/${ROOM}?token=abc.def`;
 
+const seats = ['alice', 'bob'].map((name, seat) => ({
+  seat,
+  name,
+  display_name: seat === 0 ? '小愛 🃏' : '鮑伯',
+  stack: seat === 0 ? 34 : 30,
+  bet_this_street: seat === 0 ? 0 : 4,
+  status: 'playing',
+  place: null,
+}));
+const roomFields = {
+  visibility: 'private',
+  is_host: true,
+  seats_open: 0,
+  seats,
+};
+const waitingSeats = seats.map(seat => ({
+  ...seat,
+  stack: 40,
+  bet_this_street: 0,
+  status: 'waiting',
+}));
+const waitingFields = {
+  ...roomFields,
+  seats_open: 5,
+  seats: waitingSeats.slice(0, 1),
+};
+const joinedFields = {
+  ...roomFields,
+  invite_code: null,
+  is_host: false,
+  seats_open: 4,
+  seats: waitingSeats,
+};
+
 const yourTurn = {
+  ...roomFields,
   status: 'your_turn',
   room_status: 'playing',
   opponent_name: 'bob',
@@ -109,6 +145,7 @@ const yourTurn = {
     blinds: [1, 2],
     winner_seat: 1,
     pot: 8,
+    pots: [{ amount: 8, winner_seats: [1] }],
     ended_by: 'showdown',
     board: ['2h', '3h', '9c', 'Td', 'Js'],
     hole_cards: [
@@ -122,6 +159,15 @@ const yourTurn = {
 };
 
 const matchOver = {
+  ...roomFields,
+  seats: seats.map((seat, index) => ({
+    ...seat,
+    stack: index === 0 ? 55 : 25,
+    bet_this_street: 0,
+    place: index + 1,
+  })),
+  place: 1,
+  watch_url: watchUrl,
   tell_owner: `You won. Final stacks: alice 55, bob 25. Elo: alice 1516 (+16), bob 1484 (-16). https://web.test/matches/${ROOM}`,
   hands_since_your_turn: [],
   status: 'match_over',
@@ -188,7 +234,7 @@ describe('T43 required owner experience contract fields', () => {
     },
   );
 
-  it('requires a string tell_owner on match_over and join', () => {
+  it('requires a string tell_owner on match_over and queue matched', () => {
     const joined = {
       room_id: ROOM,
       seat: 1,
@@ -204,7 +250,6 @@ describe('T43 required owner experience contract fields', () => {
     const matched = { ...joined, status: 'matched' };
     for (const [schema, example] of [
       [MatchOver, matchOver],
-      [JoinResponse, joined],
       [QueueResponse, matched],
     ] as const) {
       expect(decodes(schema, example)).toBe(true);
@@ -450,6 +495,8 @@ describe('responses', () => {
   it('decodes the create room response', () => {
     expect(
       decodes(CreateRoomResponse, {
+        ...waitingFields,
+        opponent_name: null,
         room_id: ROOM,
         invite_code: 'K7Q2MX',
         display_name: '小愛 🃏',
@@ -470,6 +517,7 @@ describe('responses', () => {
       decodes(RoomStatus, {
         status: 'waiting',
         room_status: 'waiting',
+        ...waitingFields,
         opponent_name: null,
         display_name: '小愛 🃏',
         opponent_display_name: null,
@@ -481,7 +529,12 @@ describe('responses', () => {
       }),
     ).toBe(true);
     expect(
-      decodes(RoomStatus, { ...matchOver, result: 'cancelled', ratings: null }),
+      decodes(RoomStatus, {
+        ...matchOver,
+        result: 'cancelled',
+        place: null,
+        ratings: null,
+      }),
     ).toBe(true);
   });
 
@@ -505,7 +558,7 @@ describe('responses', () => {
         view: { ...view, board: ['2s', '3s', '4s', '5s', '6s', '7s'] },
       }),
     ).toBe(false);
-    expect(decodes(RoomStatus, { ...yourTurn, to_act_seat: 2 })).toBe(false);
+    expect(decodes(RoomStatus, { ...yourTurn, to_act_seat: 6 })).toBe(false);
     expect(decodes(RoomStatus, { ...matchOver, result: 'seat0_win' })).toBe(
       false,
     );
@@ -513,6 +566,7 @@ describe('responses', () => {
 
   it('decodes the join response with opponent_name, settings and watch_url', () => {
     const joined = {
+      ...joinedFields,
       room_id: ROOM,
       seat: 1,
       token: 'abc.def',
@@ -533,6 +587,8 @@ describe('responses', () => {
 
   it('requires settings and watch_url in the create room response, and watch_url in queue matched', () => {
     const created = {
+      ...waitingFields,
+      opponent_name: null,
       room_id: ROOM,
       invite_code: 'K7Q2MX',
       display_name: '小愛 🃏',
@@ -620,6 +676,7 @@ describe('responses', () => {
             display_name: '小愛 🃏',
             rating: 1532,
             games: 4,
+            championships: 3,
             wins: 3,
             losses: 1,
             draws: 0,
@@ -632,6 +689,7 @@ describe('responses', () => {
       players: ['alice', 'bob'],
       display_names: ['小愛 🃏', '鮑伯'],
       result: 'seat0_win',
+      places: [1, 2],
       ended_at: '2026-10-16T12:50:30Z',
       rated: true,
     };
@@ -660,6 +718,7 @@ describe('responses', () => {
     },
     seed: SEED,
     result: 'seat1_win',
+    places: [2, 1],
     rated: true,
     ended_at: '2026-10-16T12:50:30Z',
     final_stacks: [39, 41],
@@ -684,6 +743,7 @@ describe('responses', () => {
         blinds: [1, 2],
         winner_seat: 1,
         pot: 2,
+        pots: [{ amount: 2, winner_seats: [1] }],
         ended_by: 'fold',
         stacks: [39, 41],
       },
@@ -760,9 +820,14 @@ describe('responses', () => {
     expect(
       decodes(RoomStatus, {
         ...yourTurn,
+        status: 'waiting',
+        room_status: 'waiting',
+        to_act_seat: null,
+        hand_number: null,
+        view: null,
         settings: { ...settings, blind_every: null },
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('requires blinds on each public hand', () => {
@@ -810,12 +875,16 @@ describe('WatchResponse', () => {
     blinds: [1, 2],
     winner_seat: 0,
     pot: 4,
+    pots: [{ amount: 4, winner_seats: [0] }],
     ended_by: 'fold',
     stacks: [42, 38],
     ...overrides,
   });
   const playing = {
     room_id: ROOM,
+    visibility: 'private',
+    seats,
+    seats_open: 0,
     seat: 0,
     players: ['alice', 'bob'],
     display_names: ['小愛 🃏', '鮑伯'],
@@ -843,6 +912,7 @@ describe('WatchResponse', () => {
     ],
     match_id: ROOM,
     result: 'seat0_win',
+    places: [1, 2],
     final_stacks: [55, 25],
     ratings: [
       { name: 'alice', rating: 1516, change: 16 },
@@ -864,13 +934,16 @@ describe('WatchResponse', () => {
     ).toBe(true);
   });
 
-  it('decodes a waiting room: second player, view and hand number null, no hands', () => {
+  it('decodes a waiting room: only seated players, view and hand number null, no hands', () => {
     expect(
       decodes(WatchResponse, {
         room_id: ROOM,
+        visibility: 'private',
+        seats: waitingFields.seats,
+        seats_open: 5,
         seat: 0,
-        players: ['alice', null],
-        display_names: ['小愛 🃏', null],
+        players: ['alice'],
+        display_names: ['小愛 🃏'],
         settings,
         room_status: 'waiting',
         hand_number: null,
@@ -895,19 +968,19 @@ describe('WatchResponse', () => {
     );
   });
 
-  it('rejects results that use the agent angle, or a seat other than 0 or 1', () => {
+  it('rejects results that use the agent angle, or a seat outside 0–5', () => {
     expect(decodes(WatchResponse, { ...finished, result: 'win' })).toBe(false);
-    expect(decodes(WatchResponse, { ...playing, seat: 2 })).toBe(false);
-    expect(decodes(WatchResponse, { ...playing, to_act_seat: 2 })).toBe(false);
+    expect(decodes(WatchResponse, { ...playing, seat: 6 })).toBe(false);
+    expect(decodes(WatchResponse, { ...playing, to_act_seat: 6 })).toBe(false);
     expect(decodes(WatchResponse, { ...playing, room_status: 'over' })).toBe(
       false,
     );
   });
 
   it('rejects malformed pieces: players, hole cards, hand_number 0, events', () => {
-    expect(decodes(WatchResponse, { ...playing, players: ['alice'] })).toBe(
-      false,
-    );
+    expect(
+      decodes(WatchResponse, { ...playing, players: Array(7).fill('alice') }),
+    ).toBe(false);
     expect(decodes(WatchResponse, { ...playing, hand_number: 0 })).toBe(false);
     expect(
       decodes(WatchResponse, {
@@ -994,7 +1067,7 @@ describe('T28 S2 last_hand.stack_changes contract', () => {
   it.each([
     { stack_changes: [1.5, -1.5] },
     { stack_changes: [1] },
-    { stack_changes: [1, -1, 0] },
+    { stack_changes: [1, -1, 0, 0, 0, 0, 0] },
     { stack_changes: ['-4', 4] },
   ])('rejects malformed seat changes $stack_changes', ({ stack_changes }) => {
     expect(
@@ -1218,6 +1291,7 @@ describe('T35 required display names in responses', () => {
     display_name: '小愛 🃏',
     rating: 1500,
     games: 1,
+    championships: 1,
     wins: 1,
     losses: 0,
     draws: 0,
@@ -1227,6 +1301,7 @@ describe('T35 required display names in responses', () => {
     players: ['alice', 'bob'],
     display_names: ['小愛 🃏', '鮑伯'],
     result: 'cancelled',
+    places: null,
     rated: false,
     ended_at: '2026-10-16T12:50:30Z',
   };
@@ -1242,6 +1317,7 @@ describe('T35 required display names in responses', () => {
   const waiting = {
     status: 'waiting',
     room_status: 'waiting',
+    ...waitingFields,
     ...named,
     opponent_display_name: null,
     opponent_name: null,
@@ -1253,9 +1329,12 @@ describe('T35 required display names in responses', () => {
   };
   const watch = {
     room_id: ROOM,
+    visibility: 'private',
+    seats: waitingFields.seats,
+    seats_open: 5,
     seat: 0,
-    players: ['alice', null],
-    display_names: ['小愛 🃏', null],
+    players: ['alice'],
+    display_names: ['小愛 🃏'],
     settings,
     room_status: 'waiting',
     hand_number: null,
@@ -1266,15 +1345,20 @@ describe('T35 required display names in responses', () => {
   };
   const finishedWatch = {
     ...watch,
+    seats: waitingSeats,
+    seats_open: 0,
     players: ['alice', 'bob'],
     display_names: ['小愛 🃏', '鮑伯'],
     room_status: 'finished',
     match_id: ROOM,
     result: 'cancelled',
+    places: null,
     final_stacks: [40, 40],
     ratings: null,
   };
   const created = {
+    ...waitingFields,
+    opponent_name: null,
     room_id: ROOM,
     invite_code: 'K7Q2MX',
     seat: 0,
@@ -1286,6 +1370,7 @@ describe('T35 required display names in responses', () => {
     opponent_display_name: null,
   };
   const joined = {
+    ...joinedFields,
     room_id: ROOM,
     seat: 1,
     token: 'abc.def',
@@ -1297,8 +1382,24 @@ describe('T35 required display names in responses', () => {
     tell_owner: `Playing against 鮑伯. Watch: ${watchUrl}`,
   };
   const envelopes = [
-    ['matched', QueueResponse, { ...joined, status: 'matched' }, false],
-    ['join', JoinResponse, joined, false],
+    [
+      'matched',
+      QueueResponse,
+      {
+        status: 'matched',
+        room_id: ROOM,
+        seat: 1,
+        token: 'abc.def',
+        opponent_name: 'bob',
+        settings,
+        watch_url: watchUrl,
+        hint: 'Call wait',
+        ...named,
+        tell_owner: joined.tell_owner,
+      },
+      false,
+    ],
+    ['join', JoinResponse, joined, true],
     ['create', CreateRoomResponse, created, true],
     ['your_turn', RoomStatus, yourTurn, true],
     ['waiting', RoomStatus, waiting, true],
@@ -1340,14 +1441,14 @@ describe('T35 required display names in responses', () => {
   });
 
   const tuples = [
-    ['watch waiting/playing', WatchResponse, watch, true],
-    ['watch finished', WatchResponse, finishedWatch, true],
+    ['watch waiting/playing', WatchResponse, watch, false],
+    ['watch finished', WatchResponse, finishedWatch, false],
     ['match summary', MatchSummary, summary, false],
     ['match detail', MatchDetail, detail, false],
   ] as const;
 
   it.each(tuples)(
-    '%s requires the display_names tuple with nonempty strings',
+    '%s requires the display_names array with nonempty strings',
     (_label, schema, response, nullable) => {
       const decode = Schema.decodeUnknownSync(
         schema as unknown as Schema.Codec<unknown>,
@@ -1357,8 +1458,7 @@ describe('T35 required display names in responses', () => {
       expect(decodes(schema, without)).toBe(false);
       for (const display_names of [
         [],
-        ['Alice'],
-        ['Alice', 'Bob', 'Carol'],
+        Array(7).fill('Alice'),
         ['', 'Bob'],
         ['Alice', ''],
         [null, 'Bob'],

@@ -202,6 +202,7 @@ describe('GET /v1/leaderboard', () => {
         rating: 1516,
         games: 1,
         wins: 1,
+        championships: 1,
         losses: 0,
         draws: 0,
       },
@@ -212,6 +213,7 @@ describe('GET /v1/leaderboard', () => {
         rating: 1484,
         games: 1,
         wins: 0,
+        championships: 0,
         losses: 1,
         draws: 0,
       },
@@ -325,6 +327,7 @@ describe('GET /v1/matches', () => {
           players: ['Alice', 'Bob'],
           display_names: ['Alice', 'Bob'],
           result: 'seat0_win',
+          places: [1, 2],
           ended_at: minutes(5),
           rated: true,
         },
@@ -333,6 +336,7 @@ describe('GET /v1/matches', () => {
           players: ['carol', 'house-bot'],
           display_names: ['carol', 'House Bot'],
           result: 'seat0_win',
+          places: [1, 2],
           ended_at: minutes(4),
           rated: false,
         },
@@ -341,6 +345,7 @@ describe('GET /v1/matches', () => {
           players: ['Alice', 'Bob'],
           display_names: ['Alice', 'Bob'],
           result: 'void',
+          places: null,
           ended_at: minutes(3),
           rated: false,
         },
@@ -349,6 +354,7 @@ describe('GET /v1/matches', () => {
           players: ['ALICE', 'dave'],
           display_names: ['ALICE', 'dave'],
           result: 'cancelled',
+          places: null,
           ended_at: minutes(2),
           rated: false,
         },
@@ -501,6 +507,7 @@ describe('GET /v1/matches/{match_id}', () => {
       },
       seed: RECORDED_SEED,
       result: 'seat0_win',
+      places: [1, 2],
       end_reason: null,
       rated: true,
       ended_at: '2026-10-18T10:31:07.250Z',
@@ -509,7 +516,15 @@ describe('GET /v1/matches/{match_id}', () => {
         { name: 'Alice', before: 1500, after: 1516 },
         { name: 'bob', before: 1500, after: 1484 },
       ],
-      hands: [hand(1), hand(2)],
+      hands: [hand(1), hand(2)].map(h => ({
+        ...h,
+        pots: [
+          {
+            amount: h.pot,
+            winner_seats: h.winner_seat === null ? [0, 1] : [h.winner_seat],
+          },
+        ],
+      })),
     });
   });
 
@@ -547,7 +562,8 @@ describe('GET /v1/matches/{match_id}', () => {
       [2, 'fold', dealHand(match.seed, 2).holeCards],
       [3, 'showdown', hand(3).hole_cards],
     ]);
-    expect(hands[1]).toStrictEqual({
+    const { pots: _pots, ...foldedRecord } = required(hands[1]);
+    expect(foldedRecord).toStrictEqual({
       ...folded,
       hole_cards: dealHand(match.seed, 2).holeCards,
     });
@@ -566,7 +582,9 @@ describe('GET /v1/matches/{match_id}', () => {
     }));
     expect(match.hands.some(h => h.ended_by === 'fold')).toBe(true);
     expect(match.hands.some(h => h.ended_by === 'showdown')).toBe(true);
-    expect(detail.hands).toStrictEqual(expected);
+    expect(detail.hands.map(({ pots: _pots, ...hand }) => hand)).toStrictEqual(
+      expected,
+    );
   });
 
   it('rating_changes are integers carried over from earlier matches', async () => {
@@ -818,3 +836,11 @@ describe('T35 recorded display names', () => {
     );
   });
 });
+
+function required<T>(value: T | null | undefined): T {
+  expect(value).not.toBeNull();
+  expect(value).not.toBeUndefined();
+  if (value === null || value === undefined)
+    throw new Error('Missing test fixture value');
+  return value;
+}

@@ -626,6 +626,7 @@
 - 先改規格：casino-api 的 A2（改寫成大廳和自動入座）、A17、A18。
 - Matchmaker DO 改成大廳：記住有空位的公開房，自動入座時進最早開的那一間，只進預設設定的房間；拿掉 queue，`POST /v1/queue` 回錯誤並附 hint。
 - 只改：`apps/api/src/matchmaker/`、`routes/queue.ts`、新的自動入座路由、casino-api skill。
+- 合約例外（2026-10-20 coordinator）：可以從 `apps/api/src/contract/` 刪掉 queue 端點和 `QueueRequest`、`QueueResponse`（只刪不改）；`gone` 錯誤碼和自動入座端點 T37 已經加好。
 - 驗證：`pnpm test:api`。同時 6 個人自動入座，會坐進同一間；第 7 個人另開一間；私人房和自訂設定的房間不會被自動入座。
 
 ### T40 多人積分與紀錄（約 700 行）· Blocked by：T37

@@ -14,7 +14,9 @@ import {
   startMatch,
 } from '../holdem/match';
 import { dealHand, mulberry32 } from '../holdem/shuffle';
+import { headsUpPots, placesOf } from '../room/heads-up';
 import { type HandNotes, watchView } from '../room/watch';
+import { fakeTable } from './fake-table';
 import type {
   Leaderboard,
   MatchDetail,
@@ -167,6 +169,7 @@ function playMatch(
       hands.push({
         ...hand,
         hole_cards: dealHand(config.seed, hand.hand_number).holeCards,
+        pots: headsUpPots(hand),
       });
     }
     state = result.state;
@@ -294,9 +297,11 @@ function fakeWatch(seed: number): {
         { name: names[0], before: 1500, after: 1500 + change },
         { name: names[1], before: 1500, after: 1500 - change },
       ],
+      places: placesOf(result),
       hands: finished.hands.map(hand => ({
         ...hand,
         hole_cards: dealHand(finished.config.seed, hand.hand_number).holeCards,
+        pots: headsUpPots(hand),
       })),
     },
   };
@@ -423,20 +428,33 @@ export function makeFakeData(
       ended_at: new Date(START_TIME + i * 37 * 60_000).toISOString(),
       final_stacks: [stacks[0], stacks[1]],
       rating_changes: ratingChanges,
+      places: placesOf(result),
       hands,
     });
   }
 
   const watch = fakeWatch(seed);
+  const table = fakeTable(seed);
   const newestFirst: MatchSummary[] = details
-    .map(({ match_id, players, display_names, result, ended_at, rated }) => ({
-      match_id,
-      players,
-      display_names,
-      result,
-      ended_at,
-      rated,
-    }))
+    .map(
+      ({
+        match_id,
+        players,
+        display_names,
+        result,
+        places,
+        ended_at,
+        rated,
+      }) => ({
+        match_id,
+        players,
+        display_names,
+        result,
+        places,
+        ended_at,
+        rated,
+      }),
+    )
     .reverse();
   const leaderboard: Leaderboard = {
     entries: [...ratings.values()]
@@ -451,6 +469,8 @@ export function makeFakeData(
         wins: r.wins,
         losses: r.losses,
         draws: r.draws,
+        // Heads-up only: a title is a win.
+        championships: r.wins,
       })),
   };
 
@@ -473,8 +493,12 @@ export function makeFakeData(
     },
     match: (matchId: string): MatchDetail | undefined =>
       details.find(d => d.match_id === matchId) ??
-      (matchId === watch.record.match_id ? watch.record : undefined),
+      (matchId === watch.record.match_id ? watch.record : undefined) ??
+      (matchId === table.record.match_id ? table.record : undefined),
     // The owner's watch link of a match in play and of one that is over.
     watch: { playing: watch.playing, finished: watch.finished },
+    // A six-seat public table: lobby, the host's and a knocked-out seat's
+    // answers, the host's watch link and the record (A25).
+    table,
   };
 }

@@ -491,7 +491,9 @@ describe('T35 persisted room display names', () => {
       }
       expect(await restored.watch(0)).toMatchObject({
         ok: true,
-        value: { display_names: ['alice', opponent] },
+        value: {
+          display_names: opponent === null ? ['alice'] : ['alice', opponent],
+        },
       });
       if (kind === 'human') {
         expect(await restored.watch(1)).toMatchObject({

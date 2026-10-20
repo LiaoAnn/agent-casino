@@ -13,6 +13,7 @@ import type {
 import { otherSeat } from '../holdem/match';
 import { dealHand } from '../holdem/shuffle';
 import { viewFor } from '../holdem/view';
+import { headsUpPots, headsUpSeats, placesOf } from './heads-up';
 
 // The seat's notes of one hand, by the step's position in the hand's events.
 export type HandNotes = Record<number, string>;
@@ -37,6 +38,8 @@ export interface WatchInput {
     result: SeatResult;
     final_stacks: [number, number];
     ratings: Extract<WatchResponse, { match_id: string }>['ratings'];
+    // The seat that left mid-match, if one did.
+    left?: Seat;
   } | null;
 }
 
@@ -68,19 +71,32 @@ export function watchView(input: WatchInput): WatchResponse {
       events: withNotes(hand.events, notes[hand.hand_number]),
       winner_seat: hand.winner_seat,
       pot: hand.pot,
+      pots: headsUpPots(hand),
       ended_by: hand.ended_by,
       stacks: hand.stacks,
     };
   });
+  const seated = (input.names[1] === null ? [0] : [0, 1]) as Seat[];
   const common = {
     room_id: input.room_id,
     seat,
-    players: input.names,
-    display_names: input.display_names,
+    players: seated.map(s => input.names[s] ?? ''),
+    display_names: seated.map(s => input.display_names[s] ?? ''),
     settings: input.settings,
+    visibility: 'private' as const,
+    seats: headsUpSeats({
+      names: input.names,
+      display_names: input.display_names,
+      settings: input.settings,
+      match,
+      places: ended && placesOf(ended.result),
+      ...(ended?.left !== undefined && { left: ended.left }),
+    }),
+    seats_open: match ? 0 : 2 - seated.length,
     hand_number: seen?.hand_number ?? null,
     view: seen && {
       ...seen.view,
+      pots: [seen.view.pot],
       // A match that is over never raises the blinds again (A19).
       ...(ended && { next_blinds_at_hand: null }),
       history: withNotes(seen.view.history, notes[seen.hand_number]),
@@ -95,6 +111,7 @@ export function watchView(input: WatchInput): WatchResponse {
       deadline: null,
       match_id: input.room_id,
       result: ended.result,
+      places: placesOf(ended.result),
       final_stacks: ended.final_stacks,
       ratings: ended.ratings,
     };

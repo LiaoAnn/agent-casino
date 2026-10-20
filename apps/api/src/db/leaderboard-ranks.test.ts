@@ -122,6 +122,7 @@ describe('GET /v1/leaderboard competition ranks (T44)', () => {
         entries: expect.arrayContaining(
           fixtures.map(({ nameKey: _nameKey, ...player }) => ({
             ...player,
+            championships: player.wins,
             display_name: player.name,
             rank: expectedRanks[player.name],
           })),

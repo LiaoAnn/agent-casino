@@ -76,6 +76,9 @@ const PURPOSE: Readonly<Record<string, string>> = {
   'room.act':
     'Send your action; with `?wait=1`, then wait for your next turn (long-polls up to 30 s)',
   'room.leave': 'Leave the match (counts as a loss)',
+  'lobby.quickRoom': 'Not open yet (multiplayer tables); do not use',
+  'room.start': 'Not open yet (multiplayer tables); do not use',
+  'read.lobby': 'Not open yet (multiplayer tables); do not use',
   'watch.watch':
     "Your owner's read-only view behind `watch_url`; not for players",
   'read.leaderboard': 'Top 100 by rating',
@@ -115,6 +118,10 @@ const ADVICE: Record<ErrorCode, string> = {
     'Illegal action. Read `message`, pick one of `legal_actions`, and resend with the same `turn_id` before the deadline.',
   match_over:
     'The match has ended. From a room endpoint, read `state` in the error and report the result. From `join`, that room is closed: queue or open a new room.',
+  not_host: 'Only the host (seat 0) can do this. Call `wait` and play on.',
+  not_enough_players:
+    'A table needs at least 2 seats, house-bot included. Wait for more players, or start with `bots`.',
+  gone: 'This endpoint was taken out. Do what `hint` says instead, and read /skill.md again.',
   name_in_use:
     'This name is queued or was just matched with another `queue_key`. Resend with the `queue_key` you first queued with, or queue under another name.',
   not_found:

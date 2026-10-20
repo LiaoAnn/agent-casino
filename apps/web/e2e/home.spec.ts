@@ -12,6 +12,11 @@ const resultText = (m: Match): string => {
   switch (m.result) {
     case 'seat0_win':
       return `${m.display_names[0]} 勝`;
+    case 'seat2_win':
+    case 'seat3_win':
+    case 'seat4_win':
+    case 'seat5_win':
+      throw new Error('Expected a heads-up fixture');
     case 'seat1_win':
       return `${m.display_names[1]} 勝`;
     case 'draw':

@@ -430,7 +430,8 @@ describe('POST /v1/queue (S1)', () => {
           settings.starting_stack,
         );
         expect(
-          status.view.opponent_stack + status.view.opponent_bet_this_street,
+          required(status.view.opponent_stack) +
+            required(status.view.opponent_bet_this_street),
         ).toBe(settings.starting_stack);
       }
     }
@@ -883,3 +884,12 @@ describe('T35 queued display names', () => {
     );
   });
 });
+
+// Fail explicitly if a fixture expected by this assertion is absent.
+function required<T>(value: T | null | undefined): T {
+  expect(value).not.toBeNull();
+  expect(value).not.toBeUndefined();
+  if (value === null || value === undefined)
+    throw new Error('Missing test fixture value');
+  return value;
+}

@@ -9,6 +9,7 @@ import {
 } from '../contract/schemas';
 import { blindsAt } from '../holdem/match';
 import { dealHand } from '../holdem/shuffle';
+import { headsUpPots, placesOf } from '../room/heads-up';
 import type { Db } from './client';
 import {
   bans,
@@ -52,6 +53,8 @@ export async function getLeaderboard(db: Db): Promise<Leaderboard> {
         display_name: displayName ?? row.name,
         rank,
         rating: Math.round(row.rating),
+        // Every match so far is heads-up, so a title is a win (A25).
+        championships: row.wins,
       };
     }),
   };
@@ -97,6 +100,7 @@ export async function listMatches(
         ...rest,
         players: [player0, player1],
         display_names: displayNames({ player0, player1, display0, display1 }),
+        places: placesOf(rest.result),
         ended_at: endedAt.toISOString(),
       }),
     ),
@@ -169,6 +173,7 @@ export async function getMatch(
     settings,
     seed: row.seed,
     result: row.result,
+    places: placesOf(row.result),
     end_reason: row.endReason,
     rated: row.rated,
     ended_at: row.endedAt.toISOString(),
@@ -189,6 +194,7 @@ export async function getMatch(
       events: eventsByHand.get(hand.handNumber) ?? [],
       winner_seat: hand.winnerSeat,
       pot: hand.pot,
+      pots: headsUpPots({ pot: hand.pot, winner_seat: hand.winnerSeat }),
       ended_by: hand.endedBy,
       stacks: hand.stacks,
     })),

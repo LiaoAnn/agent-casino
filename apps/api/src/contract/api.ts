@@ -17,16 +17,18 @@ import {
   ActionRequest,
   BanResponse,
   CreateRoomRequest,
-  CreateRoomResponse,
   JoinRequest,
-  JoinResponse,
   Leaderboard,
+  Lobby,
   MatchDetail,
   MatchList,
   MatchOver,
   QueueRequest,
   QueueResponse,
+  QuickRoomRequest,
   RoomStatus,
+  SeatResponse,
+  StartRequest,
   WatchResponse,
 } from './schemas';
 
@@ -123,13 +125,27 @@ const LobbyGroup = HttpApiGroup.make('lobby').add(
       'name_invalid',
       'name_banned',
       'name_in_use',
+      // T39 takes the queue out (casino-api: POST /v1/queue).
+      'gone',
+      'unavailable',
+      'internal',
+    ),
+  }),
+  // Sits down at an open public table, or opens one (A25).
+  HttpApiEndpoint.post('quickRoom', '/v1/rooms/quick', {
+    payload: QuickRoomRequest,
+    success: SeatResponse,
+    error: apiErrors(
+      'invalid_request',
+      'name_invalid',
+      'name_banned',
       'unavailable',
       'internal',
     ),
   }),
   HttpApiEndpoint.post('createRoom', '/v1/rooms', {
     payload: CreateRoomRequest,
-    success: CreateRoomResponse,
+    success: SeatResponse,
     error: apiErrors(
       'invalid_request',
       'name_invalid',
@@ -141,7 +157,7 @@ const LobbyGroup = HttpApiGroup.make('lobby').add(
   HttpApiEndpoint.post('joinRoom', '/v1/rooms/:room_id/join', {
     params: roomParams,
     payload: JoinRequest,
-    success: JoinResponse,
+    success: SeatResponse,
     error: apiErrors(
       'invalid_request',
       'name_invalid',
@@ -158,6 +174,21 @@ const LobbyGroup = HttpApiGroup.make('lobby').add(
 
 const RoomGroup = HttpApiGroup.make('room')
   .add(
+    // The host starts the table; answers like `state` (A25).
+    HttpApiEndpoint.post('start', '/v1/rooms/:room_id/start', {
+      params: roomParams,
+      payload: StartRequest,
+      success: RoomStatus,
+      error: apiErrors(
+        'invalid_request',
+        'room_not_found',
+        'not_host',
+        'not_enough_players',
+        'match_over',
+        'unavailable',
+        'internal',
+      ),
+    }),
     HttpApiEndpoint.get('wait', '/v1/rooms/:room_id/wait', {
       params: roomParams,
       success: RoomStatus,
@@ -210,6 +241,11 @@ const WatchGroup = HttpApiGroup.make('watch')
   .middleware(WatchAuth);
 
 const ReadGroup = HttpApiGroup.make('read').add(
+  // The rooms waiting to start (A25).
+  HttpApiEndpoint.get('lobby', '/v1/lobby', {
+    success: Lobby,
+    error: apiErrors('unavailable', 'internal'),
+  }),
   HttpApiEndpoint.get('leaderboard', '/v1/leaderboard', {
     success: Leaderboard,
     error: apiErrors('unavailable', 'internal'),

@@ -158,6 +158,30 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
 
   const ENDPOINTS: Endpoint[] = [
     {
+      name: 'lobby.quickRoom',
+      route: 'POST /v1/rooms/quick',
+      auth: 'none',
+      method: 'POST',
+      path: '/v1/rooms/quick',
+      body: { game: 'holdem', name: 'alice' },
+    },
+    {
+      name: 'room.start',
+      route: 'POST /v1/rooms/:room_id/start',
+      auth: 'room',
+      method: 'POST',
+      path: `/v1/rooms/${ROOM}/start`,
+      body: {},
+    },
+    {
+      name: 'read.lobby',
+      route: 'GET /v1/lobby',
+      auth: 'none',
+      method: 'GET',
+      path: '/v1/lobby',
+    },
+
+    {
       name: 'skill.skill',
       route: 'GET /skill.md',
       auth: 'none',
@@ -313,7 +337,7 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
       },
     });
     const table = ENDPOINTS.map(e => `${e.route} ${e.auth}`);
-    expect(contract).toHaveLength(19);
+    expect(contract).toHaveLength(22);
     expect([...table].sort()).toEqual([...contract].sort());
   });
 
@@ -353,7 +377,24 @@ describe('every CasinoApi endpoint is wired to a stub', () => {
     'admin.abortRoom',
   ]);
 
-  it.each(ENDPOINTS.filter(e => !IMPLEMENTED.has(e.name)))(
+  const NOT_OPEN = new Set(['lobby.quickRoom', 'room.start', 'read.lobby']);
+  it.each(ENDPOINTS.filter(e => NOT_OPEN.has(e.name)))(
+    '$name answers 503 unavailable until multiplayer is open',
+    async ({ name: _name, route: _route, auth, ...request }) => {
+      const authorization =
+        auth === 'room' ? `Bearer ${await roomToken()}` : undefined;
+      const body = await expectError(
+        await call({ ...request, authorization }),
+        'unavailable',
+        503,
+      );
+      expect(body.retryable).toBe(false);
+    },
+  );
+
+  it.each(
+    ENDPOINTS.filter(e => !IMPLEMENTED.has(e.name) && !NOT_OPEN.has(e.name)),
+  )(
     '$name ($method $path) answers 500 internal "not implemented"',
     async ({ name: _name, route: _route, auth, ...request }) => {
       const authorization =

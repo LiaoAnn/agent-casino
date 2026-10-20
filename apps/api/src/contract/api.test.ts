@@ -77,7 +77,12 @@ const EXPECTED: Record<
   'lobby.queue': {
     route: 'POST /v1/queue',
     auth: 'none',
-    codes: [...NAME_CODES, 'name_in_use'],
+    codes: [...NAME_CODES, 'name_in_use', 'gone'],
+  },
+  'lobby.quickRoom': {
+    route: 'POST /v1/rooms/quick',
+    auth: 'none',
+    codes: NAME_CODES,
   },
   'lobby.createRoom': {
     route: 'POST /v1/rooms',
@@ -99,6 +104,18 @@ const EXPECTED: Record<
     route: 'GET /v1/rooms/:room_id/wait',
     auth: 'room',
     codes: ['invalid_token', 'room_not_found'],
+  },
+  'room.start': {
+    route: 'POST /v1/rooms/:room_id/start',
+    auth: 'room',
+    codes: [
+      'invalid_token',
+      'room_not_found',
+      'not_host',
+      'not_enough_players',
+      'invalid_request',
+      'match_over',
+    ],
   },
   'room.state': {
     route: 'GET /v1/rooms/:room_id/state',
@@ -131,6 +148,11 @@ const EXPECTED: Record<
   },
   'read.leaderboard': {
     route: 'GET /v1/leaderboard',
+    auth: 'none',
+    codes: [],
+  },
+  'read.lobby': {
+    route: 'GET /v1/lobby',
     auth: 'none',
     codes: [],
   },
@@ -219,6 +241,18 @@ const waitingStatus = (hint: string) =>
   ({
     status: 'waiting',
     room_status: 'playing',
+    visibility: 'private',
+    is_host: true,
+    seats_open: 0,
+    seats: ['alice', 'bob'].map((name, seat) => ({
+      seat: seat as 0 | 1,
+      name,
+      display_name: name,
+      stack: 40,
+      bet_this_street: 0,
+      status: 'playing' as const,
+      place: null,
+    })),
     opponent_name: 'bob',
     display_name: 'alice',
     opponent_display_name: 'bob',
@@ -309,20 +343,13 @@ const skillStubs = {
 };
 
 const SkillHandlers = HttpApiBuilder.group(CasinoApi, 'skill', handlers =>
-  // Keep the pre-kit contract runnable: absent endpoints should fail as 404s,
-  // rather than crashing registration of unrelated existing stub handlers.
-  handlers.handleAll(
-    Object.fromEntries(
-      Object.entries(skillStubs).filter(
-        ([name]) => reflectApi()[`skill.${name}`],
-      ),
-    ) as typeof skillStubs,
-  ),
+  handlers.handleAll(skillStubs),
 );
 
 const LobbyHandlers = HttpApiBuilder.group(CasinoApi, 'lobby', handlers =>
   handlers.handleAll({
     queue: notServed,
+    quickRoom: notServed,
     createRoom: notServed,
     joinRoom: notServed,
   }),
@@ -330,6 +357,7 @@ const LobbyHandlers = HttpApiBuilder.group(CasinoApi, 'lobby', handlers =>
 
 const RoomHandlers = HttpApiBuilder.group(CasinoApi, 'room', handlers =>
   handlers.handleAll({
+    start: notServed,
     wait: notServed,
     state: () =>
       Effect.gen(function* () {
@@ -349,6 +377,7 @@ const WatchHandlers = HttpApiBuilder.group(CasinoApi, 'watch', handlers =>
 
 const ReadHandlers = HttpApiBuilder.group(CasinoApi, 'read', handlers =>
   handlers.handleAll({
+    lobby: notServed,
     leaderboard: () => Effect.succeed({ entries: [] }),
     matches: notServed,
     match: notServed,
