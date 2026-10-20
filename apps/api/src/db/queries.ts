@@ -1,5 +1,5 @@
 // What the read endpoints answer (A13, A15), in the contract's shapes.
-import { and, asc, desc, eq, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lt, or } from 'drizzle-orm';
 import {
   defaultDisplayName,
   type Leaderboard,
@@ -7,9 +7,8 @@ import {
   type MatchHand,
   type MatchList,
 } from '../contract/schemas';
-import { blindsAt } from '../holdem/match';
-import { dealHand } from '../holdem/shuffle';
-import { headsUpPots, placesOf } from '../room/heads-up';
+import { dealTable } from '../holdem/shuffle';
+import { blindsAt } from '../holdem/table';
 import type { Db } from './client';
 import {
   bans,
@@ -17,9 +16,13 @@ import {
   matchEvents,
   matches,
   matchHands,
+  matchSeats,
   type RoomSettings,
   ratings,
 } from './schema';
+
+// D1 stores seats as plain integers; recordMatch writes only 0–5.
+const asSeat = (seat: number) => seat as MatchHand['button_seat'];
 
 const LEADERBOARD_SIZE = 100;
 const PAGE_SIZE = 20;
@@ -53,7 +56,7 @@ export async function getLeaderboard(db: Db): Promise<Leaderboard> {
         display_name: displayName ?? row.name,
         rank,
         rating: Math.round(row.rating),
-        // Every match so far is heads-up, so a title is a win (A25).
+        // A win is first place alone, heads-up or not (T40).
         championships: row.wins,
       };
     }),
@@ -81,10 +84,6 @@ export async function listMatches(
   const rows = await db
     .select({
       match_id: matches.matchId,
-      player0: matches.player0,
-      player1: matches.player1,
-      display0: matches.display0,
-      display1: matches.display1,
       result: matches.result,
       endedAt: matches.endedAt,
       rated: matches.rated,
@@ -94,30 +93,44 @@ export async function listMatches(
     .orderBy(desc(matches.endedAt), desc(matches.matchId))
     .limit(PAGE_SIZE + 1);
   const page = rows.slice(0, PAGE_SIZE);
+  const seats =
+    page.length === 0
+      ? []
+      : await db
+          .select()
+          .from(matchSeats)
+          .where(
+            inArray(
+              matchSeats.matchId,
+              page.map(row => row.match_id),
+            ),
+          )
+          .orderBy(asc(matchSeats.seat));
   return {
-    matches: page.map(
-      ({ player0, player1, display0, display1, endedAt, ...rest }) => ({
+    matches: page.map(({ endedAt, ...rest }) => {
+      const own = seats.filter(seat => seat.matchId === rest.match_id);
+      return {
         ...rest,
-        players: [player0, player1],
-        display_names: displayNames({ player0, player1, display0, display1 }),
-        places: placesOf(rest.result),
+        ...seatFields(own),
         ended_at: endedAt.toISOString(),
-      }),
-    ),
+      };
+    }),
     next: rows.length > PAGE_SIZE ? (page.at(-1)?.match_id ?? null) : null,
   };
 }
 
-// A20: a match from before T35 stored no display names.
-const displayNames = (row: {
-  player0: string;
-  player1: string;
-  display0: string | null;
-  display1: string | null;
-}): [string, string] => [
-  row.display0 ?? defaultDisplayName(row.player0),
-  row.display1 ?? defaultDisplayName(row.player1),
-];
+// The by-seat fields of a match from its match_seats rows, in seat order.
+const seatFields = (seats: (typeof matchSeats.$inferSelect)[]) => ({
+  players: seats.map(seat => seat.name),
+  // A20: a match from before T35 stored no display names.
+  display_names: seats.map(
+    seat => seat.displayName ?? defaultDisplayName(seat.name),
+  ),
+  // Void and cancelled matches place nobody.
+  places: seats.every(seat => seat.place !== null)
+    ? seats.map(seat => seat.place as number)
+    : null,
+});
 
 // A19: a match from before T34 had a fixed number of hands and blinds 1/2,
 // which `blind_every: null` stands for.
@@ -137,8 +150,13 @@ export async function getMatch(
   db: Db,
   matchId: string,
 ): Promise<MatchDetail | null> {
-  const [match, hands, events] = await db.batch([
+  const [match, seats, hands, events] = await db.batch([
     db.select().from(matches).where(eq(matches.matchId, matchId)),
+    db
+      .select()
+      .from(matchSeats)
+      .where(eq(matchSeats.matchId, matchId))
+      .orderBy(asc(matchSeats.seat)),
     db
       .select()
       .from(matchHands)
@@ -157,7 +175,7 @@ export async function getMatch(
   for (const e of events) {
     const list = eventsByHand.get(e.handNumber) ?? [];
     list.push({
-      seat: e.seat,
+      seat: asSeat(e.seat),
       street: e.street,
       type: e.type,
       ...(e.amount === null ? {} : { amount: e.amount }),
@@ -166,37 +184,68 @@ export async function getMatch(
     eventsByHand.set(e.handNumber, list);
   }
   const settings = matchSettings(row.settings);
+  // Seats with chips when each hand began: all of them for hand 1.
+  let inPlay = seats.map(() => true);
   return {
     match_id: row.matchId,
-    players: [row.player0, row.player1],
-    display_names: displayNames(row),
+    ...seatFields(seats),
     settings,
     seed: row.seed,
     result: row.result,
-    places: placesOf(row.result),
     end_reason: row.endReason,
     rated: row.rated,
     ended_at: row.endedAt.toISOString(),
-    final_stacks: row.finalStacks,
-    rating_changes: row.ratingChanges,
-    hands: hands.map(hand => ({
-      hand_number: hand.handNumber,
-      blinds:
-        settings.blind_every === null
-          ? [1, 2]
-          : blindsAt(hand.handNumber, settings.blind_every),
-      button_seat: hand.buttonSeat,
-      board: hand.board,
-      // recordMatch stores none for folded hands; the public seed deals them
-      // again (A13).
-      hole_cards:
-        hand.holeCards ?? dealHand(row.seed, hand.handNumber).holeCards,
-      events: eventsByHand.get(hand.handNumber) ?? [],
-      winner_seat: hand.winnerSeat,
-      pot: hand.pot,
-      pots: headsUpPots({ pot: hand.pot, winner_seat: hand.winnerSeat }),
-      ended_by: hand.endedBy,
-      stacks: hand.stacks,
-    })),
+    final_stacks: seats.map(seat => seat.finalStack),
+    rating_changes: row.rated
+      ? seats.map(seat => ({
+          name: seat.ratingName ?? seat.name,
+          before: seat.ratingBefore ?? 0,
+          after: seat.ratingAfter ?? 0,
+        }))
+      : null,
+    hands: hands.map(hand => {
+      const holeCards = dealtHoleCards(row.seed, hand, inPlay);
+      inPlay = hand.stacks.map(stack => stack > 0);
+      return {
+        hand_number: hand.handNumber,
+        blinds:
+          settings.blind_every === null
+            ? [1, 2]
+            : blindsAt(hand.handNumber, settings.blind_every),
+        button_seat: asSeat(hand.buttonSeat),
+        board: hand.board,
+        hole_cards: holeCards,
+        events: eventsByHand.get(hand.handNumber) ?? [],
+        winner_seat: hand.winnerSeat === null ? null : asSeat(hand.winnerSeat),
+        pot: hand.pot,
+        // A hand from before T40 had one pot: the winner's, or split.
+        pots: (
+          hand.pots ?? [
+            {
+              amount: hand.pot,
+              winner_seats:
+                hand.winnerSeat === null ? [0, 1] : [hand.winnerSeat],
+            },
+          ]
+        ).map(pot => ({ ...pot, winner_seats: pot.winner_seats.map(asSeat) })),
+        ended_by: hand.endedBy,
+        stacks: hand.stacks,
+      };
+    }),
   };
+}
+
+// Every seat dealt in, by seat (A13): the cards shown at showdown, else the
+// public seed deals them again; `null` for a seat already out.
+function dealtHoleCards(
+  seed: string,
+  hand: typeof matchHands.$inferSelect,
+  inPlay: boolean[],
+) {
+  const dealt = inPlay.flatMap((playing, seat) => (playing ? [seat] : []));
+  const deal = dealTable(seed, hand.handNumber, dealt.length).holeCards;
+  return inPlay.map((_, seat) => {
+    const k = dealt.indexOf(seat);
+    return hand.holeCards?.[seat] ?? (k === -1 ? null : deal[k]);
+  });
 }

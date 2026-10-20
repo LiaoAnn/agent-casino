@@ -523,10 +523,13 @@ describe('T35 display name storage', () => {
     await recordMatch(testD1.db, first);
     expect(
       await testD1.d1
-        .prepare('SELECT display0, display1 FROM matches WHERE match_id = ?')
+        .prepare(
+          'SELECT display_name FROM match_seats WHERE match_id = ? ORDER BY seat',
+        )
         .bind(first.match_id)
-        .first(),
-    ).toEqual({ display0: '小愛 A', display1: '小包 A' });
+        .all()
+        .then(rows => rows.results),
+    ).toEqual([{ display_name: '小愛 A' }, { display_name: '小包 A' }]);
     const second = input({
       players: ['ALICE', 'bOB'],
       display_names: ['小愛 B 🃏', '小包 B 🎲'],
@@ -535,16 +538,22 @@ describe('T35 display name storage', () => {
     await recordMatch(testD1.db, second);
     expect(
       await testD1.d1
-        .prepare('SELECT display0, display1 FROM matches WHERE match_id = ?')
+        .prepare(
+          'SELECT display_name FROM match_seats WHERE match_id = ? ORDER BY seat',
+        )
         .bind(first.match_id)
-        .first(),
-    ).toEqual({ display0: '小愛 A', display1: '小包 A' });
+        .all()
+        .then(rows => rows.results),
+    ).toEqual([{ display_name: '小愛 A' }, { display_name: '小包 A' }]);
     expect(
       await testD1.d1
-        .prepare('SELECT display0, display1 FROM matches WHERE match_id = ?')
+        .prepare(
+          'SELECT display_name FROM match_seats WHERE match_id = ? ORDER BY seat',
+        )
         .bind(second.match_id)
-        .first(),
-    ).toEqual({ display0: '小愛 B 🃏', display1: '小包 B 🎲' });
+        .all()
+        .then(rows => rows.results),
+    ).toEqual([{ display_name: '小愛 B 🃏' }, { display_name: '小包 B 🎲' }]);
     const rows = await testD1.d1
       .prepare(
         'SELECT name, display_name, games FROM ratings ORDER BY name_key',
@@ -568,16 +577,26 @@ describe('T44 persisted match end reasons', () => {
     expect(addition, 'the generated 0004 migration must exist').toBeDefined();
     if (addition === undefined) throw new Error('Missing migration 0004');
 
-    // Obtain an old-format row through the existing recorder API, then put it
-    // in a separate database migrated only through 0003 before applying 0004.
+    // Build the explicit pre-0004 shape independently of the current writer.
     const match = input({ hands: [], final_stacks: [400, 0] });
-    await recordMatch(testD1.db, match);
-    const source = await testD1.d1
-      .prepare('SELECT * FROM matches WHERE match_id = ?')
-      .bind(match.match_id)
-      .first();
-    if (source === null) throw new Error('Missing fixture row');
-    const columns = Object.keys(source).filter(key => key !== 'end_reason');
+    const source = {
+      match_id: match.match_id,
+      player0: 'Alice',
+      player1: 'Bob',
+      display0: null,
+      display1: null,
+      settings: JSON.stringify(match.settings),
+      seed: match.seed,
+      result: match.result,
+      rated: 1,
+      final_stacks: JSON.stringify(match.final_stacks),
+      rating_changes: JSON.stringify([
+        { name: 'Alice', before: 1500, after: 1516 },
+        { name: 'Bob', before: 1500, after: 1484 },
+      ]),
+      ended_at: Date.parse(match.ended_at),
+    };
+    const columns = Object.keys(source) as (keyof typeof source)[];
     const proxy = await getPlatformProxy<{ DB: D1Database }>({
       configPath: fileURLToPath(
         new URL('../../wrangler.jsonc', import.meta.url).href,
@@ -603,6 +622,12 @@ describe('T44 persisted match end reasons', () => {
           .bind(match.match_id)
           .first(),
       ).toEqual({ end_reason: null });
+      // New readers require the seat migration as well. The assertion above
+      // specifically observes 0004 before any later migration is applied.
+      for (const migration of migrations.slice(5)) {
+        for (const statement of migration.sql)
+          await d1.prepare(statement).run();
+      }
       expect(await getMatch(openDb(d1), match.match_id)).toHaveProperty(
         'end_reason',
         null,
