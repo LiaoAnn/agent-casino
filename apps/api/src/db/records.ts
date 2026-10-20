@@ -158,7 +158,8 @@ export async function recordMatch(
     db
       .select({
         rated: matches.rated,
-        name: matchSeats.ratingName,
+        name: matchSeats.name,
+        ratingName: matchSeats.ratingName,
         before: matchSeats.ratingBefore,
         after: matchSeats.ratingAfter,
       })
@@ -173,7 +174,7 @@ export async function recordMatch(
       rated: stored[0].rated,
       ratings: stored[0].rated
         ? stored.map(seat => ({
-            name: seat.name ?? '',
+            name: seat.ratingName ?? seat.name,
             rating: seat.after ?? 0,
             change: (seat.after ?? 0) - (seat.before ?? 0),
           }))

@@ -21,7 +21,7 @@ import {
   ratings,
 } from './schema';
 
-// D1 stores seats as plain integers; recordMatch writes only 0–5.
+// D1 stores seats as plain integers; recordMatch takes at most 6 seats.
 const asSeat = (seat: number) => seat as MatchHand['button_seat'];
 
 const LEADERBOARD_SIZE = 100;

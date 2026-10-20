@@ -36,18 +36,20 @@ T44 新增 `0004_slimy_peter_parker.sql`（對局的 nullable `end_reason`）。
 
 ### E6 上線：migration 0005（T40）
 
-`0005_match_seats.sql` 新增 `match_seats`（每場每個座位一列），把現有每場的兩個座位搬過去，**再刪掉** `matches` 的 `player0`、`player1`、`display0`、`display1`、`final_stacks`、`rating_changes`，並給 `match_hands` 加 nullable `pots`。舊 api 讀寫的是被刪掉的欄位，新 api 讀寫的是 `match_seats`，所以兩個版本不能共用同一個資料庫；每個環境（staging、prod）都照這個順序，中間不要停：
+`0005_match_seats.sql` 新增 `match_seats`（每場每個座位一列），把現有每場的兩個座位搬過去，**再刪掉** `matches` 的 `player0`、`player1`、`display0`、`display1`、`final_stacks`、`rating_changes`，並給 `match_hands` 加 nullable `pots`。舊 api 讀寫的是被刪掉的欄位，新 api 讀寫的是 `match_seats`，所以兩個版本不能共用同一個資料庫；每個環境都照這個順序，中間不要停（staging 用 `staging`／`--target=staging`，正式環境用 `production`／`--target=prod`）：
 
-1. `pnpm db:migrate:<環境>`（套 0005）。
-2. 馬上 `pnpm --filter @agent-casino/api run deploy:<環境>`，再部署 web。
-3. `pnpm e2e --target=<環境>`，再打開 `/v1/matches` 和一場舊對局頁，確認舊紀錄還在。
+1. `pnpm db:migrate:staging`（或 `pnpm db:migrate:production`），套 0005。
+2. 馬上 `pnpm --filter @agent-casino/api run deploy:staging`（或 `deploy:production`），再部署 web。
+3. `pnpm e2e --target=staging`（或 `--target=prod`），再打開 `/v1/matches` 和一場舊對局頁，確認舊紀錄還在。
 
-第 1、2 步之間（通常十幾秒）的空窗：
+第 1、2 步之間的空窗，長短看部署多快（估計十幾秒）：
 - 舊 api 的 `GET /v1/matches`、`GET /v1/matches/{id}` 回 503 `unavailable`（可重試）；排行榜不受影響（`ratings` 沒變）。
 - 這段時間結束的對局寫不進 D1，Room DO 會在 10 秒後重試、之後間隔加倍，最多 24 小時（T22），新 api 上線後就寫進去，不會遺失。
 - 反過來先部署再 migrate 也一樣是十幾秒的 503，但新 api 會先對沒有 `match_seats` 的資料庫出錯；照上面的順序就好。
 
 不把刪欄位拆成之後的 migration：舊欄位是 `NOT NULL`，拆開的話新 api 在過渡期也要照寫一份舊欄位；而空窗裡舊 api 寫進來的對局只有舊欄位、沒有 `match_seats`，反而會在讀取時缺座位。一次搬完、靠 Room DO 的重試補上空窗比較簡單。
+
+第 1 步失敗（例如中途斷線）：不要重跑，先查 `match_seats` 表和 `matches` 的舊欄位還在不在；只套了一半時用下面的 Time Travel 還原到套用前，再重來。
 
 出問題要退回：D1 有 Time Travel，可以把資料庫還原到套 0005 之前的時間點（`wrangler d1 time-travel restore <資料庫> --timestamp=<套用前的時間>`），再部署舊版 api。這也會呼叫 Cloudflare，要先經過 Ann 同意。
 
