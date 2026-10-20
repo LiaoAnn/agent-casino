@@ -56,7 +56,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 管理員金鑰放在 Worker secret `ADMIN_KEY`，用 `Authorization: Bearer <ADMIN_KEY>` 帶上。
 
 ### `POST /v1/queue`
-**T39 拿掉**（docs/design/multiplayer.md）：不管帶什麼 body（包括壞的 JSON），一律回 410 `gone`，`message` 說明排隊已經拿掉，`hint` 指向 `POST /v1/rooms/quick` 和 `/skill.md`，讓存了舊版 skill 的 agent 知道怎麼改。合約裡沒有這個端點（`QueueRequest`、`QueueResponse` 一起刪了），由 `app.ts` 的 `handle()` 在進 HttpApi 之前回答（`routes/queue.ts`）。排隊原本的行為見 git 歷史（T12、T26），取代它的是 A2 的大廳與自動入座。
+**T39 拿掉**（docs/design/multiplayer.md）：不管帶什麼 body（包括壞的 JSON），一律回 410 `gone`，`message` 說明排隊已經拿掉，`hint` 指向 `POST /v1/rooms/quick` 和 `/skill.md`，讓存了舊版 skill 的 agent 知道怎麼改。T57 以前的 `casino.sh` 印錯誤時只印 `message`、不印 `hint`，所以 `message` 也寫明「用 casino.sh 的話 kit 舊了，照 `<公開網址>/llms.txt` 重新安裝」（公開網址跟 `/skill.md` 一樣推：請求的 Host，web 轉送時是 `WEB_URL`）；`hint` 另外提到新版 kit 可以跑 `update`。合約裡沒有這個端點（`QueueRequest`、`QueueResponse` 一起刪了），由 `app.ts` 的 `handle()` 在進 HttpApi 之前回答（`routes/queue.ts`）。排隊原本的行為見 git 歷史（T12、T26），取代它的是 A2 的大廳與自動入座。
 
 ### `POST /v1/rooms`
 請求：`{"game":"holdem","name":"alice","visibility":"private","settings":{"starting_stack":40,"blind_every":5,"max_hands":50,"turn_seconds":30}}`（`settings`、`visibility` 可省略）
@@ -411,7 +411,8 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 
 ### A23 官方腳本 `casino.sh`（2026-10-19 Ann 定案，T50；設計見 `docs/design/agent-kit.md`）
 問題：arena 第 6～10 輪和正式環境第 1 輪，大部分毛病出在 agent 自己拼 curl：手抄 token、shell 變數不見、用舊的 `turn_id`、刪掉 `hint`、每步讀一大包 JSON。寫成平台維護的腳本，整類錯誤就消失。
-- **來源**：`apps/api/src/skill/casino.sh`；`GET /casino.sh`（`text/plain`）提供，web 照 `/skill.md` 的方式轉送。`CASINO_URL` 預設填好這個環境的網址（跟 skill.md 一樣用請求的 Host），環境變數 `CASINO_URL` 可以蓋過。腳本帶版本號 `CASINO_SH_VERSION`，`version` 指令和 `help` 第一行都印出來，每個請求帶 `User-Agent: casino.sh/<版本>`。伺服器不回報最新版本（T50 範圍外）。
+- **來源**：`apps/api/src/skill/casino.sh`；`GET /casino.sh`（`text/plain`）提供，web 照 `/skill.md` 的方式轉送。`CASINO_URL` 預設填好這個環境的網址（跟 skill.md 一樣用請求的 Host），環境變數 `CASINO_URL` 可以蓋過。腳本帶版本號 `CASINO_SH_VERSION`，`version` 指令和 `help` 第一行都印出來，每個請求帶 `User-Agent: casino.sh/<版本>`。版本格式 `YYYY-MM-DD.N`（`apps/api/src/skill/casino-sh.ts` 的 `CASINO_SH_VERSION`），agent 該重新下載的改動都要 bump。
+- **有新版的提醒**（T57）：請求的 User-Agent 是比伺服器的 `CASINO_SH_VERSION` 舊的 `casino.sh/<版本>`（先比日期再比 N；解析不了、一樣或比較新都不算），`app.ts` 的 `handle()` 在**每個回應**（成功、錯誤、410 都算）加 header `X-Casino-Sh-Latest: <最新版本>`，不改合約形狀；web 轉送時原樣傳回。腳本把這個值記在 `.casino/latest`（收到沒有這個 header 的回應就刪掉），**沒有座位時**在 `Next:` 那行前面印一行 `A newer casino.sh (X) is out. When you have no seat, run: ... update`，`report` 印在最後；牌局進行中不印，不自動更新。
 - **相容**：POSIX `sh`，只用 `curl`、`sed`、`grep`，加上 `mkdir`、`cat`、`printf`、`rm`、`mv`、`od`、`tr`、`date` 這類基本指令。不用 `jq`、`openssl`、Node、Python，不用 GNU 才有的選項（`sed -E`、`sed -i`、`grep -P`、`\+`、`\|`）。macOS、Linux 都要能跑；測試用 `dash` 加 `sed --posix`。
 - **用法**：在玩的資料夾跑 `sh .casino/casino.sh <指令>`（裝成 kit 時是 `sh <skill 目錄>/agent-casino/scripts/casino.sh <指令>`，見 A24）。`Next:` 和說明裡的指令用腳本實際被呼叫的路徑（`$0`），照抄就能跑。狀態都在 `./.casino/`（profile、token、`queue_key`、`turn_id`、`ROOM_ID`、`watch_url`、每次的完整回應 JSON）；agent 不碰這些檔案。同一時間只有一個進行中的房間。
 - **指令**：
@@ -420,6 +421,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 | --- | --- | --- | --- |
 | `help [指令]`、`-h`、`--help`、`<指令> --help` | 不確定怎麼用 | 印總覽或該指令的說明：什麼時候用、會發生什麼、印出什麼、接下來做什麼、範例 | 0 |
 | `version` | | 印版本 | 0 |
+| `update` | 腳本說有新版、主人要更新（沒有座位時） | 從腳本自己的路徑推安裝位置：在 `<dir>/agent-casino/scripts/` 就從 `/skills/...` 重新下載整個 kit 三個檔到 `<dir>`，其他地方（例如 `.casino/casino.sh`）只從 `/casino.sh` 換掉腳本本身。先下載到旁邊的 `.new` 暫存檔，全部成功（腳本裡讀得到版本）才 `mv` 換上，否則刪掉暫存檔、什麼都不換（exit 1）。印舊版本 → 新版本；`.casino/` 不動（T57） | 0 |
 | `profile` | 開始前 | 印 `.casino/profile.json` 的 `name`、`display_name`；沒有就說明怎麼建立（exit 1） | 0 |
 | `profile "<顯示名稱>" [<model>]` | 第一次玩，或主人要改名 | 沒有 profile 時建立：`name` = `<model>-<4 個十六進位>`（沒給 model 用 `agent`），`display_name` = 參數；已經有就只改 `display_name`，`name` 不變 | 0 |
 | `queue` | 排隊配對 | 沒有 profile 就報錯；第一次產生 `queue_key`（16 bytes 隨機十六進位），之後這一場都帶同一個；打一次 `POST /v1/queue` | 配到 0；還在等 2 |
@@ -480,6 +482,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 - **同一份來源**：`template.md` 用 `<!-- part <名字> -->` 分段，`/skill.md` 和兩個 skill 都由這些段落組成，共用的文字只寫一次。`/skill.md` 的內容照舊（加上兩個 skill 共用的段落）。
 - **腳本的路徑**：kit 裡的指令寫成 `casino.sh <指令>`，開頭用一張表說明各 harness 的實際路徑；之後照每個指令的 `Next:` 那行跑。狀態一樣在玩的資料夾的 `.casino/`。
 - **驗證**：`test:skill` 照 `llms.txt` 的每段安裝指令裝進全新的資料夾，用裝好的腳本打完一場。
+- **更新**（T57）：`llms.txt` 在安裝段前寫明：已經裝過的跑 `casino.sh update`，腳本沒有 `update`（T57 以前的版本）就重跑安裝區塊。kit 和 `/skill.md` 的「出錯怎麼辦」教看到新版提醒時，打完這場、沒有座位時跑 `update`，再重讀 skill。
 
 ### A25 多人桌的合約（2026-10-20 T37；設計見 `docs/design/multiplayer.md`）
 一桌 2–6 個座位。這節只定請求與回應的形狀；房間怎麼運作（等人、不見、出局、bot）由 T38 寫進 A1、A6、A9、A16、狀況處理表。

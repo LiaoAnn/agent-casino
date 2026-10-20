@@ -24,6 +24,13 @@ const newVersion = `${year + 1}${currentDate.slice(4)}.1`;
 const OLD_UA = `casino.sh/${oldVersion}`;
 const LATEST_HEADER = 'X-Casino-Sh-Latest';
 
+type KitError = {
+  status: string;
+  code: string;
+  message: string;
+  hint: string;
+};
+
 const scenarios = [
   { path: '/health', method: 'GET', status: 200 },
   { path: '/v1/lobby', method: 'GET', status: 200 },
@@ -128,7 +135,7 @@ describe('T57 retired queue reinstall guidance', () => {
         ENV,
       );
       expect(response.status).toBe(410);
-      const error = await response.json();
+      const error = (await response.json()) as KitError;
       expect(error).toMatchObject({ status: 'error', code: 'gone' });
       expect.soft(error.message).toContain('https://api.example/llms.txt');
       expect.soft(error.hint).toContain('POST /v1/rooms/quick');
@@ -146,7 +153,7 @@ describe('T57 retired queue reinstall guidance', () => {
       (request: Request) => handle(request, ENV),
     );
     expect(response?.status).toBe(410);
-    const error = await response?.json();
+    const error = (await response?.json()) as KitError;
     expect(error).toMatchObject({ status: 'error', code: 'gone' });
     expect.soft(error.message).toContain(`${WEB_URL}/llms.txt`);
     expect.soft(error.hint).toContain('POST /v1/rooms/quick');
@@ -167,7 +174,7 @@ describe('T57 retired queue reinstall guidance', () => {
       ENV,
     );
     expect(response.status).toBe(410);
-    const error = await response.json();
+    const error = (await response.json()) as KitError;
     expect(error).toMatchObject({ status: 'error', code: 'gone' });
     expect.soft(error.message).toContain(`${WEB_URL}/llms.txt`);
     expect.soft(error.message).not.toContain('127.0.0.1');
@@ -186,7 +193,7 @@ describe('T57 retired queue reinstall guidance', () => {
       ENV,
     );
     expect(response.status).toBe(410);
-    const error = await response.json();
+    const error = (await response.json()) as KitError;
     expect(error).toMatchObject({ status: 'error', code: 'gone' });
     expect.soft(error.message).toContain('https://127.0.0.1:8787/llms.txt');
     expect.soft(error.message).not.toContain('evil.example');

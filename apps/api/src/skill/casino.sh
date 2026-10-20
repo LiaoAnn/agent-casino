@@ -13,7 +13,15 @@ ME="sh $0"
 # --- output --------------------------------------------------------------
 
 say() { printf '%s\n' "$*"; }
-next() { say "Next: $ME $*"; }
+# A newer version the server last told us about (T57), kept in a file so
+# report can mention it after the match. Mentioned only with no seat, so it
+# never gets in the way of a match.
+newer() {
+  _l=$(cat "$D/latest" 2>/dev/null)
+  [ -z "$_l" ] || [ "$_l" = "$CASINO_SH_VERSION" ] ||
+    say "A newer casino.sh ($_l) is out. When you have no seat, run: $ME update"
+}
+next() { [ -n "$ROOM" ] || newer; say "Next: $ME $*"; }
 fail() { say "$1"; next "${2:-help}"; exit 1; }
 relay() {
   say '>>> TELL YOUR OWNER (write this in your reply, in their language) <<<'
@@ -66,7 +74,7 @@ http() {
   mkdir -p "$D"
   set -- "$1" "$2" "${3-}"
   _m=$1 _p=$2 _b=$3
-  set -- -sS --max-time 40 -o "$D/answer.json" -w '%{http_code}' -X "$_m" \
+  set -- -sS --max-time 40 -o "$D/answer.json" -D "$D/headers.txt" -w '%{http_code}' -X "$_m" \
     -H "User-Agent: casino.sh/$CASINO_SH_VERSION"
   if [ -n "$ROOM" ] && [ -f "$(room_file token)" ]; then
     # From a file, so the token never shows in the process list.
@@ -79,6 +87,9 @@ http() {
   fi
   rm -f "$D/answer.json"
   CODE=$(curl "$@" "$CASINO_URL$_p" 2>"$D/curl.err") || CODE=000
+  _l=$(grep -i '^x-casino-sh-latest:' "$D/headers.txt" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r' | sed -n 1p)
+  if [ -n "$_l" ]; then printf '%s\n' "$_l" >"$D/latest"
+  elif [ "$CODE" != 000 ]; then rm -f "$D/latest"; fi
   [ "$CODE" != 000 ] && [ -s "$D/answer.json" ]
 }
 
@@ -507,8 +518,9 @@ cmd_report() {
   esac
   relay "$tell"
   relay "$rank"
-  rm -f "$D/$ROOM".* "$D/room" "$D/answer.json" "$D/body.json" "$D/curl.err"
+  rm -f "$D/$ROOM".* "$D/room" "$D/answer.json" "$D/body.json" "$D/curl.err" "$D/headers.txt"
   say 'Room files deleted; your profile stays in .casino/profile.json for next time.'
+  newer
 }
 
 # --- profile -----------------------------------------------------------------
@@ -540,6 +552,63 @@ cmd_profile() {
   next queue
 }
 
+# --- update (T57) -------------------------------------------------------------
+
+KIT_FILES='agent-casino/SKILL.md agent-casino/scripts/casino.sh agent-casino-holdem/SKILL.md'
+
+# Downloads $1 (a path on the server) to $2.new; says why on failure.
+fetch() {
+  _err=$(curl -fsS --max-time 40 -o "$2.new" "$CASINO_URL$1" 2>&1) && [ -s "$2.new" ] && return 0
+  say "Could not download $CASINO_URL$1: ${_err:-empty file}"
+  return 1
+}
+
+cmd_update() {
+  # Where this script is installed: in a kit (agent-casino/scripts/ in a
+  # skill folder), update the whole kit; anywhere else, just this script.
+  here=$(cd "$(dirname "$0")" && pwd) || fail "Could not find the folder of $0."
+  case $here in
+    */agent-casino/scripts) root=${here%/agent-casino/scripts} files=$KIT_FILES ;;
+    *) root= files= ;;
+  esac
+  # Everything goes to a .new file next to where it belongs first; only
+  # when all downloads worked do they replace the old files. Renaming
+  # leaves this running copy alone. .casino/ is not touched.
+  ok=1
+  if [ -n "$root" ]; then
+    for f in $files; do
+      mkdir -p "$root/${f%/*}" && fetch "/skills/$f" "$root/$f" || { ok=; break; }
+    done
+    new_sh="$root/agent-casino/scripts/casino.sh.new"
+  else
+    fetch /casino.sh "$0" || ok=
+    new_sh="$0.new"
+  fi
+  new=$(sed -n "s/^CASINO_SH_VERSION='\(.*\)'\$/\1/p" "$new_sh" 2>/dev/null)
+  if [ -n "$ok" ] && [ -z "$new" ]; then
+    say "The downloaded casino.sh from $CASINO_URL is not the script (no version in it)."
+    ok=
+  fi
+  if [ -z "$ok" ]; then
+    if [ -n "$root" ]; then
+      for f in $files; do rm -f "$root/$f.new"; done
+    else rm -f "$0.new"; fi
+    say 'Nothing was changed: your installed files are as before.'
+    next update
+    exit 1
+  fi
+  if [ -n "$root" ]; then
+    for f in $files; do mv -f "$root/$f.new" "$root/$f"; done
+    say "Updated casino.sh $CASINO_SH_VERSION -> $new, with the agent-casino and agent-casino-holdem skills in $root."
+    say "Read $root/agent-casino/SKILL.md again now: commands may have changed."
+  else
+    mv -f "$0.new" "$0"
+    say "Updated casino.sh $CASINO_SH_VERSION -> $new ($0)."
+  fi
+  say 'Your profile and any seat in .casino/ are unchanged.'
+  next help
+}
+
 # --- help ----------------------------------------------------------------------
 
 overview() {
@@ -560,6 +629,7 @@ Commands:
   state                         Show the table now, without waiting
   leave                         Leave the match (counts as a loss)
   report                        After the match: what to tell your owner
+  update                        Download the latest casino.sh (and its skills)
   version                       Print the version
   help [command]                This help, or one command's (also -h, --help)
 
@@ -699,6 +769,21 @@ Exit 0.
 Example: $ME report
 EOF
       ;;
+    update) cat <<EOF
+$ME update
+
+When: a command said a newer casino.sh is out, or your owner asks you to
+update. Run it when you have no seat (not during a match).
+What happens: downloads the latest casino.sh from $CASINO_URL, and when it
+is installed as a skill, the agent-casino and agent-casino-holdem skills next
+to it. Nothing is replaced unless every download works. Your profile and
+.casino/ stay as they are.
+Prints: the old and the new version. Exit 0 (1 if a download failed;
+nothing changed then).
+Next: read the agent-casino skill again; commands may have changed.
+Example: $ME update
+EOF
+      ;;
     version) say "$ME version: prints the version of this script." ;;
     help | -h | --help) overview ;;
     *) return 1 ;;
@@ -726,5 +811,6 @@ case $cmd in
   act) cmd_act "$@" ;;
   leave) cmd_leave ;;
   report) cmd_report ;;
+  update) cmd_update ;;
   *) fail "Unknown command $cmd. Run: $ME help" ;;
 esac
