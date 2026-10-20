@@ -622,6 +622,16 @@
 - 只改：`apps/api/src/room/`、`routes/room.ts`、`holdem/` 的單挑轉接層、casino-api skill。
 - 驗證：`pnpm test:api`，狀況處理表每一列一個測試。
 
+### T56 刪掉單挑轉接層（約 600 行，多半是測試搬移）· Blocked by：T38
+- 來源：T38 換到 `holdem/table.ts` 之後，`holdem/match.ts`、`view.ts`、`replay.ts`、`room/heads-up.ts` 剩下的單挑轉接只剩 `contract/fake.ts`、`holdem/invariants.ts`、`apps/api/scripts/` 和測試在用。從 T38 拆出來，讓 T38 的 PR 只放功能。
+- 要做的：
+  - 刪掉上面四個模組，呼叫端改用 table API；`MatchRecordInput.places` 改必填，刪 `records.ts` 的 `headsUpPlaces` 和 hands 型別的 `pots?`。
+  - adapter 自己的測試（match、view、replay）跟著刪，`table.test` 已涵蓋。
+  - `heads-up-golden.test.ts` 改成直接鎖 `table.ts` 2 人的輸出，**預期值不能重新產生**，沿用原本的 fixture 或雜湊（規則 6）。
+  - 其他測試只換 import 和呼叫，不改斷言。
+- 例外：可以改 `contract/fake.ts` 的呼叫（schemas 不動）。
+- 驗證：`pnpm check`、`pnpm test:fuzz`、`pnpm test:skill`、`pnpm e2e --target=local`。
+
 ### T39 大廳與自動入座（約 500 行）· Blocked by：T38
 - 先改規格：casino-api 的 A2（改寫成大廳和自動入座）、A17、A18。
 - Matchmaker DO 改成大廳：記住有空位的公開房，自動入座時進最早開的那一間，只進預設設定的房間；拿掉 queue，`POST /v1/queue` 回錯誤並附 hint。
