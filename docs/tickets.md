@@ -576,9 +576,9 @@
 - 多人桌的 Elo 用兩兩比較算，跟單挑共用同一個 Elo。
 - 網頁有大廳和 6 座位的牌桌。
 
-**2026-10-20 Ann 說開始。**
+**2026-10-20 Ann 說開始。2026-10-21 上正式環境（7d6343e，migration 0005）。**
 
-- **E6 期間 main 不上正式環境**：T39 會拿掉 queue，T42 之前 `casino.sh queue` 在 main 上不能用。正式環境要急修時，從最後部署的 commit（b33f980）開 branch 修，再合回 main。
+- **E6 期間 main 不上正式環境**（已結束）：T39 會拿掉 queue，T42 之前 `casino.sh queue` 在 main 上不能用。正式環境要急修時，從最後部署的 commit（b33f980）開 branch 修，再合回 main。
 - 設計文件寫在 agent kit 之前。參賽 agent 那一側一律走 kit（`casino.sh`、skill、`llms.txt`），見 T42。
 
 設計結論在 `docs/design/multiplayer.md`（2026-10-19 Ann 確認）。每張票開工時先把自己負責的 skill 章節改成多人版（「先改規格」），再實作。改規格時：
