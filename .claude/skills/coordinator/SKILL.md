@@ -16,13 +16,17 @@ disable-model-invocation: true
 | Coordinator | 人輸入 `/coordinator` 的 thread（main checkout 的 Local thread） | 看板、派工、追進度、整理要人決定的事、回顧 |
 | Ticket thread | 每張 ticket 一個，各自一個 t3 worktree | 照 `ticket-workflow` skill 從實作做到合併 |
 
+## 授權
+
+Ann 在 2026-10-19 同意，coordinator 不用每次問就可以：settle 這個專案裡 PR 已合併的 ticket 的 thread，並對它們的 worktree 跑 `wt-down <path>`（見「每一輪」第 4 步）。其他 worktree 一律不碰，除非人指名那個路徑。
+
 ## 每一輪
 被 `/coordinator` 啟動時、人問進度時、或 ticket thread 用 `t3_thread_send` 通知你時，跑一輪：
 
 1. `git -C /data/code/agent-casino pull --ff-only`，讓 `main` 跟上已合併的 PR。
 2. 跑 `scripts/board.sh` 看每張 ticket 的狀態。狀態全部由依賴、本地 branch 和 PR 推算，不要手動記。
 3. 為 Ready 的 ticket 派工（見下面「派工」）。同時進行的 ticket thread 最多 3 個：所有專案的 agent 都跑在同一台小的 agent 機器上（2 核、約 4 GB），每個 worktree 的 dev environment 也跑在所有專案共用的 dev VM 上。ticket thread 回報 `wt-up` exit 75（`no room for a new dev environment`）就是 dev VM 沒空間：叫它過幾分鐘再試，先不派新的；一直這樣就放進「等你」。
-4. 清掉 Done 的 worktree（2026-10-19 Ann 同意；留著的 dev environment 會占共用 dev VM 的資源）：PR 已合併、`git -C <path> status --porcelain` 沒有 tracked 的改動，就先用 `t3_thread_organize`（`action: "settle"`、那個 ticket thread 的 `threadId`）settle 那個 thread，再 `wt-down <path>`，最後 `git -C /data/code/agent-casino worktree remove --force <path>`。arena-server 和還在進行的不要動。
+4. 清掉 Done 的 worktree（授權見上面「授權」；留著的 dev environment 會占共用 dev VM 的資源）：PR 已合併、`git -C <path> status --porcelain` 沒有 tracked 的改動，就先用 `t3_thread_organize`（`action: "settle"`、那個 ticket thread 的 `threadId`）settle 那個 thread，再 `wt-down <path>`，最後 `git -C /data/code/agent-casino worktree remove --force <path>`。arena-server 和還在進行的不要動。
 5. 回報人：看板（給人看時用 `html_render` 畫成看板），加上「等你」清單。
 
 狀態的意思：
