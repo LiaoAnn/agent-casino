@@ -1,6 +1,6 @@
 # 給 subagent 的共用說明
 
-你是某張 ticket 的 subagent（test-author、reviewer 或 verifier），由這張 ticket 的主 agent（Claude）派來。主 agent 的任務說明會告訴你：角色、worktree 路徑、這次要看的範圍和規格。這份檔案是每個 subagent 都適用的規則，VM 的規則你已經從 Dev VM 的 AGENTS.md 讀過了。
+你是某張 ticket 的 subagent（test-author、reviewer 或 verifier），由這張 ticket 的主 agent（Claude）派來。主 agent 的任務說明會告訴你：角色、worktree 路徑、這次要看的範圍和規格。這份檔案是每個 subagent 都適用的規則；環境的規則（怎麼跑指令）你已經從 `~/.config/devvm/AGENTS.md` 讀過了。
 
 ## 你能做什麼
 
@@ -12,11 +12,12 @@
 
 所有角色都不 commit、不 push、不開 PR。主 agent 在你跑的時候不會改檔案。
 
-## 這個 repo 在這台 VM 的坑
+## 這個 repo 在這個環境的坑
 
-- `pnpm check` 要跟這個 export 在同一個容器 shell 裡跑，不然 knip 會吃光記憶體：`T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "export KNIP_DISABLE_RAW_TRANSFER=1; pnpm check"`。
-- `tmux kill-session` 不會停掉容器裡的程序（pnpm、wrangler、workerd、vite）。用完另外跑 `T3CODE_WORKTREE_PATH=<path> wt-exec pkill -f <名稱>`（不要寫在 `bash -lc` 裡，會殺到自己），再用 `docker stats --no-stream` 確認容器回到十幾 MB。
-- 主 agent 用 `task_cancel` 取消你時，你在容器裡開的 `pnpm check`（vitest、workerd）會變成孤兒繼續跑。主 agent 取消後要自己 `wt-exec pkill -f vitest`、`pkill -f workerd`。
+- 指令寫成一般參數，不要包成 shell 字串（不要 `bash -lc "…"`）。超過兩分鐘的和 dev server 用背景 job，名稱加上你的角色當前綴（例如 `verifier-check`、`verifier-api`），主 agent 才分得出是誰的：`wt-bg <path> <名稱> -- <指令…>`、`wt-wait <path> <名稱>`、`wt-stop <path> <名稱>`。
+- `pnpm check` 拿 heavy lock、帶這個變數跑，不然 knip 會吃光記憶體：`wt-bg <path> <角色>-check --heavy --timeout 20m -- env KNIP_DISABLE_RAW_TRANSFER=1 pnpm check`。
+- api dev server：`wt-bg <path> <角色>-api -- pnpm dev:api:local`（本機 D1 要先 `T3CODE_WORKTREE_PATH=<path> wt-exec pnpm db:migrate:local`）；網址 `https://app-<wt>.agent-casino.liaoann.net`。
+- 結束前 `wt-stop` 你開的每個 job，用 `wt-status <path>` 確認沒有留下。主 agent 用 `task_cancel` 取消你之後，要用 `wt-status <path>` 看你的 job 還在不在，還在就自己 `wt-stop`。
 
 ## 不要鑽牛角尖
 

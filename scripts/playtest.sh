@@ -10,7 +10,7 @@
 # not in the Dev Container (it has neither). It calls Anthropic and OpenAI.
 #
 # The url defaults to CASINO_URL, else this worktree's api on the dev VM
-# (https://app-<worktree>.<hostname>.liaoann.net).
+# (https://app-<worktree>.agent-casino.liaoann.net).
 # PLAYTEST_PLAYERS lists the harness of each player, 1 to 6 of them
 # (default "claude codex"); they all run at once.
 # PLAYTEST_SCENARIO (T42):
@@ -33,7 +33,7 @@ set -euo pipefail
 
 root=$(git -C "$(dirname "$0")/.." rev-parse --show-toplevel)
 [ $# -le 1 ] || { echo "usage: pnpm playtest [<casino-url>]" >&2; exit 2; }
-URL=${1:-${CASINO_URL:-https://app-$(basename "$root").$(hostname).liaoann.net}}
+URL=${1:-${CASINO_URL:-https://app-$(basename "$root").agent-casino.liaoann.net}}
 URL=${URL%/}
 for cmd in claude codex curl jq git; do
   command -v "$cmd" >/dev/null || { echo "playtest needs $cmd (run it on the VM, not in the container)" >&2; exit 2; }

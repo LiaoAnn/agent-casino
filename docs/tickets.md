@@ -13,7 +13,7 @@
 | Epic | 這份檔案 | 一個可交付成果的目標和完成定義，底下掛 ticket | 實作細節 |
 | Ticket | 這份檔案（Epic 底下） | 一次工作的範圍、依賴、只改哪些資料夾、驗證指令、功能驗證 | 規格本身（指向 skill） |
 | PR template | `.github/pull_request_template.md` | 交付時要附的證據格式 | |
-| Dev VM 的 CLAUDE.md | Ann 的機器上 | worktree、compose、網址等環境知識 | 專案知識 |
+| agent home 的 `~/.config/devvm/AGENTS.md` 和 `projects/agent-casino/README.md` | 跑 agent 的機器上，不在 repo | worktree、dev environment、`wt-*` 指令、網址等環境知識 | 專案知識 |
 
 ## 標記
 - 🔒 `needs-human`：要人核准才能合併的 ticket。PR 加上這個標籤。只留給正式部署這種非人不可的事，其他都交給 agent。

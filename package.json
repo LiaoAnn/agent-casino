@@ -12,6 +12,7 @@
     "test:skill": "vitest run apps/api/src/skill",
     "test:web": "pnpm --filter @agent-casino/web test",
     "dev:api": "pnpm --filter @agent-casino/api dev",
+    "dev:api:local": "pnpm --filter @agent-casino/api dev --ip 0.0.0.0 --port 8787 --var TOKEN_SECRET:dev-only-not-a-secret --var ADMIN_KEY:dev-only-not-a-secret",
     "dev:web": "pnpm --filter @agent-casino/web dev",
     "format": "biome check --write .",
     "test:fuzz": "FUZZ_HANDS=10000 vitest run apps/api/src/holdem/fuzz.test.ts apps/api/src/holdem/table-fuzz.test.ts",

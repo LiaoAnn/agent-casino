@@ -21,13 +21,13 @@ Ann 在 2026-10-17 同意，ticket thread 不用每次問就可以：
 - 計畫不用等人核准就開始實作（計畫裡出現新的設計決策時除外，見「什麼時候停下來」）。
 - 沒有 `needs-human` 的 PR，在下面「合併」的條件都滿足時自己合併。
 
-仍然每次都要先問人：部署正式環境、呼叫外部服務（見 Dev VM 規則的「External services」，包括部署 Cloudflare 測試環境）、碰別的 ticket 的 branch 或 worktree。
+仍然每次都要先問人：部署正式環境、呼叫外部服務（見 `~/.config/devvm/AGENTS.md` 的「External services」，包括部署 Cloudflare 測試環境）、碰別的 ticket 的 branch 或 worktree。
 
 ## 1. 開工
 1. 讀 `AGENTS.md`、`docs/tickets.md` 裡你那張 ticket（範圍、Blocked by、只改哪些資料夾、驗證指令、功能驗證），再讀 ticket 指到的 skill（`holdem-rules`、`casino-api`…）。
 2. 確認 Blocked by 的 ticket 都已完成（`scripts/board.sh` 顯示 Done，也就是 PR 已合併進 `main`）；沒有就不要開始，通知 coordinator。
 3. 看前面 ticket 留下了什麼：`git -C <path> log --oneline origin/main` 和相關 PR 的內文（`gh pr view <號碼>`），了解現在的程式碼長怎樣、別人已經做好哪些可以用。
-4. 用 `wt-status <path>` 確認自己的 stack 起來了；沒有就 `wt-up <path>`。
+4. 用 `wt-status <path>` 確認自己的 dev environment 起來了；沒有就 `wt-up <path>`（exit 75 `no room for a new dev environment` 是共用的 dev VM 沒空間，過幾分鐘再試，一直這樣就通知 coordinator）。第一次先 `T3CODE_WORKTREE_PATH=<path> wt-exec pnpm install --frozen-lockfile`。
 5. 一張 ticket = 一個 branch = 一個 PR，約 500–1000 行（不算 lockfile 和自動產生的檔案）。branch 名稱 `t<編號>-<簡短英文>`（coordinator 開 worktree 時已經建好）。
 
 ## 2. 計畫：`/plan-it`
@@ -50,7 +50,7 @@ Ann 在 2026-10-17 同意，ticket thread 不用每次問就可以：
 - **不准削弱測試**：不刪、不跳過既有測試（`.skip`、`.only` 會讓 `pnpm check` 失敗），不調低門檻。
 - 修 bug 先用 `/diagnose-bug` 重現，寫成會失敗的測試（規則相關的就用「種子 + 動作」），再修。
 - 秘密（`TOKEN_SECRET`、`ADMIN_KEY`、Cloudflare token、登入憑證）只放在 Worker secret 或 GitHub Actions secrets。
-- 指令都在容器裡跑：`T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "<指令>"`。
+- 指令都在自己的 dev environment 裡跑，怎麼跑以 `~/.config/devvm/AGENTS.md` 為準。指令寫成一般參數，不要包成 shell 字串（不要 `bash -lc "…"`）：短的用 `T3CODE_WORKTREE_PATH=<path> wt-exec <指令…>`；超過兩分鐘的和 dev server 用背景 job：`wt-bg <path> <名稱> -- <指令…>`，`wt-wait <path> <名稱>` 看結果，`wt-stop <path> <名稱>` 停掉（連容器裡的程序一起停）。git 和 gh 不進容器，用 `git -C <path> …`。
 
 **測試由誰寫（slice loop 第 1 步）** 分兩級：
 
@@ -74,15 +74,15 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 | 型別 | `pnpm typecheck` | TypeScript strict |
 | 測試 | `pnpm test` | 全部單元測試 |
 
-格式不對就 `pnpm format` 修。knip 在這台 VM 會吃光記憶體，跑之前先 `export KNIP_DISABLE_RAW_TRANSFER=1`（不要寫進 repo）。
+`pnpm check` 很吃記憶體，一律當背景 job、拿 heavy lock 跑，並帶上 `KNIP_DISABLE_RAW_TRANSFER=1`（不然 knip 會吃光記憶體；不要寫進 repo）：`wt-bg <path> check --heavy --timeout 20m -- env KNIP_DISABLE_RAW_TRANSFER=1 pnpm check`，再 `wt-wait <path> check`。格式不對就 `T3CODE_WORKTREE_PATH=<path> wt-exec pnpm format` 修。
 
-**驗收（slice loop 第 5 步）** 照 `/verification-evidence` 拿 Observed 的證據：API 用 `curl https://<route>-<wt>.<vm>.liaoann.net/...`（網址看 `wt-status`），網頁用 t3 preview 截圖。需要 dev server 時開在 tmux（`<wt>-api`），用完就關，VM 記憶體很少。
+**驗收（slice loop 第 5 步）** 照 `/verification-evidence` 拿 Observed 的證據：API 用 `curl https://app-<wt>.agent-casino.liaoann.net/...`，網頁 `https://web-<wt>.agent-casino.liaoann.net` 用 t3 preview 截圖（網址看 `wt-status <path>`）。需要 dev server 時開成背景 job：api 用 `wt-bg <path> api -- pnpm dev:api:local`（本機 D1 要先 `T3CODE_WORKTREE_PATH=<path> wt-exec pnpm db:migrate:local`），web 用 `wt-bg <path> web -- pnpm dev:web --host 0.0.0.0 --port 5173`；用完 `wt-stop <path> api`（`web`），dev VM 是大家共用的。
 
 **Review（slice loop 第 6 步與最後）** 每個 slice 跑 `/review-change`，最後整個 branch 再跑一次（finished-feature 的 lenses）。照 `/review-change` 的規則選 lens（一般 slice 只要 Correctness + Test Quality；碰到合約、持久資料、共用模組才加 Design Fit、Simplicity；碰到驗證、外部輸入、秘密才加 Security），不要每個 slice 都開五個。每個 lens 的 reviewer 用 Codex（見下面「subagent 用誰」），合併重複、確認 Blocker、決定 Hardening 要不要修仍由你自己做。給 reviewer 的 plan 要附 ticket 原文，讓它也檢查：做多、做少、寫死的數字、碰了範圍外的檔案、改了合約、跟 skill 規格不符。有 Blocker 就修，重跑受影響的檢查和驗收。
 
 **subagent 用誰**（2026-10-19 Ann）：你負責計畫、實作和所有決定。繁瑣但必須做的事交給 subagent：**寫測試、review、verifier 都用 Codex**。主要的 agent（你）一定是 Claude Opus 5.5；subagent 用 OpenAI，不同家的模型比較容易看到作者自己看不到的問題。Grok 暫停使用（額度用完，Ann 說先不用），等 Ann 說恢復再改回來。兩邊互相檢查：subagent 寫的測試你檢查，你寫的程式 subagent review，verifier 的結果你看過才開 PR。
 
-**任務說明要短**：subagent 自己會讀 Dev VM 的 AGENTS.md（VM 規則與環境）和 [subagents.md](subagents.md)（角色能改什麼、這個 repo 在 VM 的坑、「不要鑽牛角尖」的標準、規格在哪、回報格式），任務說明不要再重寫這些。任務說明只寫：
+**任務說明要短**：subagent 自己會讀 `~/.config/devvm/AGENTS.md`（環境的規則、怎麼跑指令）和 [subagents.md](subagents.md)（角色能改什麼、這個 repo 在這個環境的坑、「不要鑽牛角尖」的標準、規格在哪、回報格式），任務說明不要再重寫這些。任務說明只寫：
 - 第一行：「先讀 `<worktree>/.claude/skills/ticket-workflow/subagents.md`。你是 <角色>。」
 - worktree 路徑和網址。
 - 這次的範圍與輸入：test-author 給計畫的 Why、slice 的 Outcome 與 Acceptance、公開介面、要讀的 skill 段落；reviewer 給 diff 範圍（base commit）、lens 名稱、ticket 原文；verifier 給 ticket 原文。
@@ -109,7 +109,7 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 2. 在容器裡重裝依賴（`pnpm install --frozen-lockfile`），重跑 `pnpm check` 和 ticket 的每個驗證指令。
 3. 自己起 dev server，照 ticket 的「功能驗證」在 worktree 網址上實際操作。
 4. 每一項回報過或不過，附指令和輸出；做不到的標 inconclusive。
-5. 關掉自己開的 dev server，用 `docker stats --no-stream` 確認容器回到閒置。
+5. 用 `wt-stop <path> <名稱>` 關掉自己開的 dev server 和 job，再用 `wt-status <path>` 確認沒有自己的 job 還在跑。
 
 你看過 verifier 的報告再開 PR：每一項都要有指令和輸出，「過」要真的對應到 ticket 的驗證項目；看起來不對就開新的 verifier 重驗，不要自己改結論。
 
@@ -129,7 +129,7 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 
 有 `needs-human` 的 PR：開好後停下來，用一頁摘要通知 coordinator（改了什麼、證據、可以點的網址），等人說可以再合併。
 
-合併後關掉自己的 tmux dev server，用 `t3_thread_send` 通知 coordinator thread（開工訊息裡有它的 id）：ticket 編號、PR 網址、狀態，以及給後面 ticket 的提醒（留下了什麼、還沒做什麼、踩過的坑）。
+合併後用 `wt-stop <path> <名稱>` 關掉自己的 dev server（`wt-status <path>` 列出還在跑的 job），用 `t3_thread_send` 通知 coordinator thread（開工訊息裡有它的 id）：ticket 編號、PR 網址、狀態，以及給後面 ticket 的提醒（留下了什麼、還沒做什麼、踩過的坑）。
 
 ## 什麼時候停下來
 - 設計問題：要改合約、ticket 範圍不對、skill 不合理或互相矛盾、看到更簡單的做法、計畫裡出現 skill 沒定的設計決策。Skill 是目前最好的版本，不是標準答案，不要自己猜或硬照做。
@@ -148,5 +148,6 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 | 不該發生的事 | 亂打機器人上萬手：籌碼總數不變、沒人超前行動、輪到人時合法動作不為空 |
 | 介面跟說明書一致 | skill.md 從合約產生；抓出 skill.md 每個 curl 範例實際打一次，回應符合合約。改了參賽 agent 看得到的請求、回應、錯誤或 hint，同一張 ticket 就要更新 `apps/api/src/skill/template.md` 的說明和範例；範例裡的值要跟真實回應同格式（網址、時間格式、欄位都一樣），不要留下假網域或舊欄位 |
 | 狀況處理 | `casino-api` skill「狀況處理」表每列一個測試 |
+| DO 狀態撐過閒置 | 功能驗證時故意閒置 15 秒以上再打一次（本機 DO 閒置 10 秒內就被逐出，見 `casino-api` skill「資料與積分」） |
 | 從頭到尾 | `pnpm e2e`，只用 curl + jq |
 | 參賽 agent 好不好用 | `agent-playtest` skill |

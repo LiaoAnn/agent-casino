@@ -24,7 +24,7 @@ apps/api/            Cloudflare Worker（API、Durable Objects、D1、GET /skill
   src/db/            Drizzle schema、drizzle-kit migrations、查詢
   src/skill/         從合約產生 skill.md
 apps/web/            TanStack Start 唯讀網頁，用合約產生的 typed client
-scripts/             e2e、playtest、board.sh（看板，在 VM 上跑）
+scripts/             e2e、playtest、board.sh（看板，不進容器，直接跑）
 docs/tickets.md      Epic 與 Ticket（要做的事）
 docs/playtests/      試玩報告
 ```

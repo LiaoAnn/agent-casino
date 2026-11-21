@@ -21,8 +21,8 @@ disable-model-invocation: true
 
 1. `git -C /data/code/agent-casino pull --ff-only`，讓 `main` 跟上已合併的 PR。
 2. 跑 `scripts/board.sh` 看每張 ticket 的狀態。狀態全部由依賴、本地 branch 和 PR 推算，不要手動記。
-3. 為 Ready 的 ticket 派工（見下面「派工」）。同時進行的 ticket thread 最多 4 個；VM 資源是共用的，派之前看 `free -h`，可用記憶體不到 1.5 GB 就先不派，等前面的做完。
-4. 清掉 Done 的 worktree（2026-10-19 Ann 同意；`/data` 只有 63 GB，曾經因為留著 35 個舊 worktree 滿到 100%）：PR 已合併、`git -C <path> status --porcelain` 沒有 tracked 的改動，就 `wt-down <path>` 再 `git -C /data/code/agent-casino worktree remove --force <path>`。arena-server 和還在進行的不要動。派工前用 `df -h /data` 確認至少有 10 GB。
+3. 為 Ready 的 ticket 派工（見下面「派工」）。同時進行的 ticket thread 最多 3 個：所有專案的 agent 都跑在同一台小的 agent 機器上（2 核、約 4 GB），每個 worktree 的 dev environment 也跑在所有專案共用的 dev VM 上。ticket thread 回報 `wt-up` exit 75（`no room for a new dev environment`）就是 dev VM 沒空間：叫它過幾分鐘再試，先不派新的；一直這樣就放進「等你」。
+4. 清掉 Done 的 worktree（2026-10-19 Ann 同意；留著的 dev environment 會占共用 dev VM 的資源）：PR 已合併、`git -C <path> status --porcelain` 沒有 tracked 的改動，就先用 `t3_thread_organize`（`action: "settle"`、那個 ticket thread 的 `threadId`）settle 那個 thread，再 `wt-down <path>`，最後 `git -C /data/code/agent-casino worktree remove --force <path>`。arena-server 和還在進行的不要動。
 5. 回報人：看板（給人看時用 `html_render` 畫成看板），加上「等你」清單。
 
 狀態的意思：
@@ -37,7 +37,7 @@ disable-model-invocation: true
 | Done | PR 已合併 |
 
 ## 派工
-每張 Ready 的 ticket 用 `t3_thread_launch` 開一個 thread，**不要**自己 `git worktree add`。t3 建 worktree 時會跑 devvm 的 hook 把 compose stack 起好。
+每張 Ready 的 ticket 用 `t3_thread_launch` 開一個 thread，**不要**自己 `git worktree add`。t3 建 worktree 時會跑 `wt-up`，把它的 dev environment 起好。
 
 ticket thread 一定用 Claude Opus 5.5：`modelSelection` 填 `{"instanceId":"claudeAgent","model":"claude-opus-5-5"}`。Codex 只當 ticket thread 裡的 subagent（2026-10-19 Ann）；Grok 暫停使用，等 Ann 說恢復。
 
@@ -46,7 +46,7 @@ ticket thread 一定用 Claude Opus 5.5：`modelSelection` 填 `{"instanceId":"c
 - `message`：照下面的模板寫。
 
 ### 開工訊息
-把 ticket thread 當成**能力很強、但第一天來的新人**：它不知道這個平台在做什麼、前面的 ticket 做了什麼、程式碼放在哪、這台 VM 有什麼坑。開工訊息要讓它不用回頭問就能開始。派工前先做功課：讀這張 ticket、它依賴的 ticket 的 PR 內文（`gh pr view <號碼>`）、`main` 上相關的程式碼，以及前面 ticket thread 通知你的提醒。
+把 ticket thread 當成**能力很強、但第一天來的新人**：它不知道這個平台在做什麼、前面的 ticket 做了什麼、程式碼放在哪、這個環境有什麼坑。開工訊息要讓它不用回頭問就能開始。派工前先做功課：讀這張 ticket、它依賴的 ticket 的 PR 內文（`gh pr view <號碼>`）、`main` 上相關的程式碼，以及前面 ticket thread 通知你的提醒。
 
 ```
 你負責 docs/tickets.md 的 T<編號>「<標題>」。照 ticket-workflow skill 從頭做到合併，中間不用等我。
@@ -64,12 +64,13 @@ ticket thread 一定用 Claude Opus 5.5：`modelSelection` 填 `{"instanceId":"c
 ## 現在的程式碼
 <前面合併了哪些 ticket、各自留下什麼可以用（檔案路徑、函式、指令）；這張 ticket 要接在哪裡；還沒有的東西用什麼代替（例如合約產生的假資料）。>
 
-## 這台 VM 的注意事項
-- 指令在容器裡跑：T3CODE_WORKTREE_PATH=<path> wt-exec bash -lc "<指令>"。git 和 gh 在 VM 上跑。
-- 跑 pnpm check 前先 export KNIP_DISABLE_RAW_TRANSFER=1，不要寫進 repo。
-- api dev server：pnpm dev:api --ip 0.0.0.0 --port 8787，開在 tmux，健康檢查 /health，用完就關。
-- `tmux kill-session` 不會停掉 wt-exec 在容器裡開的程序（pnpm、wrangler、workerd、vite、esbuild），它們會繼續占 port 和記憶體。用完要另外跑 T3CODE_WORKTREE_PATH=<path> wt-exec pkill -f <名稱>（不要寫在 bash -lc 裡，會殺到自己），再用 docker stats --no-stream 確認自己的容器只剩十幾 MB。
-- 每個 worktree 有兩個對外網址：api 在 `https://app-<wt>.agent-casino.liaoann.net`（8787），web 在 `https://web-<wt>.agent-casino.liaoann.net`（`pnpm dev:web --host 0.0.0.0 --port 5173`，tmux `<wt>-web`）。在 a168658 之前建的容器沒有 web 網址，要 `docker rm -f <wt>-app-1` 再 `wt-up <path>`。同一個容器同時開 api 和 web 時，api 加 `--inspector-port 9230`（vite 會佔 9229）。`db:migrate:local` 前面加 `CI=1`，才不會停在確認提示。
+## 環境的注意事項
+- 怎麼跑東西以 ~/.config/devvm/AGENTS.md 和 ~/.config/devvm/projects/agent-casino/README.md 為準，先讀。
+- 指令在你的 dev environment 裡跑，寫成一般參數，不要包成 shell 字串（不要 `bash -lc "…"`）：短的用 T3CODE_WORKTREE_PATH=<path> wt-exec <指令…>；超過兩分鐘的和 dev server 用 wt-bg <path> <名稱> -- <指令…>，wt-wait <path> <名稱> 看結果，wt-stop <path> <名稱> 停掉（連容器裡的程序一起停）。git 和 gh 不進容器，用 git -C <path> …。
+- pnpm check 要拿 heavy lock：wt-bg <path> check --heavy --timeout 20m -- env KNIP_DISABLE_RAW_TRANSFER=1 pnpm check。這個變數不要寫進 repo。
+- api dev server：wt-bg <path> api -- pnpm dev:api:local（0.0.0.0:8787，帶本機用的假 TOKEN_SECRET、ADMIN_KEY），健康檢查 /health，用完 wt-stop <path> api。本機 D1 要先 T3CODE_WORKTREE_PATH=<path> wt-exec pnpm db:migrate:local。
+- web dev server：wt-bg <path> web -- pnpm dev:web --host 0.0.0.0 --port 5173，用完 wt-stop <path> web。
+- 對外網址：api 在 `https://app-<wt>.agent-casino.liaoann.net`（8787），web 在 `https://web-<wt>.agent-casino.liaoann.net`（5173）。wt-status <path> 列出網址和還在跑的 job。
 <其他前面 ticket 踩過、跟這張有關的坑。>
 
 ## 流程與授權
@@ -86,6 +87,8 @@ test-author、review lens 和 verifier 都用 t3 的 delegate_task 交給 Codex�
 ## ticket thread 卡住時
 - **自我檢查三輪還過不了**：先自己重新規劃，例如把 ticket 拆小、換一個新 thread 從頭做。還是不行才放進「等你」。
 - **設計問題**（規格不合理、互相矛盾、範圍不對、要改合約）：不要自己裁決，放進「等你」問人。人決定後，改 `docs/tickets.md` 或 skill，commit 到 `main` 並 push，再轉告 ticket thread。
+- **thread 顯示 failed 或 interrupted**：它最後一個指令可能跑了也可能沒跑。用 `t3_thread_send` 告訴它：「你的執行被中斷了。先看 `git -C <path> status` 和 `git -C <path> diff --stat`，從現在的狀態接著做。」好幾個 thread 同時失敗就告訴人，人回覆前先不要派新的。
+- **回報碰到額度上限**（Codex 等）：用一行告訴人，人可能可以重設。人說恢復之後，先用一個小的 `delegate_task` 確認能用（例如在一個 worktree 跑 `git status`），再告訴 ticket thread 可以再用。
 - **部署正式環境、呼叫外部服務**：放進「等你」，人同意後轉告。每次都要問，之前的同意不算數。
 
 ## 等你
@@ -105,4 +108,4 @@ test-author、review lens 和 verifier 都用 t3 的 delegate_task 交給 Codex�
 ## 不要做
 - 不寫產品程式、不碰 ticket thread 的 branch 或 worktree。
 - 不替 ticket thread 合併 PR，也不跳過它的自我檢查。
-- 不刪 worktree、不 `wt-down` 別人的 stack，**除了**上面第 4 步的 Done worktree。
+- 不刪 worktree、不 `wt-down` 別人的 dev environment，**除了**上面第 4 步的 Done worktree。

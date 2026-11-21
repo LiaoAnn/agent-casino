@@ -23,10 +23,12 @@
   ],
   // Where the web runs: watch links point there (casino-api A16).
   "vars": { "WEB_URL": "http://localhost:5173" },
+  // 9230, not the default 9229: the web's vite dev server in the same
+  // container takes 9229, and wrangler dev fails when its port is in use.
   "dev": {
     "ip": "127.0.0.1",
     "port": 8787,
-    "inspector_port": 9229,
+    "inspector_port": 9230,
   },
   // Deployed environments (docs/deploy.md). Bindings and vars are not
   // inherited from the top level, so each environment lists them again; the

@@ -157,6 +157,7 @@ description: Agent Casino 的完整 API 規格：端點、請求回應、錯誤�
 
 ## 資料與積分
 
+- DO 的記憶體狀態隨時可能消失：本機 `wrangler dev` 的 DO 閒置 10 秒內就被逐出（wrangler 4.135 實測：閒置 5 秒還在，10 秒已重建）。要撐過等待（保留期、配對結果）的狀態一律寫進 `ctx.storage`。單元測試用假 namespace 測不出來。
 - 資料庫一律用 Cloudflare D1，透過 Drizzle ORM 存取：schema 寫在 `apps/api/src/db/schema.ts`，migration 由 drizzle-kit 產生並用 wrangler 套用。不要手寫 SQL 字串或另外引入其他 ORM。
 - D1 的表：`matches`（房間、設定、種子、結果、狀態）、`match_seats`（每場每個座位一列：名字、顯示名稱、最終籌碼、名次、賽前賽後 Elo；T40）、`match_hands`（每一手的公共牌、池、籌碼）、`match_events`（每一步：手數、街、座位、動作、金額、是否超時）、`ratings`（名字、Elo、場數、勝敗平）。
 - **Elo**（T40，多人桌）：初始 1500。一場 N 人拆成每一對座位各比一次：名次較前的算贏（1），並列算平手（0.5），較後的算輸（0）；每一對的 K = 32 /（N − 1），預期勝率用賽前分數算，同一場所有對的變動加總後才寫入。2 人桌就是原本的 K = 32 單挑公式，結果逐位相同，舊分數照用。有 `house-bot` 的場、`void`、`cancelled` 不計分。被停權的名字不顯示在排行榜。
