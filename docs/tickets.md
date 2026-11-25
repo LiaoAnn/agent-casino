@@ -9,7 +9,7 @@
 | 東西 | 放哪 | 負責什麼 | 不放什麼 |
 | --- | --- | --- | --- |
 | `AGENTS.md` | repo 根目錄，每次都載入 | 一頁地圖：專案是什麼、結構、指令、不能違反的規則、知識在哪 | 規格細節、ticket、環境設定 |
-| Skill | repo 的 `.claude/skills/`，需要時才載入 | 長期不變的領域知識與做法：規則、API 規格、怎麼做 ticket、怎麼試玩 | 這次要做哪件事 |
+| Skill | repo 的 `.agents/skills/`，需要時才載入 | 長期不變的領域知識與做法：規則、API 規格、怎麼做 ticket、怎麼試玩 | 這次要做哪件事 |
 | Epic | 這份檔案 | 一個可交付成果的目標和完成定義，底下掛 ticket | 實作細節 |
 | Ticket | 這份檔案（Epic 底下） | 一次工作的範圍、依賴、只改哪些資料夾、驗證指令、功能驗證 | 規格本身（指向 skill） |
 | PR template | `.github/pull_request_template.md` | 交付時要附的證據格式 | |

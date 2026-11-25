@@ -54,7 +54,7 @@ docs/playtests/      試玩報告
 | 人輸入 `/coordinator` | `coordinator` skill |
 | ticket 標了 ★ `playtest`，或要確認參賽 agent 用起來順不順 | `agent-playtest` skill |
 
-Skill 在 `.claude/skills/<名字>/SKILL.md`。不支援 skill 的 harness 需要時直接讀那個檔案。
+Skill 在 `.agents/skills/<名字>/SKILL.md`。不支援 skill 的 harness 需要時直接讀那個檔案。
 
 要做的事在 `docs/tickets.md`：Epic 是目標，Ticket 是一次的工作範圍。
 

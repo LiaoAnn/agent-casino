@@ -12,7 +12,7 @@ description: 在這個 repo 接一張 ticket 到合併的 SOP：開工、/plan-i
      → 整體 /review-change → 獨立驗證 → 開 PR → CI 綠 → 合併（或等人核准）→ 通知 coordinator
 ```
 
-`/plan-it`、`/implement-plan`、`/tdd`、`/review-change`、`/verification-evidence`、`/diagnose-bug` 是使用者層級的 skill（`~/.claude/skills/`），這份 SOP 只補充這個 repo 的規定。
+`/plan-it`、`/implement-plan`、`/tdd`、`/review-change`、`/verification-evidence`、`/diagnose-bug` 是使用者層級的 skill（`~/.agents/skills/`），這份 SOP 只補充這個 repo 的規定。
 
 ## 授權
 
@@ -83,7 +83,7 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 **subagent 用誰**（2026-10-19 Ann）：你負責計畫、實作和所有決定。繁瑣但必須做的事交給 subagent：**寫測試、review、verifier 都用 Codex**。主要的 agent（你）一定是 Claude Opus 5.5；subagent 用 OpenAI，不同家的模型比較容易看到作者自己看不到的問題。Grok 暫停使用（額度用完，Ann 說先不用），等 Ann 說恢復再改回來。兩邊互相檢查：subagent 寫的測試你檢查，你寫的程式 subagent review，verifier 的結果你看過才開 PR。
 
 **任務說明要短**：subagent 自己會讀 `~/.config/devvm/AGENTS.md`（環境的規則、怎麼跑指令）和 [subagents.md](subagents.md)（角色能改什麼、這個 repo 在這個環境的坑、「不要鑽牛角尖」的標準、規格在哪、回報格式），任務說明不要再重寫這些。任務說明只寫：
-- 第一行：「先讀 `<worktree>/.claude/skills/ticket-workflow/subagents.md`。你是 <角色>。」
+- 第一行：「先讀 `<worktree>/.agents/skills/ticket-workflow/subagents.md`。你是 <角色>。」
 - worktree 路徑和網址。
 - 這次的範圍與輸入：test-author 給計畫的 Why、slice 的 Outcome 與 Acceptance、公開介面、要讀的 skill 段落；reviewer 給 diff 範圍（base commit）、lens 名稱、ticket 原文；verifier 給 ticket 原文。
 - 這次特別要注意的事（如果有）。
@@ -125,7 +125,7 @@ PR 的「驗證」段要附 RED 的輸出（每個 slice 一段即可）。沒�
 沒有 `needs-human` 的 PR，下面全部滿足就自己合併（`gh pr merge <號碼> --squash`）：
 1. CI 全綠。
 2. 整體 `/review-change` 沒有 Blocker，verifier 全過。
-3. branch 跟最新的 `main` 沒有衝突。`main` 動過就 rebase 到 `origin/main`，重跑 verifier，再 push。例外：`main` 新增的 commit 只動 `docs/` 或 `.claude/`，而且 `git diff <rebase 前> <rebase 後> -- . ':!docs' ':!.claude'` 是空的，就不用重跑，在 PR 寫明。
+3. branch 跟最新的 `main` 沒有衝突。`main` 動過就 rebase 到 `origin/main`，重跑 verifier，再 push。例外：`main` 新增的 commit 只動 `docs/`、`.agents/` 或 `.claude/`，而且 `git diff <rebase 前> <rebase 後> -- . ':!docs' ':!.agents' ':!.claude'` 是空的，就不用重跑，在 PR 寫明。
 
 有 `needs-human` 的 PR：開好後停下來，用一頁摘要通知 coordinator（改了什麼、證據、可以點的網址），等人說可以再合併。
 

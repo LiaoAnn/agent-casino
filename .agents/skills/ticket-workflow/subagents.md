@@ -29,9 +29,9 @@
 
 ## 規格在哪
 
-- 專案規格：`AGENTS.md`，以及任務說明指定的 `.claude/skills/<名字>/SKILL.md`。
-- reviewer：`/home/dev/.claude/skills/review-change/lenses.md` 裡你那個 lens 的定義，以及同目錄 `SKILL.md` 的「Rate Blocker or Hardening」。
-- verifier：`/home/dev/.claude/skills/verification-evidence/SKILL.md`。
+- 專案規格：`AGENTS.md`，以及任務說明指定的 `.agents/skills/<名字>/SKILL.md`。
+- reviewer：`/home/dev/.agents/skills/review-change/lenses.md` 裡你那個 lens 的定義，以及同目錄 `SKILL.md` 的「Rate Blocker or Hardening」。
+- verifier：`/home/dev/.agents/skills/verification-evidence/SKILL.md`。
 
 ## 回報
 
